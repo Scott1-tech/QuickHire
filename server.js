@@ -13,13 +13,40 @@ const COMPANY_NAME = process.env.COMPANY_NAME || 'National Carrier Xpress Corp';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
+// Link sending
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const EMAIL_FROM = process.env.EMAIL_FROM || process.env.SMTP_FROM || `${COMPANY_NAME} <onboarding@resend.dev>`;
+const REPLY_TO_EMAIL = process.env.REPLY_TO_EMAIL || '';
+const SUPPORT_CONTACT = process.env.SUPPORT_CONTACT || 'safety@ncxpress.com';
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || '';
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || '';
+const TWILIO_FROM = process.env.TWILIO_FROM || '';
+const LINK_TTL_DAYS = Number(process.env.LINK_TTL_DAYS || 14);
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const DB_FILE = path.join(DATA_DIR, 'candidates.json');
+const OPTOUT_FILE = path.join(DATA_DIR, 'optouts.json');
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '[]');
+if (!fs.existsSync(OPTOUT_FILE)) fs.writeFileSync(OPTOUT_FILE, '[]');
+
+// ── SMS opt-out registry (TCPA STOP handling) ────────────────────────────────
+function normPhone(p) {
+  const digits = String(p || '').replace(/[^0-9]/g, '');
+  return digits.replace(/^1(\d{10})$/, '$1'); // drop US country code for matching
+}
+function readOptouts() { try { return JSON.parse(fs.readFileSync(OPTOUT_FILE, 'utf8')); } catch { return []; } }
+function isOptedOut(phone) { return readOptouts().includes(normPhone(phone)); }
+function addOptout(phone) {
+  const o = readOptouts(); const n = normPhone(phone);
+  if (n && !o.includes(n)) { o.push(n); fs.writeFileSync(OPTOUT_FILE, JSON.stringify(o, null, 2)); }
+}
+function removeOptout(phone) {
+  const n = normPhone(phone);
+  fs.writeFileSync(OPTOUT_FILE, JSON.stringify(readOptouts().filter((x) => x !== n), null, 2));
+}
 
 // ── Checklist definition ────────────────────────────────────────────────────
 export const CHECKLIST_STEPS = [
@@ -79,6 +106,9 @@ function migrate(r) {
     lastActivityAt: r.submittedAt || r.createdAt,
     linkSentCount: 1,
     linkLastSentAt: r.createdAt,
+    linkLastChannels: ['email'],
+    linkLastStatus: 'sent',
+    linkExpiresAt: r.linkExpiresAt || null,
     consentCompletedAt: (r.application?.consentPsp && r.application?.consentMvr && r.application?.consentEmployment) ? r.submittedAt : null,
     driverFiles: r.files || {},
     signature: r.signature || null,
@@ -147,7 +177,8 @@ function checklistComplete(c) {
   return STEP_IDS.every((id) => c.checklist?.[id]?.status === 'complete');
 }
 
-// ── Email ───────────────────────────────────────────────────────────────────
+// ── Email + SMS sending ───────────────────────────────────────────────────────
+// Email: Resend (primary) → SMTP/nodemailer (fallback). SMS: Twilio REST.
 let transporter = null;
 if (process.env.SMTP_HOST) {
   transporter = nodemailer.createTransport({
@@ -157,29 +188,162 @@ if (process.env.SMTP_HOST) {
     auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
   });
 }
-async function sendEmail(to, subject, html) {
-  if (!transporter) return { sent: false, reason: 'SMTP not configured' };
-  const from = process.env.SMTP_FROM || process.env.SMTP_USER || 'no-reply@quickhire.app';
-  await transporter.sendMail({ from, to, subject, html });
-  return { sent: true };
-}
-async function sendSms(to, body) {
-  const sid = process.env.TWILIO_ACCOUNT_SID, auth = process.env.TWILIO_AUTH_TOKEN, from = process.env.TWILIO_FROM;
-  if (!sid || !auth || !from) return { sent: false, reason: 'Twilio not configured' };
-  const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
-    method: 'POST',
-    headers: { Authorization: 'Basic ' + Buffer.from(`${sid}:${auth}`).toString('base64'), 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ To: to, From: from, Body: body }),
-  });
-  return r.ok ? { sent: true } : { sent: false, reason: `Twilio ${r.status}` };
-}
+const emailEnabled = () => Boolean(RESEND_API_KEY || transporter);
+const smsEnabled = () => Boolean(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_FROM);
+const firstNameOf = (name) => String(name || '').trim().split(/\s+/)[0] || 'there';
+
+const EMAIL_SUBJECT = `Complete Your Driver Application — ${COMPANY_NAME}`;
+
 function inviteHtml(name, link) {
-  return `<div style="font-family:Inter,Arial,sans-serif;color:#1f2937;max-width:600px">
-    <h2 style="color:#b01d30">${COMPANY_NAME}</h2>
-    <p>Hi ${name},</p>
-    <p>You've been invited to complete your CDL driver qualification application. Click the secure link below to get started:</p>
-    <p><a href="${link}" style="background:#b01d30;color:#fff;padding:12px 24px;border-radius:10px;text-decoration:none;font-weight:600;display:inline-block">Start My Application</a></p>
-    <p style="font-size:13px;color:#6b7280">Or copy: ${link}</p></div>`;
+  return `<div style="font-family:'Inter',Arial,sans-serif;color:#1f2937;max-width:600px;margin:0 auto;padding:8px">
+    <div style="border-bottom:3px solid #b01d30;padding-bottom:12px;margin-bottom:20px">
+      <h2 style="color:#b01d30;margin:0">${COMPANY_NAME}</h2>
+    </div>
+    <p>Hi ${firstNameOf(name)},</p>
+    <p>Thank you for your interest in driving with ${COMPANY_NAME}. The next step is to complete
+       your driver qualification application — it only takes a few minutes.</p>
+    <p style="margin:28px 0;text-align:center">
+      <a href="${link}" style="background:#b01d30;color:#fff;padding:14px 32px;border-radius:10px;
+         text-decoration:none;font-weight:600;display:inline-block;font-size:16px">Complete My Application</a>
+    </p>
+    <p style="font-size:13px;color:#6b7280">If the button doesn't work, copy and paste this link into your browser:<br>
+      <a href="${link}" style="color:#b01d30;word-break:break-all">${link}</a></p>
+    <p style="font-size:13px;color:#6b7280">For your security, this link expires in ${LINK_TTL_DAYS} days.
+       If it expires before you finish, just reply to this email and we'll send you a new one.</p>
+    <p style="font-size:13px;color:#6b7280">Questions? Reply to this email or contact us at ${SUPPORT_CONTACT}.</p>
+    <p style="margin-top:24px">Safe travels,<br><strong>${COMPANY_NAME} — Driver Recruiting</strong></p>
+  </div>`;
+}
+function inviteText(name, link) {
+  return `Hi ${firstNameOf(name)},
+
+Thank you for your interest in driving with ${COMPANY_NAME}. The next step is to complete your driver qualification application.
+
+Complete your application here:
+${link}
+
+For your security, this link expires in ${LINK_TTL_DAYS} days. If it expires before you finish, just reply to this email and we'll send you a new one.
+
+Questions? Reply to this email or contact us at ${SUPPORT_CONTACT}.
+
+Safe travels,
+${COMPANY_NAME} — Driver Recruiting`;
+}
+function inviteSms(name, link) {
+  return `${COMPANY_NAME}: Hi ${firstNameOf(name)}, please complete your driver application here: ${link} (expires in ${LINK_TTL_DAYS} days). Reply STOP to opt out.`;
+}
+
+async function sendEmail(to, name, link) {
+  // Resend (primary)
+  if (RESEND_API_KEY) {
+    try {
+      const r = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: EMAIL_FROM, to: [to], subject: EMAIL_SUBJECT,
+          html: inviteHtml(name, link), text: inviteText(name, link),
+          ...(REPLY_TO_EMAIL ? { reply_to: REPLY_TO_EMAIL } : {}),
+        }),
+      });
+      if (r.ok) return { sent: true, provider: 'resend' };
+      const body = await r.text().catch(() => '');
+      return { sent: false, provider: 'resend', reason: `Resend ${r.status}: ${body.slice(0, 120)}` };
+    } catch (e) { return { sent: false, provider: 'resend', reason: 'Resend error: ' + e.message }; }
+  }
+  // SMTP (fallback)
+  if (transporter) {
+    try {
+      await transporter.sendMail({
+        from: EMAIL_FROM, to, subject: EMAIL_SUBJECT,
+        html: inviteHtml(name, link), text: inviteText(name, link),
+        ...(REPLY_TO_EMAIL ? { replyTo: REPLY_TO_EMAIL } : {}),
+      });
+      return { sent: true, provider: 'smtp' };
+    } catch (e) { return { sent: false, provider: 'smtp', reason: 'SMTP error: ' + e.message }; }
+  }
+  return { sent: false, reason: 'Email not configured' };
+}
+
+// Plain transactional email (e.g. admin notifications) — not the invite template.
+async function sendPlainEmail(to, subject, html) {
+  if (RESEND_API_KEY) {
+    try {
+      const r = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: EMAIL_FROM, to: [to], subject, html }),
+      });
+      return r.ok ? { sent: true } : { sent: false, reason: `Resend ${r.status}` };
+    } catch (e) { return { sent: false, reason: e.message }; }
+  }
+  if (transporter) {
+    try { await transporter.sendMail({ from: EMAIL_FROM, to, subject, html }); return { sent: true }; }
+    catch (e) { return { sent: false, reason: e.message }; }
+  }
+  return { sent: false, reason: 'Email not configured' };
+}
+
+async function sendSms(to, name, link) {
+  if (!smsEnabled()) return { sent: false, reason: 'Twilio not configured' };
+  if (isOptedOut(to)) return { sent: false, reason: 'Recipient has opted out of SMS (STOP)' };
+  try {
+    const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
+      method: 'POST',
+      headers: { Authorization: 'Basic ' + Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64'), 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ To: to, From: TWILIO_FROM, Body: inviteSms(name, link) }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) return { sent: true, provider: 'twilio', sid: data.sid };
+    return { sent: false, provider: 'twilio', reason: `Twilio ${r.status}: ${(data.message || '').slice(0, 120)}` };
+  } catch (e) { return { sent: false, provider: 'twilio', reason: 'Twilio error: ' + e.message }; }
+}
+
+// Unified: (re)generate token + expiry, send to all available channels, log each
+// attempt to the audit trail. Sending to both channels also acts as cross-channel
+// fallback so a single failing channel never leaves the candidate with nothing.
+async function dispatchLink(c, base, { regenerate = false } = {}) {
+  if (regenerate || !c.token) c.token = crypto.randomBytes(24).toString('hex');
+  c.linkExpiresAt = new Date(Date.now() + LINK_TTL_DAYS * 86400000).toISOString();
+  const link = `${base}/apply.html?token=${c.token}`;
+
+  let email = null, sms = null;
+  if (c.email) {
+    email = await sendEmail(c.email, c.name, link).catch((e) => ({ sent: false, reason: e.message }));
+    addActivity(c, 'link_sent', 'Admin',
+      `Application link ${email.sent ? 'sent' : 'FAILED'} via email to ${c.email}${email.sent ? '' : ` — ${email.reason}`}.`,
+      { channel: 'email', status: email.sent ? 'sent' : 'failed', reason: email.reason || null });
+  }
+  if (c.phone) {
+    sms = await sendSms(c.phone, c.name, link).catch((e) => ({ sent: false, reason: e.message }));
+    addActivity(c, 'link_sent', 'Admin',
+      `Application link ${sms.sent ? 'sent' : 'FAILED'} via SMS to ${c.phone}${sms.sent ? '' : ` — ${sms.reason}`}.`,
+      { channel: 'sms', status: sms.sent ? 'sent' : 'failed', reason: sms.reason || null });
+  }
+
+  const channelsTried = [c.email ? 'email' : null, c.phone ? 'sms' : null].filter(Boolean);
+  const channelsDelivered = [email?.sent ? 'email' : null, sms?.sent ? 'sms' : null].filter(Boolean);
+  const anySuccess = channelsDelivered.length > 0;
+
+  c.linkSentCount = (c.linkSentCount || 0) + 1;
+  c.linkLastSentAt = new Date().toISOString();
+  c.linkLastChannels = channelsDelivered.length ? channelsDelivered : channelsTried;
+  c.linkLastStatus = anySuccess ? 'delivered' : 'failed';
+  c.lastActivityAt = c.linkLastSentAt;
+
+  return { link, email, sms, anySuccess, channelsDelivered };
+}
+
+// Record STOP/START on the candidate matching an inbound phone number.
+function markOptoutActivity(phone, optedOut) {
+  const all = readAll();
+  const n = normPhone(phone);
+  const c = all.find((x) => normPhone(x.phone) === n && n);
+  if (!c) return;
+  addActivity(c, 'sms_optout', 'Driver',
+    optedOut ? `Driver replied STOP — opted out of SMS.` : `Driver replied START — opted back in to SMS.`,
+    { channel: 'sms', status: optedOut ? 'opted_out' : 'opted_in' });
+  upsert(c);
 }
 
 // ── Molly AI ─────────────────────────────────────────────────────────────────
@@ -255,6 +419,9 @@ app.get('/api/config', (_req, res) => {
     otherDocs: OTHER_DOCS,
     hasMolly: Boolean(ANTHROPIC_API_KEY),
     hasTelegram: Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID),
+    hasEmail: emailEnabled(),
+    hasSms: smsEnabled(),
+    linkTtlDays: LINK_TTL_DAYS,
   });
 });
 
@@ -309,7 +476,7 @@ app.post('/api/candidates', requireAdmin, async (req, res) => {
     subStatus: 'in_progress',
     recruiter: 'Admin',
     createdAt: now, stageChangedAt: now, lastActivityAt: now,
-    linkSentCount: 1, linkLastSentAt: now,
+    linkSentCount: 0, linkLastSentAt: null, linkLastChannels: [], linkLastStatus: null, linkExpiresAt: null,
     submittedAt: null, consentCompletedAt: null,
     application: null,
     driverFiles: {}, signature: null,
@@ -318,16 +485,11 @@ app.post('/api/candidates', requireAdmin, async (req, res) => {
     pev: [],
     activity: [{ id: crypto.randomUUID(), type: 'candidate_created', by: 'Admin', at: now, note: `Candidate added to pipeline at Lead.` }],
   };
+
+  const dispatch = await dispatchLink(candidate, baseUrl(req), { regenerate: false });
   upsert(candidate);
 
-  const link = `${baseUrl(req)}/apply.html?token=${candidate.token}`;
-  const emailResult = await sendEmail(candidate.email, `${COMPANY_NAME} — Complete your driver application`, inviteHtml(candidate.name, link)).catch((e) => ({ sent: false, reason: e.message }));
-  let smsResult = { sent: false, reason: 'No phone' };
-  if (candidate.phone) {
-    smsResult = await sendSms(candidate.phone, `${COMPANY_NAME}: complete your driver application here: ${link}`).catch((e) => ({ sent: false, reason: e.message }));
-  }
-
-  res.json({ id: candidate.id, link, email: emailResult, sms: smsResult });
+  res.json({ id: candidate.id, link: dispatch.link, email: dispatch.email, sms: dispatch.sms, anySuccess: dispatch.anySuccess });
 });
 
 app.get('/api/candidates/:id', requireAdmin, (req, res) => {
@@ -365,15 +527,10 @@ app.patch('/api/candidates/:id', requireAdmin, (req, res) => {
 app.post('/api/candidates/:id/resend', requireAdmin, async (req, res) => {
   const c = findById(req.params.id);
   if (!c) return res.status(404).json({ error: 'Not found' });
-  const link = `${baseUrl(req)}/apply.html?token=${c.token}`;
-  const emailResult = await sendEmail(c.email, `${COMPANY_NAME} — Complete your driver application`, inviteHtml(c.name, link)).catch((e) => ({ sent: false, reason: e.message }));
-  let smsResult = { sent: false, reason: 'No phone' };
-  if (c.phone) smsResult = await sendSms(c.phone, `${COMPANY_NAME}: complete your driver application here: ${link}`).catch((e) => ({ sent: false, reason: e.message }));
-  c.linkSentCount = (c.linkSentCount || 0) + 1;
-  c.linkLastSentAt = new Date().toISOString();
-  addActivity(c, 'link_resent', 'Admin', `Application link resent (attempt ${c.linkSentCount}).`);
+  // Generate a fresh, valid link (works any time, including after expiration)
+  const dispatch = await dispatchLink(c, baseUrl(req), { regenerate: true });
   upsert(c);
-  res.json({ link, email: emailResult, sms: smsResult });
+  res.json({ link: dispatch.link, email: dispatch.email, sms: dispatch.sms, anySuccess: dispatch.anySuccess });
 });
 
 app.post('/api/candidates/:id/activity', requireAdmin, (req, res) => {
@@ -400,11 +557,9 @@ app.post('/api/candidates/bulk', requireAdmin, async (req, res) => {
       c.stage = stage; c.stageChangedAt = new Date().toISOString(); upsert(c);
       results.push({ id, ok: true });
     } else if (action === 'resend') {
-      const link = `${baseUrl(req)}/apply.html?token=${c.token}`;
-      await sendEmail(c.email, `${COMPANY_NAME} — Complete your driver application`, inviteHtml(c.name, link)).catch(() => {});
-      c.linkSentCount = (c.linkSentCount || 0) + 1; c.linkLastSentAt = new Date().toISOString();
-      addActivity(c, 'link_resent', 'Admin', `Bulk resend of application link.`);
-      upsert(c); results.push({ id, ok: true });
+      const dispatch = await dispatchLink(c, baseUrl(req), { regenerate: true });
+      upsert(c);
+      results.push({ id, ok: dispatch.anySuccess, channels: dispatch.channelsDelivered });
     }
   }
   res.json(results);
@@ -540,16 +695,24 @@ app.post('/api/telegram/:id', requireAdmin, async (req, res) => {
 });
 
 // ── Driver-facing apply routes ────────────────────────────────────────────────
+function linkExpired(c) {
+  return Boolean(c.linkExpiresAt && new Date(c.linkExpiresAt) < new Date());
+}
+const EXPIRED_MSG = `This link has expired. Please contact ${COMPANY_NAME} at ${SUPPORT_CONTACT} for a new one.`;
+
 app.get('/api/apply/:token', (req, res) => {
   const c = findByToken(req.params.token);
-  if (!c) return res.status(404).json({ error: 'Invalid or expired application link.' });
-  res.json({ name: c.name, email: c.email, phone: c.phone, status: c.submittedAt ? 'submitted' : 'pending', companyName: COMPANY_NAME });
+  if (!c) return res.status(404).json({ error: 'This application link is not valid. Please contact the company for a new one.' });
+  if (c.submittedAt) return res.json({ name: c.name, email: c.email, phone: c.phone, status: 'submitted', companyName: COMPANY_NAME });
+  if (linkExpired(c)) return res.status(410).json({ error: EXPIRED_MSG, expired: true });
+  res.json({ name: c.name, email: c.email, phone: c.phone, status: 'pending', companyName: COMPANY_NAME, expiresAt: c.linkExpiresAt });
 });
 
 app.post('/api/apply/:token', (req, res) => {
   const c = findByToken(req.params.token);
-  if (!c) return res.status(404).json({ error: 'Invalid or expired application link.' });
+  if (!c) return res.status(404).json({ error: 'This application link is not valid. Please contact the company for a new one.' });
   if (c.submittedAt) return res.status(409).json({ error: 'Already submitted.' });
+  if (linkExpired(c)) return res.status(410).json({ error: EXPIRED_MSG, expired: true });
 
   const { application, files, signature } = req.body || {};
   if (!application) return res.status(400).json({ error: 'Missing application data.' });
@@ -575,7 +738,8 @@ app.post('/api/apply/:token', (req, res) => {
   upsert(c);
 
   if (process.env.NOTIFY_EMAIL) {
-    sendEmail(process.env.NOTIFY_EMAIL, `New application — ${c.name}`, `<p>${c.name} submitted their application.</p>`).catch(() => {});
+    sendPlainEmail(process.env.NOTIFY_EMAIL, `New driver application — ${c.name}`,
+      `<p><strong>${c.name}</strong> (${c.email}) submitted their driver application.</p><p>View it in the QuickHire workdeck dashboard.</p>`).catch(() => {});
   }
   res.json({ ok: true });
 });
@@ -599,12 +763,29 @@ app.get('/api/admin/files/:id/:field', requireAdmin, (req, res) => {
   fs.createReadStream(fp).pipe(res);
 });
 
+// ── Twilio inbound webhook: honor STOP/START (TCPA) ──────────────────────────
+// Configure this URL as the Messaging webhook for your Twilio number:
+//   https://<your-domain>/api/twilio/inbound   (HTTP POST)
+app.post('/api/twilio/inbound', express.urlencoded({ extended: false }), (req, res) => {
+  const from = req.body.From || '';
+  const body = String(req.body.Body || '').trim().toUpperCase();
+  const STOP = ['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT'];
+  const START = ['START', 'YES', 'UNSTOP'];
+  if (STOP.includes(body)) { addOptout(from); markOptoutActivity(from, true); }
+  else if (START.includes(body)) { removeOptout(from); markOptoutActivity(from, false); }
+  // Return empty TwiML — Twilio's Advanced Opt-Out sends the standard confirmation,
+  // so we avoid sending a duplicate. We just record the opt-out on our side.
+  res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+});
+
 // ── Static ─────────────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.listen(PORT, () => {
   console.log(`QuickHire on http://localhost:${PORT}`);
   if (!ADMIN_PASSWORD) console.log('WARNING: ADMIN_PASSWORD not set — dashboard is open.');
-  if (!transporter) console.log('NOTE: SMTP not configured — invite links shown in dashboard.');
+  console.log(`Email: ${RESEND_API_KEY ? 'Resend' : transporter ? 'SMTP fallback' : 'NOT configured (links shown in dashboard)'}`);
+  console.log(`SMS:   ${smsEnabled() ? 'Twilio' : 'NOT configured'}`);
   if (!ANTHROPIC_API_KEY) console.log('NOTE: ANTHROPIC_API_KEY not set — Molly AI disabled.');
+  console.log(`Link TTL: ${LINK_TTL_DAYS} days`);
 });

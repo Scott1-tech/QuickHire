@@ -51,15 +51,46 @@ tab, complete the form, then watch it appear as **Submitted** in the dashboard.
    uploaded files persist across deploys (Railway's normal filesystem is ephemeral).
 4. Add SMTP vars to send invite emails, and Twilio vars to send SMS (both optional).
 
+## Application link sending (email + SMS)
+
+When an admin adds a candidate, the system sends a **unique, non-guessable link**
+tied to that candidate's record. Submissions automatically tie back to the right
+candidate — no manual matching.
+
+- **Email:** [Resend](https://resend.com) (primary). Set `RESEND_API_KEY` + a verified
+  `EMAIL_FROM`. Falls back to SMTP (`SMTP_*`) if Resend isn't configured.
+- **SMS:** [Twilio](https://twilio.com). Set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+  `TWILIO_FROM`.
+- **Both provided → both sent.** Sending to every available channel also acts as
+  cross-channel fallback, so one failing channel never leaves the driver with nothing.
+- **Links expire after `LINK_TTL_DAYS` (default 14).** Expired links show a friendly
+  "contact us for a new one" message instead of a broken form.
+- **Resend Link** (candidate detail page) generates a *fresh* token + expiry and re-sends
+  — works any time, including after expiration. The old link is invalidated.
+- Every send attempt (channel, status, timestamp) is logged to the **Activity tab**, and
+  the latest status shows on the detail-page sidebar ("Sent N time(s) via email & sms…").
+
+### SMS compliance (TCPA) — action may be required
+
+- The SMS includes **"Reply STOP to opt out."** STOP/START replies are honored: point
+  your Twilio number's inbound Messaging webhook at `<PUBLIC_URL>/api/twilio/inbound`
+  (HTTP POST). Opted-out numbers are skipped on future sends.
+- ⚠️ **A2P 10DLC registration:** Twilio generally requires registering a Brand +
+  Campaign before it will reliably deliver business SMS to US numbers. Complete this in
+  the Twilio console — flagging it since delivery may be blocked/throttled until done.
+
 ## Environment variables
 
 See [`.env.example`](./.env.example). Key ones:
 
 - `ADMIN_PASSWORD` — protects the workdeck dashboard (leave blank only for local dev).
 - `PUBLIC_URL` — your deployed URL, used to build invite links.
-- `DATA_DIR` — where applications/uploads are stored (point at a Railway Volume).
-- `SMTP_*`, `NOTIFY_EMAIL` — email invites + new-submission notifications.
-- `TWILIO_*` — SMS invites.
+- `DATA_DIR` — where applications/uploads/opt-outs are stored (point at a Railway Volume).
+- `RESEND_API_KEY`, `EMAIL_FROM`, `REPLY_TO_EMAIL` — email invites via Resend.
+- `SMTP_*` — email fallback if Resend isn't set. `NOTIFY_EMAIL` — new-submission alerts.
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` — SMS invites.
+- `LINK_TTL_DAYS` — link expiry window (default 14). `SUPPORT_CONTACT` — shown to drivers.
+- `ANTHROPIC_API_KEY` — Molly AI summaries. `TELEGRAM_*` — Documents-tab Telegram send.
 
 ## Notes
 

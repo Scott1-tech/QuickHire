@@ -10,7 +10,13 @@ const STAGE_COLORS = { Lead:'bg-gray-100 text-gray-700', Screening:'bg-blue-100 
 const PEV_STATUS = ['not_started','in_progress','verified','unable_to_verify'];
 const PEV_LABELS = { not_started:'Not Started', in_progress:'In Progress', verified:'Verified', unable_to_verify:'Unable to Verify' };
 const PEV_COLORS = { not_started:'bg-gray-100 text-gray-600', in_progress:'bg-blue-100 text-blue-700', verified:'bg-green-100 text-green-700', unable_to_verify:'bg-red-100 text-red-700' };
-const ACTIVITY_ICONS = { stage_change:'🔄', application_submitted:'📋', note_added:'📝', link_resent:'📨', checklist_complete:'✅', molly_summary:'🤖', document_uploaded:'📎', document_removed:'🗑', pev_updated:'🔍', candidate_created:'👤' };
+const ACTIVITY_ICONS = { stage_change:'🔄', application_submitted:'📋', note_added:'📝', link_sent:'📨', link_resent:'📨', sms_optout:'🚫', checklist_complete:'✅', molly_summary:'🤖', document_uploaded:'📎', document_removed:'🗑', pev_updated:'🔍', candidate_created:'👤' };
+
+function channelsLabel(c) {
+  const ch = (c.linkLastChannels && c.linkLastChannels.length) ? c.linkLastChannels.join(' & ') : '—';
+  const status = c.linkLastStatus === 'failed' ? ' (last attempt failed)' : '';
+  return `Sent ${c.linkSentCount || 0} time(s) via ${ch}${status}. Last: ${fmtDate(c.linkLastSentAt)}`;
+}
 
 function esc(s) { return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmt(d) { return d ? new Date(d).toLocaleString() : '—'; }
@@ -114,7 +120,7 @@ function renderSidebar() {
   document.getElementById('consentBadge').textContent = consentDone ? 'Submitted' : 'Not Submitted';
   document.getElementById('consentDetail').innerHTML = `
     ${consentDone ? '<p>✓ Consents completed</p>' : '<p>Consents not yet completed</p>'}
-    <p>Sent ${c.linkSentCount || 0} time(s). Last: ${fmtDate(c.linkLastSentAt)}</p>
+    <p>${channelsLabel(c)}</p>
     ${consentDone && c.driverFiles?.signature ? `<a href="/api/candidates/${c.id}/signature" target="_blank" class="text-accent-600 underline">View Signature</a>` : ''}`;
 
   // Application card
@@ -126,7 +132,8 @@ function renderSidebar() {
   document.getElementById('appProgressPct').textContent = `${pct}% complete`;
   document.getElementById('appCardDetail').innerHTML = `
     <p>Last active: ${fmtDate(c.lastActivityAt)}</p>
-    <p>Sent ${c.linkSentCount || 0} time(s). Last: ${fmtDate(c.linkLastSentAt)}</p>`;
+    <p>${channelsLabel(c)}</p>
+    ${c.linkExpiresAt && !appDone ? `<p class="text-gray-400">Link expires: ${fmtDate(c.linkExpiresAt)}</p>` : ''}`;
 }
 
 function appCompletionPct(app) {
