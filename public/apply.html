@@ -13,36 +13,39 @@
     theme: {
       extend: {
         colors: {
-          primary: { 50: '#fef2f4', 100: '#fde6e9', 300: '#f0879a', 500: '#b01d30', 600: '#8f1727', 700: '#6f1220' },
-          accent: { 50: '#fef2f4', 100: '#fde6e9', 200: '#f7c4cc', 300: '#f0879a', 400: '#d94e60', 500: '#b01d30', 600: '#8f1727', 700: '#6f1220' },
+          primary: { 50:'#fef2f4',100:'#fde6e9',300:'#f0879a',500:'#b01d30',600:'#8f1727',700:'#6f1220' },
+          accent:  { 50:'#fef2f4',100:'#fde6e9',200:'#f7c4cc',300:'#f0879a',400:'#d94e60',500:'#b01d30',600:'#8f1727',700:'#6f1220' },
         },
-        fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
+        fontFamily: { sans: ['Inter','ui-sans-serif','system-ui','sans-serif'] },
       },
     },
   };
 </script>
 <style>
-  body { font-family: 'Inter', sans-serif; }
-  .field { width: 100%; padding: 0.75rem 1rem; border: 2px solid #e5e7eb; border-radius: 0.75rem; outline: none; transition: all .15s; background:#fff; }
-  .field:focus { border-color: #b01d30; box-shadow: 0 0 0 3px #f7c4cc; }
-  .lbl { display:block; font-size: .875rem; font-weight: 500; margin-bottom: .35rem; }
-  .pill { padding: .5rem .9rem; border-radius: 9999px; font-weight: 500; font-size: .875rem; border: 1px solid #f7c4cc; background:#fff; color:#8f1727; transition: all .15s; cursor:pointer; }
-  .pill.selected { background:#b01d30; color:#fff; border-color:#b01d30; }
-  .toggle { width:100%; padding: 1rem 1.5rem; border-radius:.75rem; font-weight:600; font-size:1.05rem; border:2px solid #e5e7eb; background:#f3f4f6; color:#b01d30; transition: all .15s; cursor:pointer; }
-  .toggle.selected { background:#b01d30; color:#fff; border-color:#b01d30; }
-  #sigCanvas { touch-action: none; }
+body { font-family: 'Inter', sans-serif; }
+.field { width:100%; padding:.75rem 1rem; border:2px solid #e5e7eb; border-radius:.75rem; outline:none; transition:all .15s; background:#fff; font-size:.875rem; }
+.field:focus { border-color:#b01d30; box-shadow:0 0 0 3px #f7c4cc; }
+.lbl { display:block; font-size:.875rem; font-weight:500; margin-bottom:.35rem; }
+.pill { padding:.45rem .9rem; border-radius:9999px; font-weight:500; font-size:.875rem; border:1px solid #f7c4cc; background:#fff; color:#8f1727; transition:all .15s; cursor:pointer; }
+.pill.selected { background:#b01d30; color:#fff; border-color:#b01d30; }
+.toggle { width:100%; padding:.9rem 1.5rem; border-radius:.75rem; font-weight:600; font-size:1rem; border:2px solid #e5e7eb; background:#f3f4f6; color:#b01d30; transition:all .15s; cursor:pointer; }
+.toggle.selected { background:#b01d30; color:#fff; border-color:#b01d30; }
+.ocr-warn { border-color:#f59e0b !important; }
+.ocr-warn-icon { display:none; }
+.ocr-warn-icon.show { display:inline; }
+#sigCanvas { touch-action:none; }
 </style>
 </head>
 <body class="bg-gray-50 text-gray-900 min-h-screen">
 
-  <!-- Sticky nav (stays fixed on scroll, every step) -->
+  <!-- Sticky nav -->
   <header class="sticky top-0 z-50 bg-white/95 backdrop-blur border-b border-gray-200">
     <div class="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
       <a href="#" class="flex items-center gap-2">
-        <div class="w-9 h-9 rounded-lg bg-accent-500 text-white font-extrabold flex items-center justify-center">N</div>
-        <span class="font-bold">National Carrier Xpress</span>
+        <div class="w-9 h-9 rounded-lg bg-accent-500 text-white font-extrabold flex items-center justify-center text-sm">N</div>
+        <span class="font-bold text-sm sm:text-base">National Carrier Xpress</span>
       </a>
-      <nav class="hidden md:flex items-center gap-7 text-sm font-medium text-gray-600">
+      <nav class="hidden md:flex items-center gap-6 text-sm font-medium text-gray-600">
         <a href="#" class="hover:text-accent-600">Home</a>
         <a href="#" class="hover:text-accent-600">About</a>
         <a href="#" class="hover:text-accent-600">Services</a>
@@ -52,16 +55,17 @@
     </div>
   </header>
 
-  <!-- Invalid-link / loading states -->
-  <div id="gateLoading" class="max-w-md mx-auto mt-24 text-center text-gray-400">Loading your application…</div>
-  <div id="gateError" class="hidden max-w-md mx-auto mt-24 px-4 text-center">
-    <div class="bg-white rounded-2xl border border-gray-200 p-8 shadow-sm">
+  <!-- Gate states -->
+  <div id="gateLoading" class="max-w-md mx-auto mt-24 text-center text-gray-400 py-12">Loading your application…</div>
+  <div id="gateError" class="hidden max-w-md mx-auto mt-24 px-4">
+    <div class="bg-white rounded-2xl border border-gray-200 p-8 shadow-sm text-center">
       <h1 class="text-xl font-bold mb-2">Application link not valid</h1>
-      <p class="text-gray-500" id="gateErrorMsg">This link is invalid or has expired. Please contact the company for a new invitation.</p>
+      <p id="gateErrorMsg" class="text-gray-500">This link is invalid or has expired.</p>
     </div>
   </div>
 
   <main id="formWrap" class="hidden max-w-3xl mx-auto px-4 sm:px-6 py-8">
+
     <!-- Progress -->
     <div class="mb-8">
       <div class="flex items-center justify-between text-sm font-semibold mb-2">
@@ -73,8 +77,8 @@
       </div>
     </div>
 
-    <!-- ============ STEP 1 ============ -->
-    <section id="step1" class="space-y-6">
+    <!-- ===== STEP 1 ===== -->
+    <section id="step1" class="space-y-5">
 
       <!-- Experience -->
       <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm space-y-5">
@@ -101,7 +105,7 @@
         </div>
 
         <div>
-          <p class="lbl">Equipment Types (select all that apply)</p>
+          <p class="lbl">Equipment Types <span class="text-gray-400 font-normal">(select all that apply)</span></p>
           <div class="flex flex-wrap gap-2" data-multi="equipmentTypes">
             <button type="button" class="pill" data-value="Dry Van">Dry Van</button>
             <button type="button" class="pill" data-value="Flatbed">Flatbed</button>
@@ -117,32 +121,35 @@
         </div>
       </div>
 
-      <!-- Documents -->
+      <!-- Documents + OCR -->
       <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm space-y-4">
         <h2 class="text-lg font-bold">Document Uploads</h2>
-        <p class="text-sm text-gray-500">Upload clear photos or scans (JPG, PNG, or PDF).</p>
+        <p class="text-sm text-gray-500">Upload clear photos or scans (JPG, PNG, PDF). Uploading your <strong>CDL Front</strong> will auto-fill your CDL information using OCR — all filled fields remain editable.</p>
+        <div id="ocrStatus" class="hidden text-sm text-blue-600 flex items-center gap-2">
+          <span class="animate-spin">⟳</span> <span id="ocrStatusText">Reading CDL…</span>
+        </div>
         <div class="grid sm:grid-cols-3 gap-4">
           <div data-upload="cdlFront">
             <p class="lbl">CDL Front</p>
-            <label class="block cursor-pointer text-center border-2 border-dashed border-gray-300 rounded-xl p-4 hover:border-accent-400">
-              <input type="file" accept="image/*,application/pdf" class="hidden" />
-              <span class="text-sm text-accent-600 font-semibold">Choose File</span>
+            <label class="block cursor-pointer text-center border-2 border-dashed border-gray-300 rounded-xl p-4 hover:border-accent-400 transition-colors">
+              <input type="file" accept="image/*,application/pdf" class="hidden"/>
+              <span class="text-sm text-accent-600 font-semibold block">Choose File</span>
               <p class="filename text-xs text-gray-500 mt-2 truncate">No file chosen</p>
             </label>
           </div>
           <div data-upload="cdlBack">
             <p class="lbl">CDL Back</p>
-            <label class="block cursor-pointer text-center border-2 border-dashed border-gray-300 rounded-xl p-4 hover:border-accent-400">
-              <input type="file" accept="image/*,application/pdf" class="hidden" />
-              <span class="text-sm text-accent-600 font-semibold">Choose File</span>
+            <label class="block cursor-pointer text-center border-2 border-dashed border-gray-300 rounded-xl p-4 hover:border-accent-400 transition-colors">
+              <input type="file" accept="image/*,application/pdf" class="hidden"/>
+              <span class="text-sm text-accent-600 font-semibold block">Choose File</span>
               <p class="filename text-xs text-gray-500 mt-2 truncate">No file chosen</p>
             </label>
           </div>
           <div data-upload="medicalCard">
             <p class="lbl">Medical Card</p>
-            <label class="block cursor-pointer text-center border-2 border-dashed border-gray-300 rounded-xl p-4 hover:border-accent-400">
-              <input type="file" accept="image/*,application/pdf" class="hidden" />
-              <span class="text-sm text-accent-600 font-semibold">Choose File</span>
+            <label class="block cursor-pointer text-center border-2 border-dashed border-gray-300 rounded-xl p-4 hover:border-accent-400 transition-colors">
+              <input type="file" accept="image/*,application/pdf" class="hidden"/>
+              <span class="text-sm text-accent-600 font-semibold block">Choose File</span>
               <p class="filename text-xs text-gray-500 mt-2 truncate">No file chosen</p>
             </label>
           </div>
@@ -153,11 +160,11 @@
       <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm space-y-4">
         <h2 class="text-lg font-bold">Personal Information</h2>
         <div class="grid sm:grid-cols-2 gap-4">
-          <div><label class="lbl" for="firstName">First Name *</label><input id="firstName" class="field" /></div>
-          <div><label class="lbl" for="lastName">Last Name *</label><input id="lastName" class="field" /></div>
-          <div><label class="lbl" for="dateOfBirth">Date of Birth *</label><input id="dateOfBirth" type="date" class="field" /></div>
-          <div><label class="lbl" for="email">Email *</label><input id="email" type="email" class="field" /></div>
-          <div><label class="lbl" for="phone">Phone *</label><input id="phone" type="tel" class="field" /></div>
+          <div><label class="lbl" for="firstName">First Name *</label><input id="firstName" class="field"/></div>
+          <div><label class="lbl" for="lastName">Last Name *</label><input id="lastName" class="field"/></div>
+          <div><label class="lbl" for="dateOfBirth">Date of Birth * <span class="ocr-warn-icon text-amber-500" id="warn-dateOfBirth">⚠ Verify OCR</span></label><input id="dateOfBirth" type="date" class="field"/></div>
+          <div><label class="lbl" for="email">Email *</label><input id="email" type="email" class="field"/></div>
+          <div><label class="lbl" for="phone">Phone *</label><input id="phone" type="tel" class="field"/></div>
         </div>
       </div>
 
@@ -165,10 +172,10 @@
       <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm space-y-4">
         <h2 class="text-lg font-bold">Address</h2>
         <div class="grid sm:grid-cols-2 gap-4">
-          <div class="sm:col-span-2"><label class="lbl" for="address">Street Address</label><input id="address" class="field" /></div>
-          <div><label class="lbl" for="city">City</label><input id="city" class="field" /></div>
+          <div class="sm:col-span-2"><label class="lbl" for="address">Street Address</label><input id="address" class="field"/></div>
+          <div><label class="lbl" for="city">City</label><input id="city" class="field"/></div>
           <div><label class="lbl" for="state">State</label><select id="state" class="field" data-states></select></div>
-          <div><label class="lbl" for="zipcode">Zip Code</label><input id="zipcode" class="field" /></div>
+          <div><label class="lbl" for="zipcode">Zip Code</label><input id="zipcode" class="field"/></div>
         </div>
       </div>
 
@@ -176,13 +183,39 @@
       <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm space-y-4">
         <h2 class="text-lg font-bold">CDL Information</h2>
         <div class="grid sm:grid-cols-2 gap-4">
-          <div><label class="lbl" for="cdlNumber">CDL Number</label><input id="cdlNumber" class="field" /></div>
-          <div><label class="lbl" for="cdlState">CDL State</label><select id="cdlState" class="field" data-states></select></div>
-          <div><label class="lbl" for="cdlIssuedDate">CDL Issued Date</label><input id="cdlIssuedDate" type="date" class="field" /></div>
-          <div><label class="lbl" for="cdlExpirationDate">CDL Expiration Date</label><input id="cdlExpirationDate" type="date" class="field" /></div>
+          <div>
+            <label class="lbl" for="cdlNumber">CDL Number <span class="ocr-warn-icon text-amber-500" id="warn-cdlNumber">⚠ Verify OCR</span></label>
+            <input id="cdlNumber" class="field"/>
+          </div>
+          <div>
+            <label class="lbl" for="cdlState">CDL State <span class="ocr-warn-icon text-amber-500" id="warn-cdlState">⚠ Verify OCR</span></label>
+            <select id="cdlState" class="field" data-states></select>
+          </div>
+          <div>
+            <label class="lbl" for="cdlClass">CDL Class <span class="ocr-warn-icon text-amber-500" id="warn-cdlClass">⚠ Verify OCR</span></label>
+            <select id="cdlClass" class="field">
+              <option value="">Select…</option>
+              <option value="A">Class A — Combination Vehicles</option>
+              <option value="B">Class B — Heavy Straight Vehicles</option>
+              <option value="C">Class C — Small Vehicles</option>
+            </select>
+          </div>
+          <div>
+            <label class="lbl" for="cdlIssuedDate">CDL Issued Date <span class="ocr-warn-icon text-amber-500" id="warn-cdlIssuedDate">⚠ Verify OCR</span></label>
+            <input id="cdlIssuedDate" type="date" class="field"/>
+          </div>
+          <div>
+            <label class="lbl" for="cdlExpirationDate">CDL Expiration Date <span class="ocr-warn-icon text-amber-500" id="warn-cdlExpirationDate">⚠ Verify OCR</span></label>
+            <input id="cdlExpirationDate" type="date" class="field"/>
+          </div>
+          <div>
+            <label class="lbl" for="medicalCardExpiration">Medical Card Expiration</label>
+            <input id="medicalCardExpiration" type="date" class="field"/>
+          </div>
         </div>
+
         <div>
-          <p class="lbl">Endorsements (select all that apply)</p>
+          <p class="lbl">Endorsements <span class="text-gray-400 font-normal">(select all that apply)</span></p>
           <div class="flex flex-wrap gap-2" data-multi="endorsements">
             <button type="button" class="pill" data-value="H">H — Hazmat</button>
             <button type="button" class="pill" data-value="N">N — Tank Vehicles</button>
@@ -190,6 +223,24 @@
             <button type="button" class="pill" data-value="S">S — School Bus</button>
             <button type="button" class="pill" data-value="T">T — Double/Triple</button>
             <button type="button" class="pill" data-value="X">X — Tank + Hazmat</button>
+          </div>
+        </div>
+
+        <div>
+          <p class="lbl">Restrictions <span class="text-gray-400 font-normal">(select all that apply)</span></p>
+          <div class="flex flex-wrap gap-2" data-multi="restrictions">
+            <button type="button" class="pill" data-value="B">B — Corrective Lenses</button>
+            <button type="button" class="pill" data-value="C">C — Mechanical Aid</button>
+            <button type="button" class="pill" data-value="E">E — No Manual Transmission</button>
+            <button type="button" class="pill" data-value="F">F — Outside Mirror</button>
+            <button type="button" class="pill" data-value="G">G — Daylight Hours Only</button>
+            <button type="button" class="pill" data-value="K">K — Intrastate Only</button>
+            <button type="button" class="pill" data-value="L">L — No Air Brakes</button>
+            <button type="button" class="pill" data-value="M">M — No Class A Passenger</button>
+            <button type="button" class="pill" data-value="N">N — No Class A or B Passenger</button>
+            <button type="button" class="pill" data-value="O">O — No Tractor-Trailer</button>
+            <button type="button" class="pill" data-value="V">V — Medical Variance</button>
+            <button type="button" class="pill" data-value="X">X — No Cargo in Tank</button>
           </div>
         </div>
       </div>
@@ -236,9 +287,10 @@
             <option value="">Select…</option>
             <option>Indeed</option>
             <option>Google Search</option>
-            <option>Facebook</option>
+            <option>Facebook / Social Media</option>
             <option>Referred by a friend</option>
             <option>Company website</option>
+            <option>CDL job board</option>
             <option>Other</option>
           </select>
         </div>
@@ -247,54 +299,59 @@
       <!-- Previous Employers -->
       <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm space-y-4">
         <h2 class="text-lg font-bold">Previous Employers</h2>
-        <p class="text-sm text-gray-500">Enter your previous trucking employers. Auto-fill from the FMCSA database is not currently available — please enter all details manually.</p>
+        <p class="text-sm text-gray-500">Enter your previous trucking employers. Please fill in all fields manually — FMCSA auto-fill is not currently available.</p>
         <div id="employers" class="space-y-4"></div>
         <button type="button" id="addEmployer" class="text-accent-600 hover:text-accent-700 font-semibold text-sm">+ Add Another Employer</button>
       </div>
 
-      <button type="button" id="toStep2" class="w-full px-8 py-4 bg-primary-500 hover:bg-primary-600 text-white rounded-xl font-semibold text-lg shadow-lg shadow-primary-500/25">
+      <button type="button" id="toStep2"
+        class="w-full px-8 py-4 bg-primary-500 hover:bg-primary-600 text-white rounded-xl font-semibold text-lg shadow-lg shadow-primary-500/25 transition-colors">
         Next Step →
       </button>
     </section>
 
-    <!-- ============ STEP 2 ============ -->
-    <section id="step2" class="hidden space-y-6">
+    <!-- ===== STEP 2 ===== -->
+    <section id="step2" class="hidden space-y-5">
 
       <!-- Consents -->
       <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm space-y-4">
         <h2 class="text-lg font-bold">Required Consent Documents</h2>
-        <p class="text-sm text-gray-500">Please review and agree to each disclosure. All are required to submit.</p>
+        <p class="text-sm text-gray-500">Please review and agree to each disclosure. All three are required to submit.</p>
+
         <label class="flex gap-3 items-start cursor-pointer p-3 rounded-xl hover:bg-gray-50">
-          <input type="checkbox" id="consentPsp" class="mt-1 w-5 h-5 accent-[#b01d30]" />
-          <span class="text-sm"><span class="font-semibold">PSP Disclosure &amp; Authorization.</span> I authorize the company to obtain my FMCSA Pre-Employment Screening Program (PSP) report.</span>
+          <input type="checkbox" id="consentPsp" class="mt-1 w-5 h-5 accent-[#b01d30]"/>
+          <span class="text-sm"><strong>PSP Disclosure &amp; Authorization.</strong> I authorize the company to obtain my FMCSA Pre-Employment Screening Program (PSP) report, which includes data from FMCSA's Motor Carrier Management Information System (MCMIS).</span>
         </label>
         <label class="flex gap-3 items-start cursor-pointer p-3 rounded-xl hover:bg-gray-50">
-          <input type="checkbox" id="consentMvr" class="mt-1 w-5 h-5 accent-[#b01d30]" />
-          <span class="text-sm"><span class="font-semibold">MVR Disclosure &amp; Authorization.</span> I authorize the company to obtain my Motor Vehicle Record (MVR).</span>
+          <input type="checkbox" id="consentMvr" class="mt-1 w-5 h-5 accent-[#b01d30]"/>
+          <span class="text-sm"><strong>MVR Disclosure &amp; Authorization.</strong> I authorize the company to obtain my Motor Vehicle Record (MVR) from the applicable state DMV for safety compliance purposes.</span>
         </label>
         <label class="flex gap-3 items-start cursor-pointer p-3 rounded-xl hover:bg-gray-50">
-          <input type="checkbox" id="consentEmployment" class="mt-1 w-5 h-5 accent-[#b01d30]" />
-          <span class="text-sm"><span class="font-semibold">Employment Verification.</span> I authorize the company to contact my previous employers to verify my work history.</span>
+          <input type="checkbox" id="consentEmployment" class="mt-1 w-5 h-5 accent-[#b01d30]"/>
+          <span class="text-sm"><strong>Employment Verification.</strong> I authorize the company to contact my previous employers to verify employment history, as required by FMCSA 49 CFR Part 391.</span>
         </label>
       </div>
 
       <!-- Signature -->
       <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm space-y-4">
         <h2 class="text-lg font-bold">Signature</h2>
-        <p class="text-sm text-gray-500">Sign to certify that all information provided is true and accurate.</p>
+        <p class="text-sm text-gray-500">Sign to certify that all information provided is true, correct, and complete to the best of your knowledge.</p>
+
         <div class="inline-flex rounded-lg bg-gray-100 p-1 text-sm">
           <button type="button" id="sigModeDraw" class="px-3 py-1.5 rounded-md font-medium bg-accent-500 text-white">Draw Signature</button>
-          <button type="button" id="sigModeType" class="px-3 py-1.5 rounded-md font-medium text-gray-700">Type Signature</button>
+          <button type="button" id="sigModeType" class="px-3 py-1.5 rounded-md font-medium text-gray-700 hover:text-gray-900">Type Signature</button>
         </div>
 
         <div id="sigDrawWrap">
-          <canvas id="sigCanvas" width="600" height="180" class="w-full border-2 border-gray-200 rounded-xl bg-white"></canvas>
+          <canvas id="sigCanvas" width="600" height="180"
+            class="w-full border-2 border-gray-200 rounded-xl bg-white cursor-crosshair"></canvas>
         </div>
         <div id="sigTypeWrap" class="hidden">
-          <input id="sigTypeInput" placeholder="Type your full legal name" class="field" style="font-family:'Dancing Script',cursive;font-size:1.75rem" />
+          <input id="sigTypeInput" placeholder="Type your full legal name"
+            class="field" style="font-family:'Dancing Script',cursive;font-size:1.75rem;height:4rem;"/>
         </div>
 
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 flex-wrap">
           <button type="button" id="sigClear" class="text-sm px-3 py-1.5 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-700">Clear</button>
           <button type="button" id="sigConfirm" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">Confirm Signature</button>
           <span id="sigConfirmed" class="hidden text-sm text-green-600 font-semibold">✓ Signature confirmed</span>
@@ -302,23 +359,35 @@
       </div>
 
       <div class="flex gap-3">
-        <button type="button" id="backToStep1" class="w-1/3 px-6 py-4 border-2 border-accent-500 text-accent-500 rounded-xl font-semibold hover:bg-accent-50">← Back</button>
+        <button type="button" id="backToStep1"
+          class="w-1/3 px-6 py-4 border-2 border-accent-500 text-accent-500 rounded-xl font-semibold hover:bg-accent-50 transition-colors">
+          ← Back
+        </button>
         <button type="button" id="submitApp" disabled
-          class="flex-1 px-8 py-4 rounded-xl font-semibold text-lg transition-colors bg-gray-200 text-gray-400 cursor-not-allowed">
+          class="flex-1 px-8 py-4 rounded-xl font-semibold text-lg bg-gray-200 text-gray-400 cursor-not-allowed">
           Submit Application
         </button>
       </div>
-      <p id="submitHint" class="text-sm text-amber-600"></p>
+      <p id="submitHint" class="text-sm text-amber-700"></p>
     </section>
 
     <!-- Success -->
     <section id="successView" class="hidden text-center py-16">
       <div class="w-16 h-16 mx-auto rounded-full bg-green-100 text-green-600 flex items-center justify-center text-3xl mb-4">✓</div>
-      <h1 class="text-2xl font-bold mb-2">Application submitted!</h1>
-      <p class="text-gray-500">Thank you. Your application has been received and the company has been notified. You may now close this window.</p>
+      <h1 class="text-2xl font-bold mb-2">Application Submitted!</h1>
+      <p class="text-gray-500 max-w-sm mx-auto">Thank you, <span id="successName"></span>. Your application has been received and the team has been notified. You may now close this window.</p>
     </section>
+
   </main>
 
+  <!-- Tesseract OCR (loaded async — non-blocking) -->
+  <script>
+    window.Tesseract = null;
+    const ts = document.createElement('script');
+    ts.src = 'https://unpkg.com/tesseract.js@5/dist/tesseract.min.js';
+    ts.onload = () => { window.Tesseract = Tesseract; };
+    document.head.appendChild(ts);
+  </script>
   <script src="/apply.js"></script>
 </body>
 </html>

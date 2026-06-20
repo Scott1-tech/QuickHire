@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>QuickHire — Sign In</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config={theme:{extend:{colors:{accent:{50:'#fef2f4',500:'#b01d30',600:'#8f1727'}},fontFamily:{sans:['Inter','sans-serif']}}}}</script>
+<style>body{font-family:'Inter',sans-serif;}</style>
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center px-4">
+<div class="w-full max-w-sm">
+  <div class="text-center mb-8">
+    <div class="w-14 h-14 rounded-2xl bg-accent-500 text-white font-black text-2xl flex items-center justify-center mx-auto mb-4">Q</div>
+    <h1 class="text-2xl font-bold">QuickHire</h1>
+    <p class="text-sm text-gray-500 mt-1">Driver Hiring Portal</p>
+  </div>
+  <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+    <h2 class="text-lg font-bold mb-1">Company sign in</h2>
+    <p class="text-sm text-gray-500 mb-6">Enter your workdeck password to continue.</p>
+    <input id="pw" type="password" placeholder="Password" autofocus
+      class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-red-100 focus:border-accent-500 outline-none mb-3" />
+    <p id="err" class="text-sm text-red-600 mb-3 hidden">Incorrect password — try again.</p>
+    <button id="btn" class="w-full py-3 bg-accent-500 hover:bg-accent-600 text-white rounded-xl font-semibold transition-colors">Sign in</button>
+  </div>
+</div>
+<script>
+const TOKEN_KEY = 'qh_admin';
+async function login() {
+  const pw = document.getElementById('pw').value;
+  const res = await fetch('/api/admin/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password:pw}) });
+  const { ok } = await res.json();
+  if (ok) { localStorage.setItem(TOKEN_KEY, pw); location.href = '/'; }
+  else document.getElementById('err').classList.remove('hidden');
+}
+document.getElementById('btn').addEventListener('click', login);
+document.getElementById('pw').addEventListener('keydown', e => { if (e.key==='Enter') login(); });
+// If already logged in, redirect
+fetch('/api/config').then(r=>r.json()).then(cfg => {
+  if (!cfg.requiresPassword) location.href='/';
+  else { const t = localStorage.getItem(TOKEN_KEY);
+    if (t) fetch('/api/candidates',{headers:{'x-admin-token':t}}).then(r => { if(r.ok) location.href='/'; }); }
+});
+</script>
+</body>
+</html>

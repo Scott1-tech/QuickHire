@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Candidate — QuickHire</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config={theme:{extend:{colors:{primary:{500:'#b01d30',600:'#8f1727'},accent:{50:'#fef2f4',100:'#fde6e9',200:'#f7c4cc',500:'#b01d30',600:'#8f1727'}},fontFamily:{sans:['Inter','sans-serif']}}}}</script>
+<style>
+body{font-family:'Inter',sans-serif;}
+.pill{display:inline-flex;align-items:center;padding:.2rem .65rem;border-radius:9999px;font-size:.75rem;font-weight:600;}
+.tab-btn{padding:.6rem 1rem;font-size:.875rem;font-weight:500;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap;}
+.tab-btn.active{border-bottom-color:#b01d30;color:#b01d30;font-weight:600;}
+.tab-btn:not(.active){color:#6b7280;}
+.tab-btn:not(.active):hover{color:#374151;}
+.checklist-row{transition:all .2s;}
+.ring-svg circle.track{fill:none;stroke:#e5e7eb;stroke-width:8;}
+.ring-svg circle.prog{fill:none;stroke:#b01d30;stroke-width:8;stroke-linecap:round;transition:stroke-dashoffset .5s ease;}
+.lbl{display:block;font-size:.8rem;font-weight:500;color:#6b7280;margin-bottom:.25rem;}
+.field{width:100%;padding:.6rem .9rem;border:1.5px solid #e5e7eb;border-radius:.625rem;font-size:.875rem;outline:none;}
+.field:focus{border-color:#b01d30;}
+</style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+
+<!-- Sticky header -->
+<header class="sticky top-0 z-50 bg-white border-b border-gray-200">
+  <div class="max-w-[1400px] mx-auto px-4 h-14 flex items-center gap-3">
+    <div class="text-sm text-gray-500 flex items-center gap-1.5">
+      <span>Carriers</span><span class="text-gray-300">›</span>
+      <a href="/" id="bcCompany" class="hover:text-accent-600 font-medium text-gray-700">NCX</a>
+      <span class="text-gray-300">›</span>
+      <a href="/" class="hover:text-accent-600">Hiring</a>
+      <span class="text-gray-300">›</span>
+      <span class="text-accent-600 font-semibold">Candidate Details</span>
+    </div>
+    <div class="flex-1"></div>
+    <button id="resendBtn" class="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 font-medium">Resend Link</button>
+    <button id="rejectBtn" class="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 font-medium">Mark Rejected</button>
+    <button onclick="location.href='/'" class="text-sm text-gray-400 hover:text-gray-700">← Back</button>
+  </div>
+</header>
+
+<div class="max-w-[1400px] mx-auto px-4 py-6 flex gap-6">
+
+  <!-- Main -->
+  <div class="flex-1 min-w-0">
+    <!-- Candidate header -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-5 mb-5 shadow-sm">
+      <div class="flex items-start gap-4 flex-wrap">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h1 id="candName" class="text-2xl font-bold"></h1>
+            <span id="stageBadge" class="pill"></span>
+            <span id="staleBadge" class="hidden pill bg-amber-100 text-amber-700">Stale</span>
+          </div>
+          <div class="flex items-center gap-4 mt-2 text-sm text-gray-500 flex-wrap">
+            <span id="candEmail"></span>
+            <span id="candPhone"></span>
+          </div>
+          <!-- Compliance dots -->
+          <div id="complianceDots" class="flex items-center gap-4 mt-3 flex-wrap text-xs font-medium"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab bar -->
+    <div class="bg-white rounded-t-2xl border border-gray-200 border-b-0 overflow-x-auto">
+      <div class="flex px-4 gap-1">
+        <button class="tab-btn active" data-tab="pipeline">Pipeline</button>
+        <button class="tab-btn" data-tab="application">Application</button>
+        <button class="tab-btn" data-tab="pev">PEV</button>
+        <button class="tab-btn" data-tab="activity">Activity</button>
+        <button class="tab-btn" data-tab="documents">Documents</button>
+      </div>
+    </div>
+
+    <!-- Tab panels -->
+    <div class="bg-white rounded-b-2xl border border-gray-200 border-t-0 shadow-sm">
+
+      <!-- Pipeline: checklist -->
+      <div id="tab-pipeline" class="p-5">
+        <div class="flex items-center gap-6 mb-6 flex-wrap">
+          <!-- Progress ring -->
+          <div class="relative flex-shrink-0">
+            <svg class="ring-svg w-24 h-24 -rotate-90" viewBox="0 0 80 80">
+              <circle class="track" cx="40" cy="40" r="32"/>
+              <circle id="ringProg" class="prog" cx="40" cy="40" r="32" stroke-dasharray="201" stroke-dashoffset="201"/>
+            </svg>
+            <div class="absolute inset-0 flex flex-col items-center justify-center text-center leading-tight">
+              <span id="ringNum" class="text-xl font-black">0/10</span>
+              <span class="text-[9px] text-gray-500 font-semibold">PROGRESS</span>
+            </div>
+          </div>
+          <div>
+            <h2 class="font-bold text-lg">Hiring Progress</h2>
+            <p id="ringSubtitle" class="text-sm text-gray-500"></p>
+          </div>
+        </div>
+        <div id="checklistWrap" class="space-y-2"></div>
+      </div>
+
+      <!-- Application: read-only form data -->
+      <div id="tab-application" class="hidden p-5">
+        <p id="appNotSubmitted" class="hidden text-gray-500 text-sm">The driver has not yet submitted their application.</p>
+        <div id="appData" class="space-y-5"></div>
+      </div>
+
+      <!-- PEV: previous employment verification -->
+      <div id="tab-pev" class="hidden p-5">
+        <p class="text-sm text-gray-500 mb-4">Log previous employment verification outcomes for each employer the driver listed.</p>
+        <div id="pevWrap" class="space-y-4"></div>
+        <p id="pevEmpty" class="hidden text-sm text-gray-400">No previous employers listed in the application yet.</p>
+      </div>
+
+      <!-- Activity log -->
+      <div id="tab-activity" class="hidden p-5">
+        <div class="flex items-center gap-3 mb-4">
+          <input id="noteInput" placeholder="Add a note…" class="field flex-1"/>
+          <button id="addNoteBtn" class="px-4 py-2 bg-accent-500 hover:bg-accent-600 text-white rounded-lg text-sm font-semibold">Add</button>
+        </div>
+        <div id="activityList" class="space-y-2"></div>
+      </div>
+
+      <!-- Documents -->
+      <div id="tab-documents" class="hidden p-5">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <div class="inline-flex rounded-lg bg-gray-100 p-0.5 text-sm">
+            <button id="docTabMain" class="px-3 py-1.5 rounded-md font-medium bg-white shadow-sm text-gray-800">Main (<span id="missingCount">?</span> missing)</button>
+            <button id="docTabOther" class="px-3 py-1.5 rounded-md font-medium text-gray-500">Other (<span id="otherCount">?</span>)</button>
+          </div>
+          <button id="telegramBtn" class="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 font-medium">Send to Telegram</button>
+        </div>
+        <div id="mainDocs" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3"></div>
+        <div id="otherDocs" class="hidden grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3"></div>
+      </div>
+
+    </div><!-- /tab panels -->
+  </div><!-- /main -->
+
+  <!-- Right sidebar (persistent across all tabs) -->
+  <aside class="w-72 flex-shrink-0 space-y-4">
+
+    <!-- Pipeline Journey -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
+      <h3 class="font-bold text-sm mb-3">Pipeline Journey</h3>
+      <div id="pipelineJourney" class="flex items-center gap-1 flex-wrap"></div>
+    </div>
+
+    <!-- Advance + Notes -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
+      <label class="lbl">Notes (optional)</label>
+      <textarea id="sideNotes" rows="3" placeholder="Add a note before advancing…" class="field resize-none mb-3"></textarea>
+      <button id="advanceBtn" class="w-full py-3 bg-accent-500 hover:bg-accent-600 text-white rounded-xl font-semibold text-sm transition-colors"></button>
+      <p id="advanceError" class="hidden text-xs text-red-600 mt-2"></p>
+    </div>
+
+    <!-- Consents card -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="font-bold text-sm">Consents</h3>
+        <span id="consentBadge" class="pill"></span>
+      </div>
+      <div id="consentDetail" class="text-xs text-gray-500 space-y-1"></div>
+    </div>
+
+    <!-- Application card -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="font-bold text-sm">Application</h3>
+        <span id="appBadge" class="pill"></span>
+      </div>
+      <div id="appCardDetail" class="text-xs text-gray-500 space-y-1"></div>
+      <div class="mt-2">
+        <div class="text-xs text-gray-400 mb-1">Completion</div>
+        <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
+          <div id="appProgress" class="h-full bg-accent-500 rounded-full transition-all" style="width:0%"></div>
+        </div>
+        <div id="appProgressPct" class="text-xs text-gray-500 mt-1"></div>
+      </div>
+    </div>
+
+  </aside>
+</div>
+
+<!-- File upload input (hidden) -->
+<input type="file" id="docUploadInput" class="hidden" accept="image/*,application/pdf"/>
+
+<script src="/candidate.js"></script>
+</body>
+</html>
