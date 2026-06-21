@@ -107,11 +107,31 @@ function AddCandidate({ onClose }: { onClose: () => void }) {
   const [form, setForm] = useState({ name: '', email: '', phone: '', owner: '' });
   const [msg, setMsg] = useState('');
 
-  const submit = () => {
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
     if (!form.name || !form.email) { setMsg('Name and email are required.'); return; }
+    setBusy(true);
+    // Optimistically add to the board, then create the real invite + link via the backend.
     s.addCandidate({ ...form, carrierId, ownerUserId: form.owner || undefined });
-    setMsg(`Added under ${s.carriers.find((c) => c.id === carrierId)?.name}. Application link sent under that company. // TODO: POST /api/candidates`);
-    setTimeout(onClose, 1500);
+    const company = s.carriers.find((c) => c.id === carrierId)?.name;
+    try {
+      const res = await fetch('/api/candidates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-token': localStorage.getItem('qh_admin') ?? '' },
+        body: JSON.stringify({ name: form.name, email: form.email, phone: form.phone, carrierId }),
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setMsg(`Added under ${company}. ${data.link ? 'Application link sent.' : 'Saved.'}`);
+      } else {
+        setMsg(`Added under ${company} (board only — backend returned ${res.status}).`);
+      }
+    } catch {
+      setMsg(`Added under ${company} (board only — backend unreachable).`);
+    } finally {
+      setBusy(false);
+      setTimeout(onClose, 1500);
+    }
   };
 
   return (
@@ -143,7 +163,7 @@ function AddCandidate({ onClose }: { onClose: () => void }) {
             </select>
             {msg && <div className="text-[12.5px] text-success mt-3">{msg}</div>}
             <div className="flex gap-2 mt-5">
-              <button onClick={submit} className="btn-primary flex-1">Add &amp; Send Link</button>
+              <button onClick={submit} disabled={busy} className="btn-primary flex-1 disabled:opacity-50">{busy ? 'Sending…' : 'Add & Send Link'}</button>
               {isSuper && <button onClick={() => setStep(1)} className="btn-ghost">Back</button>}
               <button onClick={onClose} className="btn-ghost">Cancel</button>
             </div>

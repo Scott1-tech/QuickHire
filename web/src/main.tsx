@@ -18,7 +18,10 @@ import People from '@/pages/People';
 import Departments from '@/pages/Departments';
 import Notifications from '@/pages/Notifications';
 import Inbox from '@/pages/Inbox';
-import Simple from '@/pages/Simple';
+import Compliance from '@/pages/Compliance';
+import Administration from '@/pages/Administration';
+import Research from '@/pages/Research';
+import Settings from '@/pages/Settings';
 import Login from '@/pages/Login';
 import DriverPortal from '@/pages/DriverPortal';
 
@@ -39,16 +42,16 @@ const router = createBrowserRouter([
   { path: '/carriers/:carrierId/hiring/:candidateId', element: <App><CandidateRecord /></App> },
   { path: '/carriers/:carrierId/trucks', element: <App><Trucks /></App> },
   { path: '/carriers/:carrierId/trucks/:truckId', element: <App><TruckRecord /></App> },
-  { path: '/carriers/:carrierId/compliance', element: <App><Simple title="Compliance" /></App> },
-  { path: '/carriers/:carrierId/administration', element: <App><Simple title="Administration" /></App> },
+  { path: '/carriers/:carrierId/compliance', element: <App><Compliance /></App> },
+  { path: '/carriers/:carrierId/administration', element: <App><Administration /></App> },
   { path: '/employees', element: <App><People kind="employee" /></App> },
   { path: '/dispatchers', element: <App><People kind="dispatcher" /></App> },
   { path: '/departments', element: <App><Departments /></App> },
   { path: '/notifications', element: <App><Notifications /></App> },
   { path: '/inbox', element: <App><Inbox /></App> },
   { path: '/tasks', element: <App><Departments /></App> },
-  { path: '/research', element: <App><Simple title="Research" /></App> },
-  { path: '/settings', element: <App><Simple title="Settings" /></App> },
+  { path: '/research', element: <App><Research /></App> },
+  { path: '/settings', element: <App><Settings /></App> },
   { path: '*', element: <Navigate to="/dashboard" replace /> },
 ], { basename: '/app' });
 
