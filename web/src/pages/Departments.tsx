@@ -5,17 +5,26 @@ import { TASKS } from '@/data/mock';
 import type { Task, TaskStatus } from '@/types';
 
 const COLUMNS: TaskStatus[] = ['TO DO', 'IN PROGRESS', 'REVIEW NEEDED', 'LONG-TERM', 'COMPLETE'];
-const SPACES = ['Safety', 'HR', 'Dispatch', 'Accounting', 'Claims', 'ELD', 'Driver Relations'];
+const SPACES = ['Recruiting', 'Safety', 'Driver Relations'];
 const PRIORITY_COLOR: Record<string, string> = { Urgent: 'text-danger', High: 'text-warn', Normal: 'text-muted' };
 
 export default function Departments() {
   const s = useStore();
-  const [space, setSpace] = useState('Driver Relations');
+  const [space, setSpace] = useState('Recruiting');
   const [tasks, setTasks] = useState<Task[]>(TASKS.filter((t) => t.carrierId === s.currentCarrierId));
   const [open, setOpen] = useState<Task | null>(null);
   const [drag, setDrag] = useState<string | null>(null);
+  const [adding, setAdding] = useState<TaskStatus | null>(null);
+  const [draft, setDraft] = useState('');
 
   const move = (id: string, status: TaskStatus) => setTasks((p) => p.map((t) => t.id === id ? { ...t, status } : t));
+
+  const addTask = (status: TaskStatus) => {
+    if (!draft.trim()) { setAdding(null); return; }
+    setTasks((p) => [...p, { id: 'tk' + Date.now(), carrierId: s.currentCarrierId, title: draft.trim(), status, priority: 'Normal', comments: 0, attachments: 0 }]);
+    setDraft('');
+    setAdding(null);
+  };
 
   return (
     <>
@@ -50,7 +59,19 @@ export default function Departments() {
                       {t.assignee && <div className="w-6 h-6 rounded-full bg-primary text-white text-[10px] grid place-items-center mt-2">{t.assignee}</div>}
                     </div>
                   ))}
-                  <button className="text-[12px] text-muted text-left px-2 py-1 hover:text-primary">＋ Add Task</button>
+                  {adding === col ? (
+                    <div className="card p-2">
+                      <textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addTask(col); } if (e.key === 'Escape') { setAdding(null); setDraft(''); } }}
+                        placeholder="Task title…" className="input h-14 resize-none text-[13px]" />
+                      <div className="flex gap-1.5 mt-1.5">
+                        <button onClick={() => addTask(col)} className="btn-primary py-1 px-2.5 text-[12px]">Add</button>
+                        <button onClick={() => { setAdding(null); setDraft(''); }} className="btn-ghost py-1 px-2.5 text-[12px]">Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button onClick={() => { setAdding(col); setDraft(''); }} className="text-[12px] text-muted text-left px-2 py-1 hover:text-primary transition">＋ Add Task</button>
+                  )}
                 </div>
               </div>
             );

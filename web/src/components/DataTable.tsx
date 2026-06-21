@@ -1,5 +1,10 @@
 import { useMemo, useState, type ReactNode } from 'react';
 
+function toCsvValue(v: unknown): string {
+  const s = v == null ? '' : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
 export interface Column<T> {
   key: string;
   header: string;
@@ -27,12 +32,34 @@ export default function DataTable<T>({
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(0);
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [colOpen, setColOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterCol, setFilterCol] = useState('');
+  const [filterVal, setFilterVal] = useState('');
   const perPage = 20;
+
+  const visibleCols = columns.filter((c) => !hidden.has(c.key));
+
+  const exportCsv = () => {
+    const header = visibleCols.map((c) => toCsvValue(c.header)).join(',');
+    const lines = filtered.map((row) =>
+      visibleCols.map((c) => toCsvValue((row as any)[c.key])).join(','));
+    const blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'export.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const filtered = useMemo(() => {
     const ql = q.toLowerCase().trim();
     let r = rows;
     if (ql) r = r.filter((row) => JSON.stringify(row).toLowerCase().includes(ql));
+    if (filterCol && filterVal.trim()) {
+      const fv = filterVal.toLowerCase().trim();
+      r = r.filter((row) => String((row as any)[filterCol] ?? '').toLowerCase().includes(fv));
+    }
     if (sortKey) {
       const col = columns.find((c) => c.key === sortKey);
       if (col?.sortValue) {
@@ -44,7 +71,7 @@ export default function DataTable<T>({
       }
     }
     return r;
-  }, [rows, q, sortKey, sortDir, columns]);
+  }, [rows, q, sortKey, sortDir, columns, filterCol, filterVal]);
 
   const pageRows = filtered.slice(page * perPage, page * perPage + perPage);
   const pages = Math.max(1, Math.ceil(filtered.length / perPage));
@@ -69,9 +96,38 @@ export default function DataTable<T>({
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <input value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} placeholder={searchPlaceholder}
           className="input max-w-[280px]" />
-        <button className="btn-ghost">Filter</button>
-        <button className="btn-ghost">Columns</button>
-        <button className="btn-ghost">Export</button>
+        <div className="relative">
+          <button onClick={() => { setFilterOpen((o) => !o); setColOpen(false); }} className={`btn-ghost ${filterCol && filterVal ? 'border-primary text-primary' : ''}`}>Filter{filterCol && filterVal ? ' •' : ''}</button>
+          {filterOpen && (
+            <div className="absolute left-0 mt-1 w-64 bg-surface border border-line rounded-xl p-3 z-30 shadow-pop">
+              <label className="field-label">Column</label>
+              <select value={filterCol} onChange={(e) => setFilterCol(e.target.value)} className="input mb-2">
+                <option value="">Select column…</option>
+                {columns.map((c) => <option key={c.key} value={c.key}>{c.header}</option>)}
+              </select>
+              <label className="field-label">Contains</label>
+              <input value={filterVal} onChange={(e) => { setFilterVal(e.target.value); setPage(0); }} className="input" placeholder="Value…" />
+              <div className="flex gap-2 mt-3">
+                <button onClick={() => setFilterOpen(false)} className="btn-primary py-1.5 px-3 text-[12px] flex-1">Apply</button>
+                <button onClick={() => { setFilterCol(''); setFilterVal(''); }} className="btn-ghost py-1.5 px-3 text-[12px]">Clear</button>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="relative">
+          <button onClick={() => { setColOpen((o) => !o); setFilterOpen(false); }} className="btn-ghost">Columns</button>
+          {colOpen && (
+            <div className="absolute left-0 mt-1 w-52 bg-surface border border-line rounded-xl p-2 z-30 shadow-pop max-h-72 overflow-y-auto">
+              {columns.map((c) => (
+                <label key={c.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-[var(--surface-hover)] text-[13px] text-ink cursor-pointer">
+                  <input type="checkbox" checked={!hidden.has(c.key)} onChange={() => setHidden((prev) => { const n = new Set(prev); n.has(c.key) ? n.delete(c.key) : n.add(c.key); return n; })} className="accent-[#6366F1]" />
+                  {c.header}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+        <button onClick={exportCsv} className="btn-ghost">Export</button>
         <div className="ml-auto flex gap-2">{toolbarRight}</div>
       </div>
 
@@ -79,7 +135,7 @@ export default function DataTable<T>({
         <table className="w-full border-collapse">
           <thead>
             <tr className="border-b border-line">
-              {columns.map((c) => (
+              {visibleCols.map((c) => (
                 <th key={c.key} style={{ width: c.width }}
                   onClick={() => c.sortValue && toggleSort(c.key)}
                   className={`text-left px-4 py-3 text-[11px] font-bold text-muted uppercase ${c.sortValue ? 'cursor-pointer select-none' : ''}`}>
@@ -91,7 +147,7 @@ export default function DataTable<T>({
           <tbody>
             {pageRows.map((row) => (
               <tr key={rowKey(row)} className="border-b border-line/60 hover:bg-[var(--surface-hover)]">
-                {columns.map((c) => (
+                {visibleCols.map((c) => (
                   <td key={c.key} className="px-4 py-3 text-[13px] text-ink">
                     {c.render ? c.render(row) : (row as any)[c.key]}
                   </td>
@@ -99,7 +155,7 @@ export default function DataTable<T>({
               </tr>
             ))}
             {pageRows.length === 0 && (
-              <tr><td colSpan={columns.length} className="px-4 py-10 text-center text-sm text-muted">No records.</td></tr>
+              <tr><td colSpan={visibleCols.length} className="px-4 py-10 text-center text-sm text-muted">No records.</td></tr>
             )}
           </tbody>
         </table>

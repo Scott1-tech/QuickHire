@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 
 const PILL_MAP: Record<string, string> = {
   // stages
@@ -33,15 +34,25 @@ export function StatCard({ icon, value, label, tint }: { icon: string; value: Re
 }
 
 export function PageHeader({ crumbs, actions }: { crumbs: { label: string; to?: string }[]; actions?: ReactNode }) {
+  const nav = useNavigate();
   return (
     <div className="flex items-center gap-3 px-6 py-3.5 border-b border-line bg-surface sticky top-0 z-10">
+      <button onClick={() => nav(-1)} title="Back"
+        className="grid place-items-center w-7 h-7 rounded-lg text-muted hover:bg-[var(--surface-hover)] hover:text-ink transition">‹</button>
       <nav className="flex items-center gap-1.5 text-sm">
-        {crumbs.map((c, i) => (
-          <span key={i} className="flex items-center gap-1.5">
-            {i > 0 && <span className="text-muted">›</span>}
-            <span className={i === crumbs.length - 1 ? 'font-semibold text-ink' : 'text-muted'}>{c.label}</span>
-          </span>
-        ))}
+        {crumbs.map((c, i) => {
+          const last = i === crumbs.length - 1;
+          return (
+            <span key={i} className="flex items-center gap-1.5">
+              {i > 0 && <span className="text-muted">›</span>}
+              {c.to && !last ? (
+                <Link to={c.to} className="text-muted hover:text-primary transition">{c.label}</Link>
+              ) : (
+                <span className={last ? 'font-semibold text-ink' : 'text-muted'}>{c.label}</span>
+              )}
+            </span>
+          );
+        })}
       </nav>
       <div className="flex-1" />
       {actions}

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useStore } from '@/store';
 import { PageHeader, Pill, Empty, timeAgo } from '@/ui';
 import { CHECKLIST_TEMPLATE, DOC_TYPES_MAIN } from '@/data/mock';
@@ -8,21 +8,43 @@ import { STAGES, type ChecklistStep, type Stage } from '@/types';
 const TABS = ['Pipeline', 'Application', 'PEV', 'Activity', 'Documents'];
 const GROUPS: ChecklistStep['group'][] = ['Compliance & Eligibility', 'Risk Screening', 'Health & Safety', 'Employment Setup'];
 
+const RECRUITERS: Record<string, string> = { u1: 'Nina Patel', u2: 'Dana Reed', u3: 'Sam Pike' };
+
+interface Note { author: string; time: string; text: string; }
+
 export default function CandidateRecord() {
   const s = useStore();
+  const nav = useNavigate();
   const { candidateId } = useParams();
   const [tab, setTab] = useState('Pipeline');
   const [steps, setSteps] = useState<ChecklistStep[]>(() => CHECKLIST_TEMPLATE.map((x) => ({ ...x })));
   const [expanded, setExpanded] = useState<string | null>('clearinghouse');
   const [showTruck, setShowTruck] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [action, setAction] = useState<'Note' | 'Email' | 'Call' | 'Task' | null>(null);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [autoAdvance, setAutoAdvance] = useState(true);
   const c = s.candidates.find((x) => x.id === candidateId);
-  if (!c) return <><PageHeader crumbs={[{ label: 'Hiring' }]} /><Empty icon="🚫" title="Candidate not found" /></>;
 
   const done = steps.filter((x) => x.status === 'complete').length;
-  const nextStage: Stage | null = STAGES[STAGES.indexOf(c.stage) + 1] ?? null;
+  const allDone = c ? done === steps.length : false;
+  const nextStage: Stage | null = c ? (STAGES[STAGES.indexOf(c.stage) + 1] ?? null) : null;
+  const recruiter = c?.ownerUserId ? RECRUITERS[c.ownerUserId] ?? c.ownerUserId : 'Unassigned';
+
+  // Pipeline auto-switch: when every checklist step is complete, advance the stage automatically.
+  useEffect(() => {
+    if (autoAdvance && c && allDone && nextStage && nextStage !== 'Onboarding') {
+      s.moveCandidate(c.id, nextStage);
+    }
+  }, [allDone]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!c) return <><PageHeader crumbs={[{ label: 'Hiring' }]} /><Empty icon="🚫" title="Candidate not found" /></>;
 
   const toggle = (id: string) =>
     setSteps((prev) => prev.map((x) => x.id === id ? { ...x, status: x.status === 'complete' ? 'ready' : 'complete' } : x));
+
+  const addNote = (text: string) =>
+    setNotes((prev) => [{ author: s.role === 'Super Admin' ? recruiter : s.role, time: new Date().toISOString(), text }, ...prev]);
 
   const advance = () => {
     if (nextStage === 'Onboarding') { setShowTruck(true); return; }
@@ -31,23 +53,53 @@ export default function CandidateRecord() {
 
   return (
     <>
-      <PageHeader crumbs={[{ label: 'Carriers' }, { label: s.currentCarrier.name }, { label: 'Hiring', to: `/carriers/${c.carrierId}/hiring` }, { label: 'Candidate Details' }]}
-        actions={<div className="flex gap-2"><button className="btn-ghost">Edit</button><button className="btn-ghost text-danger">Archive</button></div>} />
+      <PageHeader crumbs={[{ label: 'Carriers', to: '/carriers' }, { label: s.currentCarrier.name, to: `/carriers/${c.carrierId}` }, { label: 'Hiring', to: `/carriers/${c.carrierId}/hiring` }, { label: 'Candidate Details' }]}
+        actions={<div className="flex gap-2"><button onClick={() => setShowEdit(true)} className="btn-ghost">Edit</button><button onClick={() => { if (confirm(`Archive ${c.name}?`)) nav(`/carriers/${c.carrierId}/hiring`); }} className="btn-ghost text-danger">Archive</button></div>} />
       <div className="flex-1 overflow-y-auto p-6">
         <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr_320px] gap-5">
           {/* Left rail */}
           <div className="card p-5 h-fit">
             <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary to-purple grid place-items-center text-xl font-bold text-white mb-3">{c.name[0]}</div>
             <div className="text-lg font-extrabold text-ink uppercase">{c.name}</div>
+            {/* Recruiter / who is hiring */}
+            <div className="text-[12px] text-muted mt-1 flex items-center gap-1.5">
+              <span className="w-4 h-4 rounded-full bg-primary-light text-primary grid place-items-center text-[9px] font-bold">{recruiter[0]}</span>
+              Recruiter: <span className="font-semibold text-ink">{recruiter}</span>
+            </div>
             <div className="mt-2 mb-3"><Pill kind={c.stage}>{c.stage}</Pill></div>
-            <div className="text-[13px] text-muted">{c.email}</div>
-            <div className="text-[13px] text-muted mb-4">{c.phone}</div>
+
+            {/* Driver info block */}
+            <div className="bg-bg border border-line rounded-lg p-3 mb-4 space-y-1.5">
+              <div className="flex justify-between text-[12.5px]"><span className="text-muted">Full name</span><span className="font-semibold text-ink">{c.name}</span></div>
+              <div className="flex justify-between text-[12.5px]"><span className="text-muted">Phone</span><a href={`tel:${c.phone}`} className="font-semibold text-info">{c.phone ?? '—'}</a></div>
+              <div className="flex justify-between text-[12.5px] gap-2"><span className="text-muted">Email</span><a href={`mailto:${c.email}`} className="font-semibold text-info truncate">{c.email}</a></div>
+            </div>
+
             <div className="text-[11px] font-bold text-muted uppercase mb-2">Eligibility</div>
             {[['MVR', 'not_prohibited'], ['BGC', 'not_prohibited'], ['Clearinghouse', 'not_prohibited']].map(([k, v]) => (
               <div key={k} className="flex justify-between py-1.5 text-[12.5px]"><span className="text-muted">{k}</span><span className="text-success font-semibold">{v}</span></div>
             ))}
-            <div className="flex gap-1.5 mt-4 flex-wrap">
-              {['Note', 'Email', 'Call', 'Task'].map((a) => <button key={a} className="text-[11px] px-2.5 py-1 rounded border border-line hover:border-primary">{a}</button>)}
+            <div className="grid grid-cols-4 gap-1.5 mt-4">
+              {(['Note', 'Email', 'Call', 'Task'] as const).map((a) => (
+                <button key={a} onClick={() => setAction(a)} className="text-[11px] px-2 py-1.5 rounded-lg border border-line hover:border-primary hover:text-primary hover:-translate-y-0.5 transition-all">{a}</button>
+              ))}
+            </div>
+
+            {/* Notes log */}
+            <div className="mt-5">
+              <div className="text-[11px] font-bold text-muted uppercase mb-2">Notes ({notes.length})</div>
+              {notes.length === 0 && <div className="text-[12px] text-muted">No notes yet. Use “Note” above to add one.</div>}
+              <div className="flex flex-col gap-2">
+                {notes.map((n, i) => (
+                  <div key={i} className="bg-bg border border-line rounded-lg p-2.5">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <span className="text-[11px] font-bold text-ink">{n.author}</span>
+                      <span className="text-[10px] text-muted">· {timeAgo(n.time)}</span>
+                    </div>
+                    <div className="text-[12.5px] text-ink whitespace-pre-wrap">{n.text}</div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -126,6 +178,23 @@ export default function CandidateRecord() {
               </div>
               <textarea placeholder="Notes (optional)" className="input mt-4 h-20 resize-none" />
               {nextStage && <button onClick={advance} className="btn-primary w-full mt-3">Advance to {nextStage}</button>}
+              {!nextStage && <div className="text-[12px] text-success font-semibold mt-3 text-center">✔ Final stage reached</div>}
+            </div>
+
+            {/* Settings */}
+            <div className="card p-5">
+              <div className="text-base font-bold text-ink mb-3">⚙ Settings</div>
+              <label className="flex items-center justify-between text-[13px] text-ink py-1.5">
+                <span>Auto-advance pipeline</span>
+                <input type="checkbox" checked={autoAdvance} onChange={(e) => setAutoAdvance(e.target.checked)} className="w-4 h-4 accent-[#6366F1]" />
+              </label>
+              <p className="text-[11.5px] text-muted mb-3">Move to the next stage automatically when every checklist step is complete.</p>
+              <label className="field-label">Reassign recruiter</label>
+              <select defaultValue={c.ownerUserId ?? ''} className="input mb-3">
+                <option value="">Unassigned</option>
+                {Object.entries(RECRUITERS).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+              </select>
+              <button onClick={() => setShowEdit(true)} className="btn-ghost w-full py-2 text-[13px]">Edit candidate details</button>
             </div>
 
             <div className="card p-5">
@@ -150,7 +219,63 @@ export default function CandidateRecord() {
       </div>
 
       {showTruck && <SelectTruck onClose={() => setShowTruck(false)} onPick={(tid) => { s.assignTruck(c.id, tid); s.moveCandidate(c.id, 'Onboarding'); setShowTruck(false); }} />}
+      {action && <ActionModal kind={action} candidate={c} onClose={() => setAction(null)} onNote={addNote} />}
+      {showEdit && <EditCandidate name={c.name} email={c.email} phone={c.phone ?? ''} onClose={() => setShowEdit(false)} />}
     </>
+  );
+}
+
+function ActionModal({ kind, candidate, onClose, onNote }: { kind: 'Note' | 'Email' | 'Call' | 'Task'; candidate: { name: string; email: string; phone?: string }; onClose: () => void; onNote: (t: string) => void }) {
+  const [text, setText] = useState('');
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { ref.current?.focus(); }, []);
+
+  const title = { Note: 'Add Note', Email: `Email ${candidate.name}`, Call: `Call ${candidate.name}`, Task: 'Create Task' }[kind];
+  const placeholder = { Note: 'Write a note…', Email: 'Message body…', Call: 'Call notes / outcome…', Task: 'Task description…' }[kind];
+
+  const submit = () => {
+    if (!text.trim()) return;
+    if (kind === 'Note') onNote(text.trim());
+    else if (kind === 'Email') { onNote(`📧 Emailed: ${text.trim()}`); window.location.href = `mailto:${candidate.email}?body=${encodeURIComponent(text)}`; }
+    else if (kind === 'Call') onNote(`📞 Call logged: ${text.trim()}`);
+    else onNote(`✓ Task created: ${text.trim()}`);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 grid place-items-center p-4" onClick={onClose}>
+      <div className="card p-6 w-[440px] max-w-full shadow-pop" onClick={(e) => e.stopPropagation()}>
+        <div className="text-lg font-extrabold text-ink mb-1">{title}</div>
+        {kind === 'Call' && <a href={`tel:${candidate.phone}`} className="text-[13px] text-info font-semibold">{candidate.phone}</a>}
+        {kind === 'Email' && <div className="text-[13px] text-muted mb-2">{candidate.email}</div>}
+        <textarea ref={ref} value={text} onChange={(e) => setText(e.target.value)} placeholder={placeholder} className="input h-28 resize-none mt-3" />
+        <div className="flex gap-2 mt-4">
+          <button onClick={submit} className="btn-primary flex-1">{kind === 'Email' ? 'Send & Log' : kind === 'Call' ? 'Log Call' : 'Save'}</button>
+          <button onClick={onClose} className="btn-ghost">Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditCandidate({ name, email, phone, onClose }: { name: string; email: string; phone: string; onClose: () => void }) {
+  const [form, setForm] = useState({ name, email, phone });
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 grid place-items-center p-4" onClick={onClose}>
+      <div className="card p-6 w-[440px] max-w-full shadow-pop" onClick={(e) => e.stopPropagation()}>
+        <div className="text-lg font-extrabold text-ink mb-4">Edit Candidate</div>
+        {(['name', 'email', 'phone'] as const).map((f) => (
+          <div key={f} className="mb-3">
+            <label className="field-label capitalize">{f}</label>
+            <input value={form[f]} onChange={(e) => setForm({ ...form, [f]: e.target.value })} className="input" />
+          </div>
+        ))}
+        <div className="flex gap-2 mt-4">
+          <button onClick={onClose} className="btn-primary flex-1">Save changes</button>
+          <button onClick={onClose} className="btn-ghost">Cancel</button>
+        </div>
+      </div>
+    </div>
   );
 }
 

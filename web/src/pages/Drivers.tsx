@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useStore } from '@/store';
 import { PageHeader, Pill } from '@/ui';
 import DataTable, { type Column } from '@/components/DataTable';
@@ -15,9 +15,13 @@ const TABS = [
 
 export default function Drivers() {
   const s = useStore();
+  const nav = useNavigate();
+  const [section, setSection] = useState<'active' | 'hiring'>('active');
   const [tab, setTab] = useState('active');
+  const [showAdd, setShowAdd] = useState(false);
 
   const rows = s.drivers.filter((d) => tab === 'all' ? true : tab === 'vacation' ? d.status === 'vacation' : d.status === tab);
+  const hiring = s.candidates;
 
   const cols: Column<Driver>[] = [
     { key: 'name', header: 'Name', sortValue: (d) => d.name, render: (d) => (
@@ -27,7 +31,7 @@ export default function Drivers() {
     { key: 'type', header: 'Type', render: (d) => d.type === 'company' ? 'Company' : 'Owner Operator' },
     { key: 'mc', header: 'MC', render: (d) => d.mc ?? '—' },
     { key: 'truck', header: 'Truck', render: (d) => d.assignedTruckId ? <Link to={`/carriers/${d.carrierId}/trucks/${d.assignedTruckId}`} className="text-info">#{s.trucks.find((t) => t.id === d.assignedTruckId)?.unit ?? '—'}</Link> : <span className="text-muted">—</span> },
-    { key: 'dispatcher', header: 'Dispatcher', render: (d) => d.dispatcher ?? '—' },
+    { key: 'dispatcher', header: 'Recruiter', render: (d) => d.dispatcher ?? '—' },
     { key: 'score', header: 'Score', sortValue: (d) => d.score },
     { key: 'license', header: 'License #' },
     { key: 'state', header: 'State' },
@@ -37,17 +41,85 @@ export default function Drivers() {
 
   return (
     <>
-      <PageHeader crumbs={[{ label: 'Carriers' }, { label: s.currentCarrier.name }, { label: 'Drivers' }]} />
+      <PageHeader crumbs={[{ label: 'Carriers', to: '/carriers' }, { label: s.currentCarrier.name, to: `/carriers/${s.currentCarrierId}` }, { label: 'Drivers' }]} />
       <div className="flex-1 overflow-y-auto p-6">
-        <DataTable rows={rows} columns={cols} rowKey={(d) => d.id} tabs={TABS} activeTab={tab} onTab={setTab}
-          searchPlaceholder="Search by name or license…"
-          toolbarRight={<button className="btn-primary">＋ Add Driver</button>}
-          statusChips={[
-            { label: 'AVAILABLE', count: s.drivers.filter((d) => d.driverStatus === 'Available').length, color: '#16A34A' },
-            { label: 'ON-TRIP', count: s.drivers.filter((d) => d.driverStatus === 'On-trip').length, color: '#2563EB' },
-            { label: 'HOME', count: s.drivers.filter((d) => d.driverStatus === 'Home').length, color: '#64748B' },
-          ]} />
+        {/* Section switch: active drivers vs drivers still in hiring */}
+        <div className="inline-flex gap-1 bg-bg border border-line rounded-[10px] p-1 mb-4">
+          <button onClick={() => setSection('active')} className={`px-4 py-1.5 text-[13px] font-semibold rounded-lg transition ${section === 'active' ? 'bg-primary-light text-primary' : 'text-muted'}`}>
+            Active Drivers <span className="opacity-60">{s.drivers.length}</span>
+          </button>
+          <button onClick={() => setSection('hiring')} className={`px-4 py-1.5 text-[13px] font-semibold rounded-lg transition ${section === 'hiring' ? 'bg-primary-light text-primary' : 'text-muted'}`}>
+            Hiring Drivers <span className="opacity-60">{hiring.length}</span>
+          </button>
+        </div>
+
+        {section === 'active' ? (
+          <DataTable rows={rows} columns={cols} rowKey={(d) => d.id} tabs={TABS} activeTab={tab} onTab={setTab}
+            searchPlaceholder="Search by name or license…"
+            toolbarRight={<button onClick={() => setShowAdd(true)} className="btn-primary">＋ Add Driver</button>}
+            statusChips={[
+              { label: 'AVAILABLE', count: s.drivers.filter((d) => d.driverStatus === 'Available').length, color: '#16A34A' },
+              { label: 'ON-TRIP', count: s.drivers.filter((d) => d.driverStatus === 'On-trip').length, color: '#2563EB' },
+              { label: 'HOME', count: s.drivers.filter((d) => d.driverStatus === 'Home').length, color: '#64748B' },
+            ]} />
+        ) : (
+          <div className="card overflow-hidden shadow-card">
+            <table className="w-full border-collapse">
+              <thead><tr className="border-b border-line">
+                {['Name', 'Stage', 'Email', 'Phone', 'Application'].map((h) => <th key={h} className="text-left px-4 py-3 text-[11px] font-bold text-muted uppercase">{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {hiring.map((c) => (
+                  <tr key={c.id} onClick={() => nav(`/carriers/${c.carrierId}/hiring/${c.id}`)} className="border-b border-line/60 hover:bg-[var(--surface-hover)] cursor-pointer">
+                    <td className="px-4 py-3 text-[13px] font-bold text-info uppercase">{c.name}</td>
+                    <td className="px-4 py-3"><Pill kind={c.stage}>{c.stage}</Pill></td>
+                    <td className="px-4 py-3 text-[13px] text-muted">{c.email}</td>
+                    <td className="px-4 py-3 text-[13px] text-muted">{c.phone ?? '—'}</td>
+                    <td className="px-4 py-3 text-[13px] text-muted">{c.appProgress}%</td>
+                  </tr>
+                ))}
+                {hiring.length === 0 && <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-muted">No candidates in hiring.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
+
+      {showAdd && <AddDriver onClose={() => setShowAdd(false)} />}
     </>
+  );
+}
+
+function AddDriver({ onClose }: { onClose: () => void }) {
+  const s = useStore();
+  const [form, setForm] = useState({ name: '', license: '', state: '', phone: '', email: '', type: 'company' });
+  const [msg, setMsg] = useState('');
+  const save = () => {
+    if (!form.name || !form.license) { setMsg('Name and license are required.'); return; }
+    setMsg(`${form.name.toUpperCase()} added to ${s.currentCarrier.name}.`);
+    setTimeout(onClose, 1200);
+  };
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 grid place-items-center p-4" onClick={onClose}>
+      <div className="card p-6 w-[460px] max-w-full shadow-pop" onClick={(e) => e.stopPropagation()}>
+        <div className="text-lg font-extrabold text-ink mb-4">Add Driver</div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2"><label className="field-label">Driver Name *</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input" /></div>
+          <div><label className="field-label">License # *</label><input value={form.license} onChange={(e) => setForm({ ...form, license: e.target.value })} className="input" /></div>
+          <div><label className="field-label">State</label><input value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} className="input" /></div>
+          <div><label className="field-label">Phone</label><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="input" /></div>
+          <div><label className="field-label">Email</label><input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="input" /></div>
+          <div className="col-span-2"><label className="field-label">Type</label>
+            <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="input">
+              <option value="company">Company</option><option value="owner-operator">Owner Operator</option>
+            </select></div>
+        </div>
+        {msg && <div className="text-[12.5px] text-success mt-3">{msg}</div>}
+        <div className="flex gap-2 mt-5">
+          <button onClick={save} className="btn-primary flex-1">Save Driver</button>
+          <button onClick={onClose} className="btn-ghost">Cancel</button>
+        </div>
+      </div>
+    </div>
   );
 }
