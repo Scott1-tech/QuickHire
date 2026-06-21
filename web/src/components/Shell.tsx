@@ -113,7 +113,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <NavItem to={link('hiring')} icon="🧭" label="Hiring" />
           <NavItem to={link('drivers')} icon="🚚" label="Drivers" />
           <NavItem to={link('trucks')} icon="🚛" label="Trucks" />
-          <NavItem to={link('compliance')} icon="📋" label="Compliance" />
           {can(s.role, 'people') && (
             <NavItem to="/employees" icon="👥" label="Employees" />
           )}

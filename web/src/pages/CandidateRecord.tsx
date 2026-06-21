@@ -34,17 +34,6 @@ const ACTIVITY_COLOR: Record<string, string> = {
   Stage: 'bg-[#F1F5F9] text-[#64748B]',
 };
 
-interface CdlFields {
-  truckNumber: string;
-  mvr: string;
-  drugScheduled: string;
-  drugTaken: string;
-  readyToStart: string;
-  flightBooked: string;
-  clearinghouse: string;
-  companyName: string;
-}
-
 export default function CandidateRecord() {
   const s = useStore();
   const nav = useNavigate();
@@ -57,8 +46,6 @@ export default function CandidateRecord() {
   const [action, setAction] = useState<'Note' | 'Email' | 'Call' | 'Task' | null>(null);
   const [activity, setActivity] = useState<Activity[]>(INITIAL_ACTIVITY);
   const [autoAdvance, setAutoAdvance] = useState(true);
-  const [cdl, setCdl] = useState<CdlFields>({ truckNumber: '', mvr: '', drugScheduled: '', drugTaken: '', readyToStart: '', flightBooked: '', clearinghouse: '', companyName: '' });
-  const [editCdl, setEditCdl] = useState(false);
   const [activityFilter, setActivityFilter] = useState<'all' | 'Note' | 'Email' | 'Call' | 'Task'>('all');
 
   const c = s.candidates.find((x) => x.id === candidateId);
@@ -92,17 +79,6 @@ export default function CandidateRecord() {
   };
 
   const filteredActivity = activityFilter === 'all' ? activity : activity.filter((a) => a.type === activityFilter);
-
-  const CDL_FIELDS: { key: keyof CdlFields; label: string }[] = [
-    { key: 'truckNumber', label: 'Truck number' },
-    { key: 'mvr', label: 'MVR / PSP' },
-    { key: 'drugScheduled', label: 'Drug test scheduled' },
-    { key: 'drugTaken', label: 'Drug test taken' },
-    { key: 'readyToStart', label: 'Ready to start' },
-    { key: 'flightBooked', label: 'Flight booked' },
-    { key: 'clearinghouse', label: 'Clearinghouse' },
-    { key: 'companyName', label: 'Company name' },
-  ];
 
   return (
     <>
@@ -152,27 +128,6 @@ export default function CandidateRecord() {
                   <span className="text-muted">{k}</span><span className="text-success font-semibold">{v}</span>
                 </div>
               ))}
-            </div>
-
-            {/* CDL / Deal fields */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-[10px] font-bold text-muted uppercase">About this deal</div>
-                <button onClick={() => setEditCdl((v) => !v)} className="text-[11px] text-primary hover:underline">{editCdl ? 'Done' : 'Edit'}</button>
-              </div>
-              <div className="space-y-1.5">
-                {CDL_FIELDS.map(({ key, label }) => (
-                  <div key={key} className="flex justify-between items-center text-[12.5px]">
-                    <span className="text-muted flex-shrink-0 mr-2">{label}</span>
-                    {editCdl ? (
-                      <input value={cdl[key]} onChange={(e) => setCdl((p) => ({ ...p, [key]: e.target.value }))}
-                        className="border border-line rounded px-1.5 py-0.5 text-[12px] text-ink bg-surface outline-none focus:border-primary w-[110px]" />
-                    ) : (
-                      <span className="font-medium text-ink truncate">{cdl[key] || '—'}</span>
-                    )}
-                  </div>
-                ))}
-              </div>
             </div>
 
             {/* Settings */}

@@ -18,7 +18,6 @@ import People from '@/pages/People';
 import Departments from '@/pages/Departments';
 import Notifications from '@/pages/Notifications';
 import Inbox from '@/pages/Inbox';
-import Compliance from '@/pages/Compliance';
 import Administration from '@/pages/Administration';
 import Research from '@/pages/Research';
 import Settings from '@/pages/Settings';
@@ -42,7 +41,6 @@ const router = createBrowserRouter([
   { path: '/carriers/:carrierId/hiring/:candidateId', element: <App><CandidateRecord /></App> },
   { path: '/carriers/:carrierId/trucks', element: <App><Trucks /></App> },
   { path: '/carriers/:carrierId/trucks/:truckId', element: <App><TruckRecord /></App> },
-  { path: '/carriers/:carrierId/compliance', element: <App><Compliance /></App> },
   { path: '/carriers/:carrierId/administration', element: <App><Administration /></App> },
   { path: '/employees', element: <App><People kind="employee" /></App> },
 
