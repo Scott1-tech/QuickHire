@@ -4,7 +4,6 @@ data/
 *.log
 .DS_Store
 
-# Web SPA build output (generated at deploy by `npm run build`)
-public/app/
+# Web SPA build deps (build output public/app/ is committed for reliable deploys)
 web/node_modules/
 web/dist/
