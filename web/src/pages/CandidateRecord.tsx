@@ -59,6 +59,30 @@ export default function CandidateRecord() {
   const [autoAdvance, setAutoAdvance] = useState(true);
   const [activityFilter, setActivityFilter] = useState<'all' | ActionKind>('all');
   const [edits, setEdits] = useState<{ name?: string; phone?: string; email?: string }>({});
+  const [leftW, setLeftW] = useState(320);
+  const [rightW, setRightW] = useState(320);
+
+  const startDrag = (side: 'left' | 'right') => (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = side === 'left' ? leftW : rightW;
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX;
+      const next = side === 'left' ? startW + dx : startW - dx;
+      const clamped = Math.min(620, Math.max(240, next));
+      side === 'left' ? setLeftW(clamped) : setRightW(clamped);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
 
   const c = s.candidates.find((x) => x.id === candidateId);
   const done = steps.filter((x) => x.status === 'complete').length;
@@ -99,10 +123,10 @@ export default function CandidateRecord() {
         actions={<div className="flex gap-2"><button onClick={() => setShowEdit(true)} className="btn-ghost">Edit</button><button onClick={() => { if (confirm(`Archive ${c.name}?`)) nav(`/carriers/${c.carrierId}/hiring`); }} className="btn-ghost text-danger">Archive</button></div>}
       />
 
-      <div className="flex-1 overflow-y-auto">
-        <div className="flex min-h-full">
+      <div className="flex-1 overflow-hidden">
+        <div className="flex h-full">
           {/* ── LEFT RAIL ───────────────────────────── */}
-          <aside className="w-[320px] flex-shrink-0 border-r border-line overflow-y-auto p-5 flex flex-col gap-4">
+          <aside style={{ width: leftW }} className="flex-shrink-0 overflow-y-auto p-5 flex flex-col gap-4">
             {/* Avatar + name */}
             <div>
               <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary to-purple grid place-items-center text-xl font-bold text-white mb-3">{c.name[0]}</div>
@@ -191,8 +215,10 @@ export default function CandidateRecord() {
             </div>
           </aside>
 
+          <Splitter onMouseDown={startDrag('left')} />
+
           {/* ── CENTER ──────────────────────────────── */}
-          <main className="flex-1 min-w-0 p-6">
+          <main className="flex-1 min-w-0 overflow-y-auto p-6">
             <div className="flex gap-1 mb-4 border-b border-line">
               {TABS.map((t) => (
                 <button key={t} onClick={() => setTab(t)}
@@ -254,8 +280,10 @@ export default function CandidateRecord() {
             {(tab === 'Application' || tab === 'PEV') && <Empty icon="📄" title={`${tab} tab`} sub="Connect to API to render submitted application data." />}
           </main>
 
+          <Splitter onMouseDown={startDrag('right')} />
+
           {/* ── RIGHT RAIL ──────────────────────────── */}
-          <aside className="w-[320px] flex-shrink-0 border-l border-line overflow-y-auto p-5 flex flex-col gap-4">
+          <aside style={{ width: rightW }} className="flex-shrink-0 overflow-y-auto p-5 flex flex-col gap-4">
             {/* Pipeline Journey */}
             <div className="card p-4">
               <div className="text-[11px] font-bold text-muted uppercase mb-3">Pipeline Journey</div>
@@ -295,6 +323,16 @@ export default function CandidateRecord() {
       {action && <ActionModal kind={action} candidate={c} recruiter={recruiter} onClose={() => setAction(null)} onLog={addActivity} />}
       {showEdit && <EditCandidate name={c.name} email={c.email} phone={c.phone ?? ''} onClose={() => setShowEdit(false)} />}
     </>
+  );
+}
+
+// Draggable vertical splitter between resizable panes.
+function Splitter({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => void }) {
+  return (
+    <div onMouseDown={onMouseDown} title="Drag to resize"
+      className="w-1.5 flex-shrink-0 cursor-col-resize bg-line/50 hover:bg-primary/60 active:bg-primary transition-colors relative group">
+      <span className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-line group-hover:bg-transparent" />
+    </div>
   );
 }
 
