@@ -45,7 +45,7 @@ const router = createBrowserRouter([
   { path: '/carriers/:carrierId/compliance', element: <App><Compliance /></App> },
   { path: '/carriers/:carrierId/administration', element: <App><Administration /></App> },
   { path: '/employees', element: <App><People kind="employee" /></App> },
-  { path: '/dispatchers', element: <App><People kind="dispatcher" /></App> },
+
   { path: '/departments', element: <App><Departments /></App> },
   { path: '/notifications', element: <App><Notifications /></App> },
   { path: '/inbox', element: <App><Inbox /></App> },

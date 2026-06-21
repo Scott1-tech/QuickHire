@@ -42,13 +42,13 @@ body {
   * { animation: none !important; transition: none !important; }
 }
 
-/* Status pill palette */
-.pill-green  { background:#DCFCE7; color:#15803D; }
+/* Status pill palette — exact master-spec tokens */
+.pill-green  { background:#DCFCE7; color:#16A34A; }
 .pill-amber  { background:#FEF3C7; color:#B45309; }
-.pill-red    { background:#FEE2E2; color:#B91C1C; }
-.pill-purple { background:#EDE9FE; color:#6D28D9; }
-.pill-slate  { background:#F1F5F9; color:#475569; }
-.pill-blue   { background:#DBEAFE; color:#1D4ED8; }
+.pill-red    { background:#FEE2E2; color:#DC2626; }
+.pill-purple { background:#EDE9FE; color:#8B5CF6; }
+.pill-slate  { background:#F1F5F9; color:#64748B; }
+.pill-blue   { background:#DBEAFE; color:#2563EB; }
 .dark .pill-green{background:#14321f;color:#86efac}
 .dark .pill-amber{background:#3a2c0a;color:#fcd34d}
 .dark .pill-red{background:#3b1416;color:#fca5a5}

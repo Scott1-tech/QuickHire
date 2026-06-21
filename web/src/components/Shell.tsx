@@ -3,8 +3,8 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useStore } from '@/store';
 import type { Role } from '@/types';
 
-const ROLES: Role[] = ['Recruiter', 'Dispatcher', 'Owner', 'Super Admin'];
-const ROLE_ICON: Record<Role, string> = { Recruiter: '📞', Dispatcher: '🎧', Owner: '👑', 'Super Admin': '🛡' };
+const ROLES: Role[] = ['Recruiter', 'Owner', 'Super Admin'];
+const ROLE_ICON: Record<Role, string> = { Recruiter: '📞', Owner: '👑', 'Super Admin': '🛡' };
 
 function can(role: Role, cap: 'research' | 'people' | 'admin' | 'multicarrier' | 'trucksEdit') {
   switch (cap) {
@@ -114,10 +114,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <NavItem to={link('drivers')} icon="🚚" label="Drivers" />
           <NavItem to={link('trucks')} icon="🚛" label="Trucks" />
           <NavItem to={link('compliance')} icon="📋" label="Compliance" />
-          {can(s.role, 'people') && <>
+          {can(s.role, 'people') && (
             <NavItem to="/employees" icon="👥" label="Employees" />
-            <NavItem to="/dispatchers" icon="🎧" label="Dispatchers" />
-          </>}
+          )}
           <NavItem to="/departments" icon="🗂" label="Departments" />
           {can(s.role, 'admin') && <NavItem to={link('administration')} icon="⚙" label="Administration" />}
 

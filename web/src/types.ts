@@ -1,4 +1,4 @@
-export type Role = 'Recruiter' | 'Dispatcher' | 'Owner' | 'Super Admin';
+export type Role = 'Recruiter' | 'Owner' | 'Super Admin';
 
 export type Stage = 'Lead' | 'Screening' | 'Background Check' | 'Offer' | 'Onboarding';
 export const STAGES: Stage[] = ['Lead', 'Screening', 'Background Check', 'Offer', 'Onboarding'];
