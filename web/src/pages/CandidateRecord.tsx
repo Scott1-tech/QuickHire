@@ -9,9 +9,11 @@ const TABS = ['Pipeline', 'Application', 'PEV', 'Documents'];
 const GROUPS: ChecklistStep['group'][] = ['Compliance & Eligibility', 'Risk Screening', 'Health & Safety', 'Employment Setup'];
 const RECRUITERS: Record<string, string> = { u1: 'Nina Patel', u2: 'Dana Reed', u3: 'Sam Pike' };
 
+type ActionKind = 'Note' | 'Email' | 'Call' | 'Task' | 'Meeting';
+
 interface Activity {
   id: string;
-  type: 'Note' | 'Email' | 'Call' | 'Task' | 'Stage';
+  type: ActionKind | 'Stage';
   author: string;
   time: string;
   text: string;
@@ -24,13 +26,22 @@ const INITIAL_ACTIVITY: Activity[] = [
   { id: 'a3', type: 'Stage', author: 'Dana Reed', time: new Date(Date.now() - 7200000).toISOString(), text: 'Stage changed to Screening.' },
 ];
 
-const ACTION_ICON: Record<string, string> = { Note: '✏', Email: '✉', Call: '📞', Task: '✓' };
-const ACTIVITY_ICON: Record<string, string> = { Note: '✏', Email: '✉', Call: '📞', Task: '✓', Stage: '🔀' };
+// HubSpot-style action rail: circular icon + label + hover tooltip
+const ACTIONS: { key: ActionKind; icon: string; label: string; tip: string }[] = [
+  { key: 'Note', icon: '📝', label: 'Note', tip: 'Create a note' },
+  { key: 'Email', icon: '✉️', label: 'Email', tip: 'Send an email' },
+  { key: 'Call', icon: '📞', label: 'Call', tip: 'Log a call' },
+  { key: 'Task', icon: '✅', label: 'Task', tip: 'Create a task' },
+  { key: 'Meeting', icon: '📅', label: 'Meeting', tip: 'Schedule a meeting' },
+];
+
+const ACTIVITY_ICON: Record<string, string> = { Note: '📝', Email: '✉️', Call: '📞', Task: '✅', Meeting: '📅', Stage: '🔀' };
 const ACTIVITY_COLOR: Record<string, string> = {
   Note: 'bg-primary-light text-primary',
   Email: 'bg-[#DBEAFE] text-[#2563EB]',
   Call: 'bg-[#DCFCE7] text-[#16A34A]',
   Task: 'bg-[#EDE9FE] text-[#8B5CF6]',
+  Meeting: 'bg-[#FEF3C7] text-[#B45309]',
   Stage: 'bg-[#F1F5F9] text-[#64748B]',
 };
 
@@ -43,10 +54,10 @@ export default function CandidateRecord() {
   const [expanded, setExpanded] = useState<string | null>('clearinghouse');
   const [showTruck, setShowTruck] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
-  const [action, setAction] = useState<'Note' | 'Email' | 'Call' | 'Task' | null>(null);
+  const [action, setAction] = useState<ActionKind | null>(null);
   const [activity, setActivity] = useState<Activity[]>(INITIAL_ACTIVITY);
   const [autoAdvance, setAutoAdvance] = useState(true);
-  const [activityFilter, setActivityFilter] = useState<'all' | 'Note' | 'Email' | 'Call' | 'Task'>('all');
+  const [activityFilter, setActivityFilter] = useState<'all' | ActionKind>('all');
 
   const c = s.candidates.find((x) => x.id === candidateId);
   const done = steps.filter((x) => x.status === 'complete').length;
@@ -102,14 +113,20 @@ export default function CandidateRecord() {
               <div className="mt-2"><Pill kind={c.stage}>{c.stage}</Pill></div>
             </div>
 
-            {/* Action icon buttons — HubSpot style */}
-            <div className="flex gap-2">
-              {(['Note', 'Email', 'Call', 'Task'] as const).map((a) => (
-                <button key={a} onClick={() => setAction(a)}
-                  className="flex-1 flex flex-col items-center gap-1 py-2 rounded-xl border border-line bg-bg hover:border-primary hover:bg-primary-light hover:text-primary transition-all text-muted">
-                  <span className="text-[18px]">{ACTION_ICON[a]}</span>
-                  <span className="text-[10px] font-semibold">{a}</span>
-                </button>
+            {/* Action icon buttons — HubSpot style: circular icon + label + hover tooltip */}
+            <div className="flex gap-1 justify-between">
+              {ACTIONS.map((a) => (
+                <div key={a.key} className="relative group flex flex-col items-center gap-1">
+                  <button onClick={() => setAction(a.key)}
+                    className="w-10 h-10 rounded-full border border-line bg-surface grid place-items-center text-[16px] hover:bg-primary-light hover:border-primary hover:-translate-y-0.5 active:scale-95 transition-all">
+                    <span>{a.icon}</span>
+                  </button>
+                  <span className="text-[10px] font-medium text-muted">{a.label}</span>
+                  {/* hover tooltip */}
+                  <span className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap bg-[#33475b] text-white text-[11px] font-medium px-2 py-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity z-20 shadow-pop">
+                    {a.tip}
+                  </span>
+                </div>
               ))}
             </div>
 
@@ -251,7 +268,7 @@ export default function CandidateRecord() {
 
               {/* Filter chips */}
               <div className="flex gap-1 px-3 pt-2.5 pb-1 flex-wrap">
-                {(['all', 'Note', 'Email', 'Call', 'Task'] as const).map((f) => (
+                {(['all', 'Note', 'Email', 'Call', 'Task', 'Meeting'] as const).map((f) => (
                   <button key={f} onClick={() => setActivityFilter(f)}
                     className={`text-[11px] px-2.5 py-0.5 rounded-full border transition ${activityFilter === f ? 'bg-primary text-white border-primary' : 'border-line text-muted hover:border-primary'}`}>
                     {f === 'all' ? 'All' : f}
@@ -290,7 +307,7 @@ export default function CandidateRecord() {
 }
 
 function ActionModal({ kind, candidate, recruiter, onClose, onLog }: {
-  kind: 'Note' | 'Email' | 'Call' | 'Task';
+  kind: ActionKind;
   candidate: { name: string; email: string; phone?: string };
   recruiter: string;
   onClose: () => void;
@@ -300,15 +317,15 @@ function ActionModal({ kind, candidate, recruiter, onClose, onLog }: {
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { ref.current?.focus(); }, []);
 
-  const TITLES: Record<string, string> = { Note: 'Add Note', Email: `Email ${candidate.name}`, Call: `Log Call`, Task: 'Create Task' };
-  const PLACEHOLDERS: Record<string, string> = { Note: 'Write a note…', Email: 'Message body…', Call: 'Call outcome & notes…', Task: 'Task description…' };
-  const SAVES: Record<string, string> = { Note: 'Save Note', Email: 'Send & Log', Call: 'Log Call', Task: 'Create Task' };
+  const TITLES: Record<ActionKind, string> = { Note: 'Add Note', Email: `Email ${candidate.name}`, Call: 'Log Call', Task: 'Create Task', Meeting: 'Schedule Meeting' };
+  const PLACEHOLDERS: Record<ActionKind, string> = { Note: 'Write a note…', Email: 'Message body…', Call: 'Call outcome & notes…', Task: 'Task description…', Meeting: 'Meeting agenda, date & time…' };
+  const SAVES: Record<ActionKind, string> = { Note: 'Save Note', Email: 'Send & Log', Call: 'Log Call', Task: 'Create Task', Meeting: 'Schedule' };
+  const PREFIX: Record<ActionKind, string> = { Note: '', Email: 'Emailed: ', Call: 'Call: ', Task: 'Task: ', Meeting: 'Meeting: ' };
 
   const submit = () => {
     if (!text.trim()) return;
     if (kind === 'Email') window.location.href = `mailto:${candidate.email}?body=${encodeURIComponent(text)}`;
-    const logText = kind === 'Email' ? `Emailed: ${text.trim()}` : kind === 'Call' ? `Call: ${text.trim()}` : kind === 'Task' ? `Task: ${text.trim()}` : text.trim();
-    onLog(kind, logText);
+    onLog(kind, `${PREFIX[kind]}${text.trim()}`);
     onClose();
   };
 
