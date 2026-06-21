@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Carrier Overview — FleetView</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="/shell.css"/>
+</head>
+<body>
+
+<div id="sidebar-root"></div>
+
+<div id="app-shell">
+  <div id="main-content">
+    <div id="page-header-root"></div>
+
+    <div class="page-content">
+      <!-- Carrier heading -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:10px;">
+        <div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+            <div id="carrier-avatar" style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#6366F1,#8B5CF6);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#fff;">G</div>
+            <h1 id="carrier-heading" style="font-size:22px;font-weight:800;color:var(--text-primary);margin:0;">GRAND ONE LLC</h1>
+          </div>
+          <div id="carrier-sub" style="font-size:13px;color:var(--text-muted);margin-left:54px;">DOT 1234567 · MC-123456 · <span class="pill pill-active">Active</span></div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn-secondary" id="edit-carrier-btn">✏ Edit</button>
+          <a href="/hiring.html" class="btn-primary" style="text-decoration:none;">+ Add Candidate</a>
+        </div>
+      </div>
+
+      <!-- Stat cards -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:24px;">
+        <div class="stat-card" style="display:flex;align-items:center;gap:16px;">
+          <div class="stat-icon" style="background:#F0FDF4;">🚚</div>
+          <div>
+            <div class="stat-value" id="active-drivers-stat">—</div>
+            <div class="stat-label">Active Drivers</div>
+          </div>
+        </div>
+        <div class="stat-card" style="display:flex;align-items:center;gap:16px;">
+          <div class="stat-icon" style="background:#EEF2FF;">🏎</div>
+          <div>
+            <div class="stat-value" id="fleet-stat">—</div>
+            <div class="stat-label">Fleet Size</div>
+          </div>
+        </div>
+        <div class="stat-card" style="display:flex;align-items:center;gap:16px;">
+          <div class="stat-icon" style="background:#FFF7ED;">📋</div>
+          <div>
+            <div class="stat-value" id="authority-stat">—</div>
+            <div class="stat-label">Authority Status</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Two col layout -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;" id="overview-grid">
+
+        <!-- Company Information -->
+        <div class="card" style="padding:0;overflow:hidden;">
+          <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;">
+            <span style="font-size:15px;font-weight:700;color:var(--text-primary);">Company Information</span>
+            <button class="btn-ghost" style="margin-left:auto;font-size:13px;" id="toggle-edit">✏ Edit</button>
+          </div>
+          <div style="padding:18px 20px;" id="company-info-view">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+              <div>
+                <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:4px;">Legal Name</div>
+                <div class="info-value" data-field="name" style="font-size:13.5px;font-weight:600;color:var(--text-primary);">GRAND ONE LLC</div>
+              </div>
+              <div>
+                <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:4px;">DOT Number</div>
+                <div class="info-value" data-field="dot" style="font-size:13.5px;font-weight:600;color:var(--text-primary);font-family:monospace;">1234567</div>
+              </div>
+              <div>
+                <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:4px;">MC Number</div>
+                <div class="info-value" data-field="mc" style="font-size:13.5px;font-weight:600;color:var(--text-primary);">MC-123456</div>
+              </div>
+              <div>
+                <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:4px;">Authority</div>
+                <div class="info-value" data-field="authority" style="font-size:13.5px;font-weight:600;color:var(--text-primary);">Active</div>
+              </div>
+              <div style="grid-column:1/-1;">
+                <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:4px;">Address</div>
+                <div class="info-value" data-field="address" style="font-size:13.5px;font-weight:600;color:var(--text-primary);">123 Fleet Ave, Dallas, TX 75201</div>
+              </div>
+              <div>
+                <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:4px;">Contact Email</div>
+                <div class="info-value" data-field="email" style="font-size:13.5px;font-weight:600;color:var(--text-primary);">safety@grandone.com</div>
+              </div>
+              <div>
+                <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:4px;">Contact Phone</div>
+                <div class="info-value" data-field="phone" style="font-size:13.5px;font-weight:600;color:var(--text-primary);">(214) 555-0100</div>
+              </div>
+            </div>
+          </div>
+          <!-- Edit form (hidden by default) -->
+          <div id="company-info-edit" class="hidden" style="padding:18px 20px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+              <div style="grid-column:1/-1;">
+                <label class="form-label">Legal Name</label>
+                <input id="edit-name" class="form-input" value="GRAND ONE LLC"/>
+              </div>
+              <div>
+                <label class="form-label">DOT Number</label>
+                <input id="edit-dot" class="form-input" value="1234567"/>
+              </div>
+              <div>
+                <label class="form-label">MC Number</label>
+                <input id="edit-mc" class="form-input" value="MC-123456"/>
+              </div>
+              <div style="grid-column:1/-1;">
+                <label class="form-label">Address</label>
+                <input id="edit-address" class="form-input" value="123 Fleet Ave, Dallas, TX 75201"/>
+              </div>
+              <div>
+                <label class="form-label">Contact Email</label>
+                <input id="edit-email" type="email" class="form-input" value="safety@grandone.com"/>
+              </div>
+              <div>
+                <label class="form-label">Contact Phone</label>
+                <input id="edit-phone" type="tel" class="form-input" value="(214) 555-0100"/>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:16px;">
+              <button class="btn-primary" id="save-info-btn">Save Changes</button>
+              <button class="btn-secondary" id="cancel-edit-btn">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right column -->
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <!-- Compliance Overview -->
+          <div class="card" style="padding:18px 20px;">
+            <div style="font-size:15px;font-weight:700;color:var(--text-primary);margin-bottom:14px;">Compliance Overview</div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <span style="font-size:13px;color:var(--text-secondary);">CDL Verifications</span>
+                <span class="pill pill-valid">Valid</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <span style="font-size:13px;color:var(--text-secondary);">Drug Tests</span>
+                <span class="pill pill-valid">Valid</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <span style="font-size:13px;color:var(--text-secondary);">Medical Cards</span>
+                <span class="pill pill-pending">2 Expiring</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <span style="font-size:13px;color:var(--text-secondary);">Clearinghouse</span>
+                <span class="pill pill-missing">1 Missing</span>
+              </div>
+              <div style="margin-top:10px;">
+                <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-bottom:6px;">
+                  <span>Overall Compliance</span><span style="font-weight:700;color:var(--text-primary);">78%</span>
+                </div>
+                <div style="background:var(--border);border-radius:99px;height:8px;">
+                  <div style="background:linear-gradient(90deg,#6366F1,#8B5CF6);border-radius:99px;height:8px;width:78%;transition:width 0.5s;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Alerts -->
+          <div class="card" style="padding:18px 20px;">
+            <div style="font-size:15px;font-weight:700;color:var(--text-primary);margin-bottom:14px;display:flex;align-items:center;gap:8px;">⚠️ Alerts</div>
+            <div style="display:flex;flex-direction:column;gap:8px;" id="alerts-panel">
+              <div style="padding:10px 12px;background:#FEF3C7;border:1px solid #FDE68A;border-radius:8px;font-size:12.5px;color:#92400E;">
+                <strong>JAMES WILSON</strong> CDL expires in 12 days
+              </div>
+              <div style="padding:10px 12px;background:#FEE2E2;border:1px solid #FCA5A5;border-radius:8px;font-size:12.5px;color:#991B1B;">
+                Missing Clearinghouse query for <strong>1 driver</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent Activity -->
+      <div class="card" style="padding:0;overflow:hidden;margin-top:18px;">
+        <div style="padding:16px 20px;border-bottom:1px solid var(--border);">
+          <span style="font-size:15px;font-weight:700;color:var(--text-primary);">Recent Activity</span>
+        </div>
+        <div style="padding:18px 20px;">
+          <div style="text-align:center;padding:24px;color:var(--text-muted);">
+            <div style="font-size:32px;margin-bottom:8px;">📋</div>
+            <div style="font-size:14px;font-weight:600;margin-bottom:4px;">No recent activity</div>
+            <div style="font-size:13px;">Activity will appear here as your team works on this carrier.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/shell.js"></script>
+<script>
+initShell('carriers');
+
+const carrier = Shell.currentCarrier();
+const drivers = Shell.drivers();
+
+// Update page with carrier data
+document.getElementById('carrier-avatar').textContent = carrier.name[0];
+document.getElementById('carrier-heading').textContent = carrier.name;
+document.getElementById('carrier-sub').innerHTML = `DOT ${carrier.dot} · ${carrier.mc} · <span class="pill pill-active">${carrier.authority[0].toUpperCase() + carrier.authority.slice(1)}</span>`;
+document.getElementById('active-drivers-stat').textContent = carrier.driverCount;
+document.getElementById('fleet-stat').textContent = carrier.driverCount;
+document.getElementById('authority-stat').textContent = carrier.authority[0].toUpperCase() + carrier.authority.slice(1);
+
+document.querySelectorAll('.info-value').forEach(el => {
+  const field = el.dataset.field;
+  if (field === 'name') el.textContent = carrier.name;
+  else if (field === 'dot') el.textContent = carrier.dot;
+  else if (field === 'mc') el.textContent = carrier.mc;
+  else if (field === 'authority') el.textContent = carrier.authority[0].toUpperCase() + carrier.authority.slice(1);
+});
+
+document.getElementById('edit-name').value = carrier.name;
+document.getElementById('edit-dot').value = carrier.dot;
+document.getElementById('edit-mc').value = carrier.mc;
+
+document.getElementById('page-header-root').innerHTML = renderPageHeader([
+  { label: 'FleetView', href: '/dashboard.html' },
+  { label: 'Carriers', href: '/carriers.html' },
+  { label: carrier.name }
+], `<a href="/hiring.html" class="btn-primary" style="text-decoration:none;">+ Add Candidate</a>`);
+
+// Edit toggle
+let editing = false;
+document.getElementById('toggle-edit').addEventListener('click', toggleEdit);
+document.getElementById('edit-carrier-btn').addEventListener('click', toggleEdit);
+document.getElementById('cancel-edit-btn').addEventListener('click', () => {
+  editing = false;
+  document.getElementById('company-info-view').classList.remove('hidden');
+  document.getElementById('company-info-edit').classList.add('hidden');
+  document.getElementById('toggle-edit').textContent = '✏ Edit';
+});
+
+function toggleEdit() {
+  editing = !editing;
+  document.getElementById('company-info-view').classList.toggle('hidden', editing);
+  document.getElementById('company-info-edit').classList.toggle('hidden', !editing);
+  document.getElementById('toggle-edit').textContent = editing ? '× Cancel' : '✏ Edit';
+}
+
+document.getElementById('save-info-btn').addEventListener('click', () => {
+  const name = document.getElementById('edit-name').value.trim();
+  const dot = document.getElementById('edit-dot').value.trim();
+  const mc = document.getElementById('edit-mc').value.trim();
+
+  // Update display
+  document.querySelector('[data-field="name"]').textContent = name.toUpperCase();
+  document.querySelector('[data-field="dot"]').textContent = dot;
+  document.querySelector('[data-field="mc"]').textContent = mc;
+  document.getElementById('carrier-heading').textContent = name.toUpperCase();
+  document.getElementById('carrier-avatar').textContent = name[0].toUpperCase();
+
+  editing = false;
+  document.getElementById('company-info-view').classList.remove('hidden');
+  document.getElementById('company-info-edit').classList.add('hidden');
+  document.getElementById('toggle-edit').textContent = '✏ Edit';
+});
+
+// Responsive grid
+function adjustGrid() {
+  const grid = document.getElementById('overview-grid');
+  if (window.innerWidth < 900) grid.style.gridTemplateColumns = '1fr';
+  else grid.style.gridTemplateColumns = '1fr 1fr';
+}
+adjustGrid();
+window.addEventListener('resize', adjustGrid);
+</script>
+</body>
+</html>
