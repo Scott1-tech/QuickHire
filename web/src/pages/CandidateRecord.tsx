@@ -58,6 +58,7 @@ export default function CandidateRecord() {
   const [activity, setActivity] = useState<Activity[]>(INITIAL_ACTIVITY);
   const [autoAdvance, setAutoAdvance] = useState(true);
   const [activityFilter, setActivityFilter] = useState<'all' | ActionKind>('all');
+  const [edits, setEdits] = useState<{ name?: string; phone?: string; email?: string }>({});
 
   const c = s.candidates.find((x) => x.id === candidateId);
   const done = steps.filter((x) => x.status === 'complete').length;
@@ -101,7 +102,7 @@ export default function CandidateRecord() {
       <div className="flex-1 overflow-y-auto">
         <div className="flex min-h-full">
           {/* ── LEFT RAIL ───────────────────────────── */}
-          <aside className="w-[270px] flex-shrink-0 border-r border-line overflow-y-auto p-5 flex flex-col gap-4">
+          <aside className="w-[320px] flex-shrink-0 border-r border-line overflow-y-auto p-5 flex flex-col gap-4">
             {/* Avatar + name */}
             <div>
               <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary to-purple grid place-items-center text-xl font-bold text-white mb-3">{c.name[0]}</div>
@@ -130,21 +131,12 @@ export default function CandidateRecord() {
               ))}
             </div>
 
-            {/* Contact info */}
-            <div className="card p-3 space-y-2">
-              <div className="flex justify-between text-[12.5px]"><span className="text-muted">Full name</span><span className="font-semibold text-ink truncate ml-2">{c.name}</span></div>
-              <div className="flex justify-between text-[12.5px]"><span className="text-muted">Phone</span><a href={`tel:${c.phone}`} className="font-semibold text-info">{c.phone ?? '—'}</a></div>
-              <div className="flex justify-between text-[12.5px] gap-1"><span className="text-muted flex-shrink-0">Email</span><a href={`mailto:${c.email}`} className="font-semibold text-info truncate">{c.email}</a></div>
-            </div>
-
-            {/* Eligibility */}
-            <div>
-              <div className="text-[10px] font-bold text-muted uppercase mb-2">Eligibility</div>
-              {[['MVR', 'not_prohibited'], ['BGC', 'not_prohibited'], ['Clearinghouse', 'not_prohibited']].map(([k, v]) => (
-                <div key={k} className="flex justify-between py-1 text-[12.5px] border-b border-line/50 last:border-0">
-                  <span className="text-muted">{k}</span><span className="text-success font-semibold">{v}</span>
-                </div>
-              ))}
+            {/* Contact info — click any value to edit (HubSpot-style inline edit) */}
+            <div className="card p-3 space-y-1">
+              <div className="text-[10px] font-bold text-muted uppercase mb-1">About this candidate</div>
+              <EditableField label="Full name" value={edits.name ?? c.name} onSave={(v) => setEdits((p) => ({ ...p, name: v }))} />
+              <EditableField label="Phone" value={edits.phone ?? c.phone ?? ''} onSave={(v) => setEdits((p) => ({ ...p, phone: v }))} link={`tel:${edits.phone ?? c.phone}`} />
+              <EditableField label="Email" value={edits.email ?? c.email} onSave={(v) => setEdits((p) => ({ ...p, email: v }))} link={`mailto:${edits.email ?? c.email}`} />
             </div>
 
             {/* Settings */}
@@ -159,6 +151,43 @@ export default function CandidateRecord() {
                 <option value="">Unassigned</option>
                 {Object.entries(RECRUITERS).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
               </select>
+            </div>
+
+            {/* Recent Activity feed — left side */}
+            <div className="card overflow-hidden flex flex-col">
+              <div className="px-4 py-3 border-b border-line flex items-center justify-between">
+                <span className="font-bold text-[14px] text-ink">Recent Activity</span>
+                <button onClick={() => setAction('Note')} className="text-[12px] font-semibold text-primary hover:underline">＋ Add</button>
+              </div>
+
+              {/* Filter chips */}
+              <div className="flex gap-1 px-3 pt-2.5 pb-1 flex-wrap">
+                {(['all', 'Note', 'Email', 'Call', 'Task', 'Meeting'] as const).map((f) => (
+                  <button key={f} onClick={() => setActivityFilter(f)}
+                    className={`text-[11px] px-2.5 py-0.5 rounded-full border transition ${activityFilter === f ? 'bg-primary text-white border-primary' : 'border-line text-muted hover:border-primary'}`}>
+                    {f === 'all' ? 'All' : f}
+                  </button>
+                ))}
+              </div>
+
+              <div className="divide-y divide-line/50 max-h-[520px] overflow-y-auto">
+                {filteredActivity.map((a) => (
+                  <div key={a.id} className="px-4 py-3 hover:bg-[var(--surface-hover)]">
+                    <div className="flex items-start gap-2.5 mb-1">
+                      <span className={`w-6 h-6 rounded-full flex-shrink-0 grid place-items-center text-[11px] font-bold ${ACTIVITY_COLOR[a.type]}`}>{ACTIVITY_ICON[a.type]}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline gap-1.5 flex-wrap">
+                          <span className="text-[12.5px] font-semibold text-ink">{a.type}</span>
+                          <span className="text-[11px] text-muted">by {a.author}</span>
+                          <span className="text-[11px] text-muted ml-auto">{timeAgo(a.time)}</span>
+                        </div>
+                        <div className="text-[12.5px] text-ink mt-0.5 break-words">{a.text}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {filteredActivity.length === 0 && <div className="px-4 py-8 text-center text-sm text-muted">No {activityFilter} entries yet.</div>}
+              </div>
             </div>
           </aside>
 
@@ -258,43 +287,6 @@ export default function CandidateRecord() {
                 <button className="btn-ghost py-1.5 text-[12px]">Download PDF</button>
               </div>
             </div>
-
-            {/* Activity / Notes feed */}
-            <div className="card overflow-hidden flex flex-col">
-              <div className="px-4 py-3 border-b border-line flex items-center justify-between">
-                <span className="font-bold text-[14px] text-ink">Recent Activity</span>
-                <button onClick={() => setAction('Note')} className="text-[12px] font-semibold text-primary hover:underline">＋ Add</button>
-              </div>
-
-              {/* Filter chips */}
-              <div className="flex gap-1 px-3 pt-2.5 pb-1 flex-wrap">
-                {(['all', 'Note', 'Email', 'Call', 'Task', 'Meeting'] as const).map((f) => (
-                  <button key={f} onClick={() => setActivityFilter(f)}
-                    className={`text-[11px] px-2.5 py-0.5 rounded-full border transition ${activityFilter === f ? 'bg-primary text-white border-primary' : 'border-line text-muted hover:border-primary'}`}>
-                    {f === 'all' ? 'All' : f}
-                  </button>
-                ))}
-              </div>
-
-              <div className="divide-y divide-line/50 max-h-[520px] overflow-y-auto">
-                {filteredActivity.map((a) => (
-                  <div key={a.id} className="px-4 py-3 hover:bg-[var(--surface-hover)]">
-                    <div className="flex items-start gap-2.5 mb-1">
-                      <span className={`w-6 h-6 rounded-full flex-shrink-0 grid place-items-center text-[11px] font-bold ${ACTIVITY_COLOR[a.type]}`}>{ACTIVITY_ICON[a.type]}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-baseline gap-1.5 flex-wrap">
-                          <span className="text-[12.5px] font-semibold text-ink">{a.type}</span>
-                          <span className="text-[11px] text-muted">by {a.author}</span>
-                          <span className="text-[11px] text-muted ml-auto">{timeAgo(a.time)}</span>
-                        </div>
-                        <div className="text-[12.5px] text-ink mt-0.5 break-words">{a.text}</div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                {filteredActivity.length === 0 && <div className="px-4 py-8 text-center text-sm text-muted">No {activityFilter} entries yet.</div>}
-              </div>
-            </div>
           </aside>
         </div>
       </div>
@@ -303,6 +295,38 @@ export default function CandidateRecord() {
       {action && <ActionModal kind={action} candidate={c} recruiter={recruiter} onClose={() => setAction(null)} onLog={addActivity} />}
       {showEdit && <EditCandidate name={c.name} email={c.email} phone={c.phone ?? ''} onClose={() => setShowEdit(false)} />}
     </>
+  );
+}
+
+// Inline editable field: shows value, click (or pencil) to edit, Enter/blur saves, Esc cancels.
+function EditableField({ label, value, onSave, link }: { label: string; value: string; onSave: (v: string) => void; link?: string }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (editing) { setDraft(value); ref.current?.focus(); } }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const commit = () => { onSave(draft.trim()); setEditing(false); };
+
+  return (
+    <div className="flex items-center justify-between gap-2 text-[12.5px] py-0.5 group">
+      <span className="text-muted flex-shrink-0">{label}</span>
+      {editing ? (
+        <input ref={ref} value={draft} onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
+          className="border border-primary rounded px-1.5 py-0.5 text-[12px] text-ink bg-surface outline-none w-[150px] text-right" />
+      ) : (
+        <button onClick={() => setEditing(true)} title="Click to edit"
+          className="flex items-center gap-1 min-w-0 hover:bg-[var(--surface-hover)] rounded px-1 -mx-1 transition">
+          {link ? (
+            <a href={link} onClick={(e) => e.stopPropagation()} className="font-semibold text-info truncate">{value || '—'}</a>
+          ) : (
+            <span className="font-semibold text-ink truncate">{value || '—'}</span>
+          )}
+          <span className="text-[10px] text-muted opacity-0 group-hover:opacity-100 transition flex-shrink-0">✏️</span>
+        </button>
+      )}
+    </div>
   );
 }
 
