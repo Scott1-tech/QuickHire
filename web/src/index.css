@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --surface: #ffffff;
+  --bg: #f4f6fb;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --muted: #64748b;
+  --surface-hover: #f8fafc;
+}
+.dark {
+  --surface: #1e293b;
+  --bg: #0f172a;
+  --border: #334155;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --surface-hover: #243044;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .card { @apply bg-surface border border-line rounded-xl; box-shadow: var(--shadow, none); }
+  .pill { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold; }
+  .btn-primary { @apply bg-primary hover:bg-primary-700 text-white font-semibold rounded-[10px] px-4 py-2 text-sm transition; }
+  .btn-ghost { @apply border border-line bg-surface text-ink hover:bg-[var(--surface-hover)] font-medium rounded-[10px] px-4 py-2 text-sm transition; }
+  .input { @apply w-full bg-surface border border-line rounded-[10px] px-3 py-2.5 text-sm text-ink outline-none focus:ring-2 focus:ring-primary/40; }
+  .field-label { @apply block text-xs font-semibold text-muted mb-1.5; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+/* Status pill palette */
+.pill-green  { background:#DCFCE7; color:#15803D; }
+.pill-amber  { background:#FEF3C7; color:#B45309; }
+.pill-red    { background:#FEE2E2; color:#B91C1C; }
+.pill-purple { background:#EDE9FE; color:#6D28D9; }
+.pill-slate  { background:#F1F5F9; color:#475569; }
+.pill-blue   { background:#DBEAFE; color:#1D4ED8; }
+.dark .pill-green{background:#14321f;color:#86efac}
+.dark .pill-amber{background:#3a2c0a;color:#fcd34d}
+.dark .pill-red{background:#3b1416;color:#fca5a5}
+.dark .pill-purple{background:#2a2247;color:#c4b5fd}
+.dark .pill-slate{background:#2a3344;color:#cbd5e1}
+.dark .pill-blue{background:#16243f;color:#93c5fd}
+
+.scrollbar-thin::-webkit-scrollbar { width:8px; height:8px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background:var(--border); border-radius:8px; }

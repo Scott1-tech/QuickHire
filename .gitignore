@@ -3,3 +3,8 @@ data/
 .env
 *.log
 .DS_Store
+
+# Web SPA build output (generated at deploy by `npm run build`)
+public/app/
+web/node_modules/
+web/dist/

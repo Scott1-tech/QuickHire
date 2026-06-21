@@ -781,6 +781,11 @@ app.post('/api/twilio/inbound', express.urlencoded({ extended: false }), (req, r
 // ── Static ─────────────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
 
+// SPA fallback: serve the FleetView React app for any /app/* client-side route.
+app.get('/app/*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'app', 'index.html'));
+});
+
 app.listen(PORT, () => {
   console.log(`QuickHire on http://localhost:${PORT}`);
   if (!ADMIN_PASSWORD) console.log('WARNING: ADMIN_PASSWORD not set — dashboard is open.');

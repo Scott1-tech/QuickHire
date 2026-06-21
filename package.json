@@ -6,7 +6,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "build": "cd web && npm install && npm run build",
+    "postinstall": "cd web && npm install && npm run build"
   },
   "engines": {
     "node": ">=18"
