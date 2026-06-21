@@ -163,20 +163,6 @@ export default function CandidateRecord() {
               <EditableField label="Email" value={edits.email ?? c.email} onSave={(v) => setEdits((p) => ({ ...p, email: v }))} link={`mailto:${edits.email ?? c.email}`} />
             </div>
 
-            {/* Settings */}
-            <div>
-              <div className="text-[10px] font-bold text-muted uppercase mb-2">Settings</div>
-              <label className="flex items-center justify-between text-[12.5px] text-ink py-1">
-                <span>Auto-advance pipeline</span>
-                <input type="checkbox" checked={autoAdvance} onChange={(e) => setAutoAdvance(e.target.checked)} className="w-4 h-4 accent-[#6366F1]" />
-              </label>
-              <label className="field-label mt-2">Recruiter</label>
-              <select defaultValue={c.ownerUserId ?? ''} className="input text-[12px]">
-                <option value="">Unassigned</option>
-                {Object.entries(RECRUITERS).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-              </select>
-            </div>
-
             {/* Recent Activity feed — left side */}
             <div className="card overflow-hidden flex flex-col">
               <div className="px-4 py-3 border-b border-line flex items-center justify-between">
