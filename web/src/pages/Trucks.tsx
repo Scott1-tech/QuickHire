@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useStore } from '@/store';
 import { PageHeader, Pill } from '@/ui';
 import DataTable, { type Column } from '@/components/DataTable';
+import CreateModal from '@/components/CreateModal';
 import type { Truck } from '@/types';
 
 const TABS = [
@@ -15,6 +16,7 @@ const TABS = [
 export default function Trucks() {
   const s = useStore();
   const [tab, setTab] = useState('all');
+  const [showAdd, setShowAdd] = useState(false);
 
   const rows = s.trucks.filter((t) =>
     tab === 'all' ? true :
@@ -44,13 +46,15 @@ export default function Trucks() {
       <div className="flex-1 overflow-y-auto p-6">
         <DataTable rows={rows} columns={cols} rowKey={(t) => t.id} tabs={TABS} activeTab={tab} onTab={setTab}
           searchPlaceholder="Search by unit, VIN, plate…"
-          toolbarRight={<><button className="btn-ghost">Import file</button><button className="btn-primary">＋ Create Truck</button></>}
+          toolbarRight={<button onClick={() => setShowAdd(true)} className="btn-primary">＋ Create Truck</button>}
           statusChips={[
             { label: 'AVAILABLE', count: s.trucks.filter((t) => t.status === 'Available').length, color: '#16A34A' },
             { label: 'IN-TRANSIT', count: s.trucks.filter((t) => t.status === 'In-Transit').length, color: '#2563EB' },
             { label: 'SHOP', count: s.trucks.filter((t) => t.status === 'Shop').length, color: '#DC2626' },
           ]} />
       </div>
+
+      {showAdd && <CreateModal kind="truck" open onClose={() => setShowAdd(false)} />}
     </>
   );
 }

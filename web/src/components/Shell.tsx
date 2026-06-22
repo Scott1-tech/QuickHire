@@ -78,7 +78,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           </div>
 
           <NavItem to="/dashboard" icon="⊞" label="Dashboard" />
-          <NavItem to="/carriers" icon="🏢" label="Carriers" />
 
           <SectionLabel>Features</SectionLabel>
           <NavItem to="/notifications" icon="🔔" label="Notifications" badge="3" />
@@ -114,6 +113,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <NavItem to={link('hiring')} icon="🧭" label="Hiring" />
           <NavItem to={link('drivers')} icon="🚚" label="Drivers" />
           <NavItem to={link('trucks')} icon="🚛" label="Trucks" />
+          <NavItem to="/carriers" icon="🏢" label="Carriers" />
           {can(s.role, 'people') && (
             <NavItem to="/employees" icon="👥" label="Employees" />
           )}

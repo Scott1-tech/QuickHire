@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '@/store';
 import { PageHeader, Pill, timeSince, isStale } from '@/ui';
-import { STAGES, type Stage, type Candidate } from '@/types';
+import { STAGES, type Stage } from '@/types';
+import CreateModal from '@/components/CreateModal';
 
 export default function Hiring() {
   const s = useStore();
@@ -94,82 +95,7 @@ export default function Hiring() {
         )}
       </div>
 
-      {showAdd && <AddCandidate onClose={() => setShowAdd(false)} />}
+      {showAdd && <CreateModal kind="candidate" open onClose={() => setShowAdd(false)} />}
     </>
-  );
-}
-
-function AddCandidate({ onClose }: { onClose: () => void }) {
-  const s = useStore();
-  const isSuper = s.role === 'Super Admin';
-  const [step, setStep] = useState(isSuper ? 1 : 2);
-  const [carrierId, setCarrierId] = useState(s.currentCarrierId);
-  const [form, setForm] = useState({ name: '', email: '', phone: '', owner: '' });
-  const [msg, setMsg] = useState('');
-
-  const [busy, setBusy] = useState(false);
-  const submit = async () => {
-    if (!form.name || !form.email) { setMsg('Name and email are required.'); return; }
-    setBusy(true);
-    // Optimistically add to the board, then create the real invite + link via the backend.
-    s.addCandidate({ ...form, carrierId, ownerUserId: form.owner || undefined });
-    const company = s.carriers.find((c) => c.id === carrierId)?.name;
-    try {
-      const res = await fetch('/api/candidates', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-token': localStorage.getItem('qh_admin') ?? '' },
-        body: JSON.stringify({ name: form.name, email: form.email, phone: form.phone, carrierId }),
-      });
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setMsg(`Added under ${company}. ${data.link ? 'Application link sent.' : 'Saved.'}`);
-      } else {
-        setMsg(`Added under ${company} (board only — backend returned ${res.status}).`);
-      }
-    } catch {
-      setMsg(`Added under ${company} (board only — backend unreachable).`);
-    } finally {
-      setBusy(false);
-      setTimeout(onClose, 1500);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/40 z-50 grid place-items-center p-4" onClick={onClose}>
-      <div className="card p-6 w-[440px] max-w-full shadow-pop" onClick={(e) => e.stopPropagation()}>
-        <div className="text-lg font-extrabold text-ink">Add Candidate</div>
-        <div className="text-xs text-muted mb-4">{step === 1 ? 'Step 1 — Choose company' : 'Step 2 — Candidate details'}</div>
-
-        {step === 1 ? (
-          <>
-            <label className="field-label">Company (MC carrier) *</label>
-            <select value={carrierId} onChange={(e) => setCarrierId(e.target.value)} className="input">
-              {s.carriers.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.mc.join(', ')}</option>)}
-            </select>
-            <p className="text-[11.5px] text-muted mt-2">The candidate inherits this company's name, DOT/MC, pipeline, document checklist, and settings.</p>
-            <button onClick={() => setStep(2)} className="btn-primary w-full mt-5">Next</button>
-          </>
-        ) : (
-          <>
-            {(['name', 'email', 'phone'] as const).map((f) => (
-              <div key={f} className="mb-3">
-                <label className="field-label">{f === 'name' ? 'Driver Name *' : f === 'email' ? 'Email *' : 'Phone (for SMS)'}</label>
-                <input value={form[f]} onChange={(e) => setForm({ ...form, [f]: e.target.value })} className="input" />
-              </div>
-            ))}
-            <label className="field-label">Assign hiring user</label>
-            <select value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} className="input">
-              <option value="">Unassigned</option><option value="u1">Nina Patel (Recruiter)</option><option value="u2">Dana Reed (Owner)</option>
-            </select>
-            {msg && <div className="text-[12.5px] text-success mt-3">{msg}</div>}
-            <div className="flex gap-2 mt-5">
-              <button onClick={submit} disabled={busy} className="btn-primary flex-1 disabled:opacity-50">{busy ? 'Sending…' : 'Add & Send Link'}</button>
-              {isSuper && <button onClick={() => setStep(1)} className="btn-ghost">Back</button>}
-              <button onClick={onClose} className="btn-ghost">Cancel</button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
   );
 }

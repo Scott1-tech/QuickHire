@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { Carrier, Candidate, Driver, Truck, Role, Stage } from '@/types';
-import { CARRIERS, CANDIDATES, DRIVERS, TRUCKS } from '@/data/mock';
+import type { Carrier, Candidate, Driver, Truck, Employee, Role, Stage } from '@/types';
+import { CARRIERS, CANDIDATES, DRIVERS, TRUCKS, EMPLOYEES } from '@/data/mock';
 
 interface Store {
   role: Role;
@@ -11,37 +11,50 @@ interface Store {
   currentCarrierId: string;
   setCurrentCarrierId: (id: string) => void;
   currentCarrier: Carrier;
-  // scoped collections
+  // collections scoped to the active carrier
   candidates: Candidate[];
   drivers: Driver[];
   trucks: Truck[];
+  employees: Employee[];
+  // full collections (global views like the dashboard)
+  allCandidates: Candidate[];
+  allDrivers: Driver[];
+  allTrucks: Truck[];
+  allEmployees: Employee[];
   // mutations
   moveCandidate: (id: string, stage: Stage) => void;
   addCandidate: (c: Partial<Candidate>) => Candidate;
+  addDriver: (d: Partial<Driver>) => Driver;
+  addTruck: (t: Partial<Truck>) => Truck;
+  addCarrier: (c: Partial<Carrier>) => Carrier;
+  addEmployee: (e: Partial<Employee>) => Employee;
   assignTruck: (candidateId: string, truckId: string) => void;
 }
 
 const Ctx = createContext<Store | null>(null);
+const uid = (p: string) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<Role>('Super Admin');
   const [theme, setTheme] = useState<'light' | 'dark'>(
     () => (document.documentElement.classList.contains('dark') ? 'dark' : 'light'),
   );
-  const [currentCarrierId, setCurrentCarrierId] = useState<string>(CARRIERS[0].id);
 
-  // mutable mock collections
+  // mutable collections (seeded from mock data)
+  const [carriers, setCarriers] = useState<Carrier[]>(CARRIERS);
+  const [currentCarrierId, setCurrentCarrierId] = useState<string>(CARRIERS[0].id);
   const [candidates, setCandidates] = useState<Candidate[]>(CANDIDATES);
-  const [drivers] = useState<Driver[]>(DRIVERS);
+  const [drivers, setDrivers] = useState<Driver[]>(DRIVERS);
   const [trucks, setTrucks] = useState<Truck[]>(TRUCKS);
+  const [employees, setEmployees] = useState<Employee[]>(EMPLOYEES);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
 
   const currentCarrier = useMemo(
-    () => CARRIERS.find((c) => c.id === currentCarrierId) ?? CARRIERS[0],
-    [currentCarrierId],
+    () => carriers.find((c) => c.id === currentCarrierId) ?? carriers[0],
+    [carriers, currentCarrierId],
   );
 
   const value: Store = {
@@ -49,20 +62,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setRole,
     theme,
     toggleTheme: () => setTheme((t) => (t === 'dark' ? 'light' : 'dark')),
-    carriers: CARRIERS,
+    carriers,
     currentCarrierId,
     setCurrentCarrierId,
     currentCarrier,
     candidates: candidates.filter((c) => c.carrierId === currentCarrierId),
     drivers: drivers.filter((d) => d.carrierId === currentCarrierId),
     trucks: trucks.filter((t) => t.carrierId === currentCarrierId),
+    employees: employees.filter((e) => e.carrierId === currentCarrierId),
+    allCandidates: candidates,
+    allDrivers: drivers,
+    allTrucks: trucks,
+    allEmployees: employees,
     moveCandidate: (id, stage) =>
       setCandidates((prev) =>
         prev.map((c) => (c.id === id ? { ...c, stage, stageEnteredAt: new Date().toISOString() } : c)),
       ),
     addCandidate: (c) => {
       const created: Candidate = {
-        id: 'p' + Date.now(),
+        id: uid('p'),
         carrierId: c.carrierId ?? currentCarrierId,
         name: (c.name ?? 'New Candidate').toUpperCase(),
         stage: 'Lead',
@@ -75,7 +93,78 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         appProgress: 0,
         ownerUserId: c.ownerUserId,
       };
-      setCandidates((prev) => [...prev, created]);
+      setCandidates((prev) => [created, ...prev]);
+      return created;
+    },
+    addDriver: (d) => {
+      const created: Driver = {
+        id: uid('d'),
+        carrierId: d.carrierId ?? currentCarrierId,
+        name: (d.name ?? 'New Driver').toUpperCase(),
+        score: d.score ?? 0,
+        license: d.license ?? '',
+        state: d.state ?? '',
+        status: d.status ?? 'active',
+        type: d.type ?? 'company',
+        mc: d.mc,
+        phone: d.phone,
+        email: d.email,
+        driverStatus: d.driverStatus ?? 'Available',
+        assignedTruckId: d.assignedTruckId ?? null,
+        hireDate: d.hireDate ?? new Date().toISOString().slice(0, 10),
+        isNew: true,
+      };
+      setDrivers((prev) => [created, ...prev]);
+      return created;
+    },
+    addTruck: (t) => {
+      const created: Truck = {
+        id: uid('t'),
+        carrierId: t.carrierId ?? currentCarrierId,
+        unit: t.unit ?? '000',
+        make: t.make ?? '',
+        model: t.model ?? '',
+        year: t.year ?? new Date().getFullYear(),
+        plate: t.plate ?? '',
+        vin: t.vin ?? '',
+        state: t.state ?? '',
+        mc: t.mc,
+        status: t.status ?? 'Available',
+        ownership: t.ownership ?? 'company',
+        owner: t.owner,
+        operatorDriverId: t.operatorDriverId ?? null,
+      };
+      setTrucks((prev) => [created, ...prev]);
+      return created;
+    },
+    addCarrier: (c) => {
+      const created: Carrier = {
+        id: uid('c'),
+        name: (c.name ?? 'New Carrier').toUpperCase(),
+        dot: c.dot ?? '',
+        mc: c.mc ?? [],
+        authority: c.authority ?? 'active',
+        address: c.address,
+        phone: c.phone,
+      };
+      setCarriers((prev) => [...prev, created]);
+      return created;
+    },
+    addEmployee: (e) => {
+      const created: Employee = {
+        id: uid('e'),
+        carrierId: e.carrierId ?? currentCarrierId,
+        firstName: e.firstName ?? 'New',
+        lastName: e.lastName ?? 'Employee',
+        status: 'ACTIVE',
+        nickname: e.nickname,
+        phone: e.phone,
+        email: e.email,
+        shift: e.shift,
+        role: e.role ?? 'dispatcher',
+        kind: e.kind ?? 'employee',
+      };
+      setEmployees((prev) => [created, ...prev]);
       return created;
     },
     assignTruck: (candidateId, truckId) => {
