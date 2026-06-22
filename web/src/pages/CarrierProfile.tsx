@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { PageHeader, Pill, Empty, timeAgo } from '@/ui';
 import CarrierForm from '@/components/CarrierForm';
+import LinkSender from '@/components/LinkSender';
 import {
   getCarrier, updateCarrier, resendCarrier, deleteCarrier,
   statusMeta, type CarrierRecord,
@@ -149,7 +150,6 @@ function SendLink({ rec, onClose, onSent }: { rec: CarrierRecord; onClose: () =>
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ link: string | null; email: { sent: boolean; reason?: string } | null; sms: { sent: boolean; reason?: string } | null } | null>(null);
   const [err, setErr] = useState('');
-  const [copied, setCopied] = useState(false);
 
   const send = async () => {
     setBusy(true); setErr('');
@@ -178,19 +178,9 @@ function SendLink({ rec, onClose, onSent }: { rec: CarrierRecord; onClose: () =>
           </>
         ) : (
           <>
-            <div className="rounded-lg bg-slate-50 border border-line p-3 mb-3 text-[12.5px]">
-              <div className={result.email ? (result.email.sent ? 'text-success' : 'text-danger') : 'text-muted'}>
-                Email: {result.email ? (result.email.sent ? 'sent ✓' : `not sent — ${result.email.reason}`) : 'no email on file'}</div>
-              <div className={result.sms ? (result.sms.sent ? 'text-success' : 'text-danger') : 'text-muted'}>
-                SMS: {result.sms ? (result.sms.sent ? 'sent ✓' : `not sent — ${result.sms.reason}`) : 'no phone on file'}</div>
-            </div>
-            <label className="field-label">Shareable link (copy &amp; send manually if needed)</label>
-            <div className="flex gap-2">
-              <input className="input flex-1 text-[12px]" readOnly value={result.link ?? ''} onFocus={(e) => e.target.select()} />
-              <button className="btn-ghost" onClick={() => { if (result.link) { navigator.clipboard?.writeText(result.link); setCopied(true); setTimeout(() => setCopied(false), 1500); } }}>
-                {copied ? 'Copied' : 'Copy'}</button>
-            </div>
-            <button onClick={onClose} className="btn-primary w-full mt-4">Done</button>
+            <LinkSender link={result.link} name={rec.name} ownerName={rec.ownerName} email={email} phone={phone}
+              serverEmail={result.email} serverSms={result.sms} />
+            <button onClick={onClose} className="btn-ghost w-full mt-4">Done</button>
           </>
         )}
       </div>

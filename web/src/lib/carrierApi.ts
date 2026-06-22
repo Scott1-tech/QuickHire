@@ -66,3 +66,18 @@ export function statusMeta(status: CarrierStatus, filledBy: string | null) {
   if (status === 'completed') return { label: filledBy === 'carrier' ? 'Completed by carrier' : 'Completed', kind: 'active' };
   return { label: 'Awaiting carrier', kind: 'pending' };
 }
+
+// ── Send-the-link helpers ─────────────────────────────────────────────────────
+// Let the recruiter send the intake link from their own email/SMS app — works
+// even when no server-side email provider (Resend/SMTP) is configured.
+export const inviteSubject = (name: string) => `Carrier requirements — ${name || 'your company'}`;
+export function inviteBody(name: string, ownerName: string, link: string) {
+  const who = (ownerName || '').trim().split(/\s+/)[0] || 'there';
+  return `Hi ${who},\n\n`
+    + `Please complete your carrier requirements for ${name || 'your company'} here:\n${link}\n\n`
+    + `It only takes a few minutes — just fill in what applies. Thank you!`;
+}
+export const mailtoHref = (email: string, subject: string, body: string) =>
+  `mailto:${email.trim()}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+export const smsHref = (phone: string, body: string) =>
+  `sms:${phone.trim()}?&body=${encodeURIComponent(body)}`;
