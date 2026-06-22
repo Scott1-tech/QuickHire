@@ -8,6 +8,7 @@ import './index.css';
 import Dashboard from '@/pages/Dashboard';
 import Carriers from '@/pages/Carriers';
 import CarrierOverview from '@/pages/CarrierOverview';
+import CarrierProfile from '@/pages/CarrierProfile';
 import Drivers from '@/pages/Drivers';
 import DriverRecord from '@/pages/DriverRecord';
 import Hiring from '@/pages/Hiring';
@@ -34,6 +35,7 @@ const router = createBrowserRouter([
   { path: '/', element: <Navigate to="/dashboard" replace /> },
   { path: '/dashboard', element: <App><Dashboard /></App> },
   { path: '/carriers', element: <App><Carriers /></App> },
+  { path: '/carriers/profile/:id', element: <App><CarrierProfile /></App> },
   { path: '/carriers/:carrierId', element: <App><CarrierOverview /></App> },
   { path: '/carriers/:carrierId/drivers', element: <App><Drivers /></App> },
   { path: '/carriers/:carrierId/drivers/:driverId', element: <App><DriverRecord /></App> },

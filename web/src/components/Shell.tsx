@@ -78,6 +78,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           </div>
 
           <NavItem to="/dashboard" icon="⊞" label="Dashboard" />
+          <NavItem to="/carriers" icon="🏢" label="Carriers" />
 
           <SectionLabel>Features</SectionLabel>
           <NavItem to="/notifications" icon="🔔" label="Notifications" badge="3" />
