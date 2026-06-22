@@ -4,6 +4,7 @@ import { useStore } from '@/store';
 import { PageHeader, Pill, Empty, timeAgo } from '@/ui';
 import { CHECKLIST_TEMPLATE, DOC_TYPES_MAIN } from '@/data/mock';
 import { STAGES, type ChecklistStep, type Stage } from '@/types';
+import CandidateScreening from '@/components/CandidateScreening';
 
 const TABS = ['Pipeline', 'Application', 'PEV', 'Documents'];
 const GROUPS: ChecklistStep['group'][] = ['Compliance & Eligibility', 'Risk Screening', 'Health & Safety', 'Employment Setup'];
@@ -54,6 +55,7 @@ export default function CandidateRecord() {
   const [expanded, setExpanded] = useState<string | null>('clearinghouse');
   const [showTruck, setShowTruck] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [showScreen, setShowScreen] = useState(false);
   const [action, setAction] = useState<ActionKind | null>(null);
   const [activity, setActivity] = useState<Activity[]>(INITIAL_ACTIVITY);
   const [autoAdvance, setAutoAdvance] = useState(true);
@@ -120,8 +122,10 @@ export default function CandidateRecord() {
     <>
       <PageHeader
         crumbs={[{ label: 'Carriers', to: '/carriers' }, { label: s.currentCarrier.name, to: `/carriers/${c.carrierId}` }, { label: 'Hiring', to: `/carriers/${c.carrierId}/hiring` }, { label: c.name }]}
-        actions={<div className="flex gap-2"><button onClick={() => setShowEdit(true)} className="btn-ghost">Edit</button><button onClick={() => { if (confirm(`Archive ${c.name}?`)) nav(`/carriers/${c.carrierId}/hiring`); }} className="btn-ghost text-danger">Archive</button></div>}
+        actions={<div className="flex gap-2"><button onClick={() => setShowScreen(true)} className="btn-primary">✓ Run AI Screening</button><button onClick={() => setShowEdit(true)} className="btn-ghost">Edit</button><button onClick={() => { if (confirm(`Archive ${c.name}?`)) nav(`/carriers/${c.carrierId}/hiring`); }} className="btn-ghost text-danger">Archive</button></div>}
       />
+
+      {showScreen && <CandidateScreening candidateName={c.name} carrierId={c.carrierId} onClose={() => setShowScreen(false)} />}
 
       <div className="flex-1 overflow-hidden">
         <div className="flex h-full">

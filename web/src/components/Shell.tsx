@@ -118,6 +118,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           )}
           <NavItem to="/departments" icon="🗂" label="Departments" />
           {can(s.role, 'admin') && <NavItem to={link('administration')} icon="⚙" label="Administration" />}
+          <NavItem to="/settings" icon="🛠" label="Settings" />
+          <NavItem to="/settings#screening" icon="✅" label="Driver Screening" />
 
           {can(s.role, 'multicarrier') && <>
             <SectionLabel>My Carriers</SectionLabel>
