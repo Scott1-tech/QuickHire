@@ -377,6 +377,118 @@ Write a concise compliance summary as Molly. Return ONLY valid JSON matching thi
   return JSON.parse(json);
 }
 
+// ── Driver screening (CDL / MVR / PSP / Insurance) ───────────────────────────
+// Evaluates one applicant against a carrier's stated requirements and returns an
+// approve/reject verdict with a per-category reason. Uses Claude when configured,
+// and falls back to a deterministic rule engine so the feature always returns a
+// verdict (and is testable without an API key).
+const SCREENING_MODEL = process.env.SCREENING_MODEL || 'claude-opus-4-8';
+const SCREEN_SYSTEM =
+  'You are an FMCSA-compliant driver-qualification assistant for a CDL trucking carrier. ' +
+  'You evaluate a single applicant strictly against the carrier\'s stated hiring requirements ' +
+  'across four areas: CDL, MVR (motor vehicle record), PSP (FMCSA Pre-Employment Screening), and Insurance. ' +
+  'Judge ONLY against the provided requirements and data. Never consider age, race, sex, religion, ' +
+  'national origin, disability, or any other protected characteristic. Cite specific numbers in every reason. ' +
+  'If data needed for a category is missing, mark that category as needing review rather than guessing.';
+
+function normalizeScreen(p = {}) {
+  const decision = ['approved', 'rejected', 'review'].includes(p.decision) ? p.decision : 'review';
+  const categories = Array.isArray(p.categories)
+    ? p.categories.map((c) => ({ key: String(c.key || ''), pass: Boolean(c.pass), reason: String(c.reason || '') }))
+    : [];
+  return { decision, categories, summary: String(p.summary || '') };
+}
+
+async function screenWithAI(requirements, driver) {
+  const userPrompt =
+    `Carrier requirements:\n${JSON.stringify(requirements, null, 2)}\n\n` +
+    `Driver applicant:\n${JSON.stringify(driver, null, 2)}\n\n` +
+    'Evaluate each of the four categories (CDL, MVR, PSP, Insurance) against the requirements. ' +
+    'Return ONLY valid JSON matching this schema exactly:\n' +
+    '{\n' +
+    '  "decision": "approved" | "rejected" | "review",\n' +
+    '  "categories": [ { "key": "CDL" | "MVR" | "PSP" | "Insurance", "pass": true | false, "reason": "one concise sentence citing specifics" } ],\n' +
+    '  "summary": "one or two sentence overall recommendation"\n' +
+    '}\n' +
+    'Approve only if every category passes. Reject if any hard requirement fails. Use "review" only when required data is missing.';
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: SCREENING_MODEL,
+      max_tokens: 1024,
+      system: SCREEN_SYSTEM,
+      messages: [{ role: 'user', content: userPrompt }],
+    }),
+  });
+  if (!res.ok) throw new Error(`Anthropic API error ${res.status}`);
+  const data = await res.json();
+  const text = data.content?.[0]?.text || '';
+  const json = text.match(/\{[\s\S]*\}/)?.[0];
+  if (!json) throw new Error('Could not parse screening response');
+  return normalizeScreen(JSON.parse(json));
+}
+
+function screenHeuristic(reqs = {}, driver = {}) {
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const rank = { A: 3, B: 2, C: 1 };
+  const categories = [];
+
+  // CDL
+  {
+    const r = reqs.cdl || {}, d = driver.cdl || {};
+    const fails = [];
+    if (r.class && (rank[String(d.class || '').toUpperCase()] || 0) < (rank[String(r.class).toUpperCase()] || 0))
+      fails.push(`Requires a Class ${r.class} CDL; applicant holds ${d.class ? 'Class ' + d.class : 'no class on file'}.`);
+    const missing = (r.endorsements || []).filter((e) => !(d.endorsements || []).includes(e));
+    if (missing.length) fails.push(`Missing required endorsement(s): ${missing.join(', ')}.`);
+    if (num(d.experienceYears) < num(r.minExperienceYears))
+      fails.push(`Requires ${num(r.minExperienceYears)} yr(s) experience; applicant has ${num(d.experienceYears)}.`);
+    if (r.allowOwnerOperator === false && d.type === 'owner-operator')
+      fails.push('Owner-operators are not accepted for this requirement.');
+    if (num(r.minValidityDays) > 0 && num(d.expiresInDays) < num(r.minValidityDays))
+      fails.push(`CDL must be valid ${num(r.minValidityDays)}+ days; expires in ${num(d.expiresInDays)} day(s).`);
+    categories.push({ key: 'CDL', pass: !fails.length, reason: fails.length ? fails.join(' ') : `Class ${d.class || '—'} CDL meets class, endorsement, experience, and validity requirements.` });
+  }
+  // MVR
+  {
+    const r = reqs.mvr || {}, d = driver.mvr || {};
+    const fails = [];
+    if (num(d.movingViolations) > num(r.maxMovingViolations)) fails.push(`${num(d.movingViolations)} moving violation(s) exceeds the limit of ${num(r.maxMovingViolations)}.`);
+    if (num(d.accidents) > num(r.maxAccidents)) fails.push(`${num(d.accidents)} accident(s) exceeds the limit of ${num(r.maxAccidents)}.`);
+    if (num(d.dui) > num(r.maxDUI)) fails.push(`${num(d.dui)} DUI/DWI exceeds the limit of ${num(r.maxDUI)}.`);
+    categories.push({ key: 'MVR', pass: !fails.length, reason: fails.length ? fails.join(' ') : `Driving record is within limits over the last ${num(r.lookbackYears) || 3} years.` });
+  }
+  // PSP
+  {
+    const r = reqs.psp || {}, d = driver.psp || {};
+    const fails = [];
+    if (num(d.crashes) > num(r.maxCrashes)) fails.push(`${num(d.crashes)} PSP crash(es) exceeds the limit of ${num(r.maxCrashes)}.`);
+    if (num(d.oosInspections) > num(r.maxOOSInspections)) fails.push(`${num(d.oosInspections)} out-of-service inspection(s) exceeds the limit of ${num(r.maxOOSInspections)}.`);
+    categories.push({ key: 'PSP', pass: !fails.length, reason: fails.length ? fails.join(' ') : 'PSP crash and inspection history is within limits.' });
+  }
+  // Insurance
+  {
+    const r = reqs.insurance || {}, d = driver.insurance || {};
+    const fails = [];
+    if (num(d.autoLiability) < num(r.minAutoLiability)) fails.push(`Auto liability $${num(d.autoLiability).toLocaleString()} is below the required $${num(r.minAutoLiability).toLocaleString()}.`);
+    if (r.cargoRequired && !d.hasCargo) fails.push('Cargo insurance is required but none is on file.');
+    if (r.cargoRequired && d.hasCargo && num(d.cargo) < num(r.minCargo)) fails.push(`Cargo coverage $${num(d.cargo).toLocaleString()} is below the required $${num(r.minCargo).toLocaleString()}.`);
+    categories.push({ key: 'Insurance', pass: !fails.length, reason: fails.length ? fails.join(' ') : 'Insurance coverage meets the stated minimums.' });
+  }
+
+  const allPass = categories.every((c) => c.pass);
+  const failed = categories.filter((c) => !c.pass).map((c) => c.key);
+  return {
+    decision: allPass ? 'approved' : 'rejected',
+    categories,
+    summary: allPass
+      ? 'Applicant meets all stated CDL, MVR, PSP, and insurance requirements and is recommended for approval.'
+      : `Applicant does not meet requirements in: ${failed.join(', ')}. See category notes for specifics.`,
+  };
+}
+
 // ── Decode & save base64 file ─────────────────────────────────────────────
 function decodeAndSave(subDir, field, payload) {
   if (!payload?.dataUrl) return null;
@@ -611,6 +723,25 @@ app.post('/api/candidates/:id/molly/:stepId', requireAdmin, async (req, res) => 
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ── Driver screening ──────────────────────────────────────────────────────────
+// Evaluate one applicant against a carrier's requirements (CDL / MVR / PSP /
+// Insurance). Returns { decision, categories[], summary, engine }. Falls back to
+// the deterministic rule engine when no API key is set or the AI call fails.
+app.post('/api/screen', requireAdmin, async (req, res) => {
+  const { requirements, driver } = req.body || {};
+  if (!requirements || !driver) return res.status(400).json({ error: 'requirements and driver are required.' });
+  if (ANTHROPIC_API_KEY) {
+    try {
+      const result = await screenWithAI(requirements, driver);
+      return res.json({ ...result, engine: 'ai', model: SCREENING_MODEL });
+    } catch (e) {
+      // Degrade gracefully to the rule engine rather than failing the request.
+      return res.json({ ...screenHeuristic(requirements, driver), engine: 'rules', aiError: e.message });
+    }
+  }
+  return res.json({ ...screenHeuristic(requirements, driver), engine: 'rules' });
 });
 
 // ── Documents ─────────────────────────────────────────────────────────────────

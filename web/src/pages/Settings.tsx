@@ -1,12 +1,18 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useStore } from '@/store';
 import { PageHeader, Pill } from '@/ui';
+import DriverScreening from '@/components/DriverScreening';
 
-const TABS = ['Profile', 'Security', 'Integrations', 'Notifications', 'Appearance'];
+const TABS = ['Profile', 'Driver Screening', 'Security', 'Integrations', 'Notifications', 'Appearance'];
 
 export default function Settings() {
   const s = useStore();
-  const [tab, setTab] = useState('Profile');
+  const loc = useLocation();
+  const [tab, setTab] = useState(loc.hash === '#screening' ? 'Driver Screening' : 'Profile');
+
+  // Allow the sidebar "Driver Screening" link to deep-link to the tab.
+  useEffect(() => { if (loc.hash === '#screening') setTab('Driver Screening'); }, [loc.hash, loc.key]);
 
   return (
     <>
@@ -18,6 +24,8 @@ export default function Settings() {
               className={`px-3 py-2 text-[13px] font-medium -mb-px border-b-2 ${tab === t ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-ink'}`}>{t}</button>
           ))}
         </div>
+
+        {tab === 'Driver Screening' && <DriverScreening />}
 
         <div className="max-w-xl">
           {tab === 'Profile' && (
