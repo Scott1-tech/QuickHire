@@ -4,6 +4,7 @@ import { useStore } from '@/store';
 import { PageHeader, Pill, Empty, timeAgo } from '@/ui';
 import { DRIVERS, CANDIDATES, TRUCKS } from '@/data/mock';
 import CarrierForm from '@/components/CarrierForm';
+import LinkSender from '@/components/LinkSender';
 import {
   listCarriers, createCarrier, getCarrierForm, statusMeta,
   type CarrierSummary, type CarrierSection, type DispatchResult,
@@ -178,7 +179,6 @@ function InviteCarrier({ back, onClose, onCreated }: { back: () => void; onClose
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [result, setResult] = useState<DispatchResult | null>(null);
-  const [copied, setCopied] = useState(false);
 
   const send = async () => {
     if (!name.trim()) { setErr('Company name is required.'); return; }
@@ -191,20 +191,10 @@ function InviteCarrier({ back, onClose, onCreated }: { back: () => void; onClose
 
   if (result) return (
     <div>
-      <div className="flex items-center gap-2 text-success font-bold text-[15px] mt-3 mb-2">✓ Carrier added & link sent</div>
-      <div className="rounded-lg bg-slate-50 border border-line p-3 mb-3 text-[12.5px]">
-        <div className={result.email ? (result.email.sent ? 'text-success' : 'text-danger') : 'text-muted'}>
-          Email: {result.email ? (result.email.sent ? 'sent ✓' : `not sent — ${result.email.reason}`) : 'no email entered'}</div>
-        <div className={result.sms ? (result.sms.sent ? 'text-success' : 'text-danger') : 'text-muted'}>
-          SMS: {result.sms ? (result.sms.sent ? 'sent ✓' : `not sent — ${result.sms.reason}`) : 'no phone entered'}</div>
-      </div>
-      <label className="field-label">Shareable link (copy &amp; send manually if needed)</label>
-      <div className="flex gap-2">
-        <input className="input flex-1 text-[12px]" readOnly value={result.link ?? ''} onFocus={(e) => e.target.select()} />
-        <button className="btn-ghost" onClick={() => { if (result.link) { navigator.clipboard?.writeText(result.link); setCopied(true); setTimeout(() => setCopied(false), 1500); } }}>
-          {copied ? 'Copied' : 'Copy'}</button>
-      </div>
-      <button onClick={onClose} className="btn-primary w-full mt-5">Done</button>
+      <div className="flex items-center gap-2 text-success font-bold text-[15px] mt-3 mb-2">✓ Carrier added</div>
+      <LinkSender link={result.link} name={name} ownerName={ownerName} email={email} phone={phone}
+        serverEmail={result.email} serverSms={result.sms} />
+      <button onClick={onClose} className="btn-ghost w-full mt-5">Done</button>
     </div>
   );
 

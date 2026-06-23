@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useStore } from '@/store';
 import { PageHeader, Pill } from '@/ui';
 import DataTable, { type Column } from '@/components/DataTable';
+import CreateModal from '@/components/CreateModal';
 import type { Driver } from '@/types';
 
 const TABS = [
@@ -85,41 +86,7 @@ export default function Drivers() {
         )}
       </div>
 
-      {showAdd && <AddDriver onClose={() => setShowAdd(false)} />}
+      {showAdd && <CreateModal kind="driver" open onClose={() => setShowAdd(false)} />}
     </>
-  );
-}
-
-function AddDriver({ onClose }: { onClose: () => void }) {
-  const s = useStore();
-  const [form, setForm] = useState({ name: '', license: '', state: '', phone: '', email: '', type: 'company' });
-  const [msg, setMsg] = useState('');
-  const save = () => {
-    if (!form.name || !form.license) { setMsg('Name and license are required.'); return; }
-    setMsg(`${form.name.toUpperCase()} added to ${s.currentCarrier.name}.`);
-    setTimeout(onClose, 1200);
-  };
-  return (
-    <div className="fixed inset-0 bg-black/40 z-50 grid place-items-center p-4" onClick={onClose}>
-      <div className="card p-6 w-[460px] max-w-full shadow-pop" onClick={(e) => e.stopPropagation()}>
-        <div className="text-lg font-extrabold text-ink mb-4">Add Driver</div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2"><label className="field-label">Driver Name *</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input" /></div>
-          <div><label className="field-label">License # *</label><input value={form.license} onChange={(e) => setForm({ ...form, license: e.target.value })} className="input" /></div>
-          <div><label className="field-label">State</label><input value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} className="input" /></div>
-          <div><label className="field-label">Phone</label><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="input" /></div>
-          <div><label className="field-label">Email</label><input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="input" /></div>
-          <div className="col-span-2"><label className="field-label">Type</label>
-            <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="input">
-              <option value="company">Company</option><option value="owner-operator">Owner Operator</option>
-            </select></div>
-        </div>
-        {msg && <div className="text-[12.5px] text-success mt-3">{msg}</div>}
-        <div className="flex gap-2 mt-5">
-          <button onClick={save} className="btn-primary flex-1">Save Driver</button>
-          <button onClick={onClose} className="btn-ghost">Cancel</button>
-        </div>
-      </div>
-    </div>
   );
 }

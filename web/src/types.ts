@@ -97,16 +97,28 @@ export interface Employee {
 }
 
 export type TaskStatus = 'TO DO' | 'IN PROGRESS' | 'REVIEW NEEDED' | 'LONG-TERM' | 'COMPLETE';
+export interface TaskChecklistItem { id: string; text: string; done: boolean }
+export interface TaskComment { id: string; author: string; text: string; at: string }
 export interface Task {
   id: string;
   carrierId: string;
   title: string;
   status: TaskStatus;
   assignee?: string;
+  start?: string;
   due?: string;
   priority?: 'Urgent' | 'High' | 'Normal';
   comments?: number;
   attachments?: number;
+  // rich fields (ClickUp-style task record)
+  tags?: string[];
+  description?: string;
+  timeEstimate?: string;
+  checklist?: TaskChecklistItem[];
+  commentList?: TaskComment[];
+  createdBy?: string;
+  source?: string;
+  createdAt?: string;
 }
 
 export interface NotificationItem {

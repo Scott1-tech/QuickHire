@@ -17,6 +17,7 @@ import Trucks from '@/pages/Trucks';
 import TruckRecord from '@/pages/TruckRecord';
 import People from '@/pages/People';
 import Departments from '@/pages/Departments';
+import Tasks from '@/pages/Tasks';
 import Notifications from '@/pages/Notifications';
 import Inbox from '@/pages/Inbox';
 import Administration from '@/pages/Administration';
@@ -49,7 +50,7 @@ const router = createBrowserRouter([
   { path: '/departments', element: <App><Departments /></App> },
   { path: '/notifications', element: <App><Notifications /></App> },
   { path: '/inbox', element: <App><Inbox /></App> },
-  { path: '/tasks', element: <App><Departments /></App> },
+  { path: '/tasks', element: <App><Tasks /></App> },
   { path: '/research', element: <App><Research /></App> },
   { path: '/settings', element: <App><Settings /></App> },
   { path: '*', element: <Navigate to="/dashboard" replace /> },

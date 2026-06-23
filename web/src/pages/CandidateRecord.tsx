@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useStore } from '@/store';
 import { PageHeader, Pill, Empty, timeAgo } from '@/ui';
-import { CHECKLIST_TEMPLATE, DOC_TYPES_MAIN } from '@/data/mock';
+import { DOC_TYPES_MAIN } from '@/data/mock';
 import { STAGES, type ChecklistStep, type Stage } from '@/types';
 import CandidateScreening from '@/components/CandidateScreening';
 
@@ -51,7 +51,7 @@ export default function CandidateRecord() {
   const nav = useNavigate();
   const { candidateId } = useParams();
   const [tab, setTab] = useState('Pipeline');
-  const [steps, setSteps] = useState<ChecklistStep[]>(() => CHECKLIST_TEMPLATE.map((x) => ({ ...x })));
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, ChecklistStep['status']>>({});
   const [expanded, setExpanded] = useState<string | null>('clearinghouse');
   const [showTruck, setShowTruck] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
@@ -87,6 +87,8 @@ export default function CandidateRecord() {
   };
 
   const c = s.candidates.find((x) => x.id === candidateId);
+  // Steps come from the (customizable) store template; completion is per-candidate.
+  const steps = s.checklistTemplate.map((x) => ({ ...x, status: statusOverrides[x.id] ?? x.status }));
   const done = steps.filter((x) => x.status === 'complete').length;
   const allDone = c ? done === steps.length : false;
   const nextStage: Stage | null = c ? (STAGES[STAGES.indexOf(c.stage) + 1] ?? null) : null;
@@ -101,8 +103,10 @@ export default function CandidateRecord() {
 
   if (!c) return <><PageHeader crumbs={[{ label: 'Hiring' }]} /><Empty icon="🚫" title="Candidate not found" /></>;
 
-  const toggle = (id: string) =>
-    setSteps((prev) => prev.map((x) => x.id === id ? { ...x, status: x.status === 'complete' ? 'ready' : 'complete' } : x));
+  const toggle = (id: string) => {
+    const cur = steps.find((x) => x.id === id)?.status;
+    setStatusOverrides((prev) => ({ ...prev, [id]: cur === 'complete' ? 'ready' : 'complete' }));
+  };
 
   const addActivity = (type: Activity['type'], text: string) => {
     setActivity((prev) => [{ id: 'a' + Date.now(), type, author: recruiter, time: new Date().toISOString(), text }, ...prev]);
@@ -166,6 +170,9 @@ export default function CandidateRecord() {
               <EditableField label="Phone" value={edits.phone ?? c.phone ?? ''} onSave={(v) => setEdits((p) => ({ ...p, phone: v }))} link={`tel:${edits.phone ?? c.phone}`} />
               <EditableField label="Email" value={edits.email ?? c.email} onSave={(v) => setEdits((p) => ({ ...p, email: v }))} link={`mailto:${edits.email ?? c.email}`} />
             </div>
+
+            {/* Assigned truck — editable: switch among available trucks */}
+            <AssignedTruck candidateId={c.id} assignedTruckId={c.assignedTruckId ?? null} />
 
             {/* Recent Activity feed — left side */}
             <div className="card overflow-hidden flex flex-col">
@@ -463,6 +470,31 @@ function Documents() {
           <label className="flex items-center gap-2 text-[13px] mb-3"><input type="checkbox" defaultChecked /> Extract with AI (OCR)</label>
           <div className="border-2 border-dashed border-line rounded-xl p-8 text-center text-sm text-muted">Drag & drop files here, or click to browse — up to 10 files, 10MB each</div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// Editable assigned-truck card on the candidate record — switch among available trucks.
+function AssignedTruck({ candidateId, assignedTruckId }: { candidateId: string; assignedTruckId: string | null }) {
+  const s = useStore();
+  const assigned = s.trucks.find((t) => t.id === assignedTruckId);
+  const options = s.trucks.filter((t) => t.status === 'Available' || t.id === assignedTruckId);
+  return (
+    <div className="card p-3">
+      <div className="text-[10px] font-bold text-muted uppercase mb-2">Assigned Truck</div>
+      <select className="input py-1.5" value={assignedTruckId ?? ''}
+        onChange={(e) => s.assignTruckToCandidate(candidateId, e.target.value || null)}>
+        <option value="">— Unassigned —</option>
+        {options.map((t) => <option key={t.id} value={t.id}>#{t.unit} · {t.make} {t.model}</option>)}
+      </select>
+      {assigned ? (
+        <div className="text-[11.5px] text-muted mt-2 flex items-center gap-2">
+          <span>{assigned.year} · {assigned.plate}</span>
+          <Pill kind={assigned.status}>{assigned.status}</Pill>
+        </div>
+      ) : (
+        <div className="text-[11.5px] text-muted mt-2">No truck assigned. Pick an available truck above.</div>
       )}
     </div>
   );

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useStore } from '@/store';
+import Icon from '@/components/Icon';
+import TaskModal from '@/components/TaskModal';
 import type { Role } from '@/types';
 
 const ROLES: Role[] = ['Recruiter', 'Owner', 'Super Admin'];
@@ -24,6 +26,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [roleOpen, setRoleOpen] = useState(false);
   const [carrierOpen, setCarrierOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [quickTask, setQuickTask] = useState(false);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -78,7 +81,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           </div>
 
           <NavItem to="/dashboard" icon="⊞" label="Dashboard" />
-          <NavItem to="/carriers" icon="🏢" label="Carriers" />
 
           <SectionLabel>Features</SectionLabel>
           <NavItem to="/notifications" icon="🔔" label="Notifications" badge="3" />
@@ -114,6 +116,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <NavItem to={link('hiring')} icon="🧭" label="Hiring" />
           <NavItem to={link('drivers')} icon="🚚" label="Drivers" />
           <NavItem to={link('trucks')} icon="🚛" label="Trucks" />
+          <NavItem to="/carriers" icon="🏢" label="Carriers" />
           {can(s.role, 'people') && (
             <NavItem to="/employees" icon="👥" label="Employees" />
           )}
@@ -144,12 +147,22 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       {/* Main */}
       <main className="flex-1 flex flex-col overflow-hidden">{children}</main>
 
-      {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} onGo={(to) => { nav(to); setPaletteOpen(false); }} />}
+      {/* Create-anywhere: floating New Task button, available on every page */}
+      <button onClick={() => setQuickTask(true)} title="Create a task (works anywhere)"
+        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 bg-primary text-white font-semibold rounded-full pl-4 pr-5 py-3 shadow-pop hover:-translate-y-0.5 transition">
+        <Icon name="plus" size={18} /> New Task
+      </button>
+
+      {paletteOpen && <CommandPalette
+        onClose={() => setPaletteOpen(false)}
+        onGo={(to) => { nav(to); setPaletteOpen(false); }}
+        onCreateTask={() => { setPaletteOpen(false); setQuickTask(true); }} />}
+      {quickTask && <TaskModal createSeed={{ assignee: s.currentUser }} onClose={() => setQuickTask(false)} />}
     </div>
   );
 }
 
-function CommandPalette({ onClose, onGo }: { onClose: () => void; onGo: (to: string) => void }) {
+function CommandPalette({ onClose, onGo, onCreateTask }: { onClose: () => void; onGo: (to: string) => void; onCreateTask: () => void }) {
   const s = useStore();
   const [q, setQ] = useState('');
   const ref = useRef<HTMLInputElement>(null);
@@ -173,6 +186,10 @@ function CommandPalette({ onClose, onGo }: { onClose: () => void; onGo: (to: str
           <kbd className="text-[11px] text-muted border border-line rounded px-1.5 py-0.5">ESC</kbd>
         </div>
         <div className="p-2 max-h-80 overflow-y-auto">
+          <button onClick={onCreateTask} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] text-left text-primary font-semibold text-sm">
+            <Icon name="plus" size={16} /> Create new task
+          </button>
+          <div className="border-t border-line my-1" />
           {!ql && <div className="p-5 text-center text-sm text-muted">Start typing to search…</div>}
           {ql && hits.length === 0 && <div className="p-5 text-center text-sm text-muted">No results.</div>}
           {hits.map((h, i) => (
