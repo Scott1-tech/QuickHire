@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, CSSProperties } from 'react';
 
 // Lightweight professional line-icon set (stroke-based, inherits currentColor).
 // Used across the dashboard in place of decorative emoji.
@@ -129,16 +129,45 @@ const PATHS: Record<string, ReactNode> = {
       <path d="M15 3v18" />
     </>
   ),
+  flag: <path d="M4 22V4M4 4h12l-1.6 3.5L16 11H4" />,
+  hourglass: <path d="M7 3h10v3l-5 6 5 6v3H7v-3l5-6-5-6V3Z" />,
+  link: (
+    <>
+      <path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1" />
+      <path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" />
+    </>
+  ),
+  paperclip: <path d="M21.4 11.6 12 21a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6L14 11" />,
+  sparkles: (
+    <>
+      <path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8L12 3Z" />
+      <path d="M19 14l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7L19 14Z" />
+    </>
+  ),
+  search: (<><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></>),
+  bell: (<><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></>),
+  filter: <path d="M22 3H2l8 9.5V19l4 2v-8.5L22 3Z" />,
+  chevronDown: <path d="m6 9 6 6 6-6" />,
+  chevronRight: <path d="m9 6 6 6-6 6" />,
+  dots: (<><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></>),
+  star: <path d="M12 2l3 6.5 7 .9-5 4.8 1.3 7L12 18l-6.3 3.2L7 14 2 9.4l7-.9L12 2Z" />,
+  share: (<><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4" /></>),
+  send: <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z" />,
+  at: (<><circle cx="12" cy="12" r="4" /><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" /></>),
+  smile: (<><circle cx="12" cy="12" r="9" /><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01" /></>),
+  mic: (<><rect x="9" y="2" width="6" height="11" rx="3" /><path d="M5 10a7 7 0 0 0 14 0M12 19v3" /></>),
+  listChecklist: (<><path d="M9 6h11M9 12h11M9 18h11" /><path d="m3 6 1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2" /></>),
+  subtask: (<><path d="M7 4v9a3 3 0 0 0 3 3h10" /><path d="m17 12 3 4-3 4" /></>),
 };
 
 export default function Icon({
-  name, size = 20, className = '', strokeWidth = 1.75,
-}: { name: keyof typeof PATHS | string; size?: number; className?: string; strokeWidth?: number }) {
+  name, size = 20, className = '', strokeWidth = 1.75, style,
+}: { name: keyof typeof PATHS | string; size?: number; className?: string; strokeWidth?: number; style?: CSSProperties }) {
   return (
     <svg
       width={size} height={size} viewBox="0 0 24 24" fill="none"
       stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"
-      className={className} aria-hidden="true"
+      className={className} style={style} aria-hidden="true"
     >
       {PATHS[name] ?? null}
     </svg>
