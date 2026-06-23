@@ -4,6 +4,7 @@ import { useStore } from '@/store';
 import { PageHeader, Pill, timeSince, isStale } from '@/ui';
 import { STAGES, type Stage } from '@/types';
 import CreateModal from '@/components/CreateModal';
+import CustomizePipeline from '@/components/CustomizePipeline';
 
 export default function Hiring() {
   const s = useStore();
@@ -12,6 +13,8 @@ export default function Hiring() {
   const [q, setQ] = useState('');
   const [recruiter, setRecruiter] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [showCustomize, setShowCustomize] = useState(false);
+  const fullAccess = s.role === 'Owner' || s.role === 'Super Admin';
   const [dragId, setDragId] = useState<string | null>(null);
   const [overStage, setOverStage] = useState<Stage | null>(null);
 
@@ -35,7 +38,10 @@ export default function Hiring() {
             <option value="">All recruiters</option>
             {owners.map((o) => <option key={o} value={o}>{o}</option>)}
           </select>
-          <button onClick={() => setShowAdd(true)} className="btn-primary ml-auto">＋ Add Candidate</button>
+          <div className="ml-auto flex items-center gap-2">
+            {fullAccess && <button onClick={() => setShowCustomize(true)} className="btn-ghost" title="Full access only">⚙ Customize Pipeline</button>}
+            <button onClick={() => setShowAdd(true)} className="btn-primary">＋ Add Candidate</button>
+          </div>
         </div>
 
         {view === 'board' ? (
@@ -96,6 +102,7 @@ export default function Hiring() {
       </div>
 
       {showAdd && <CreateModal kind="candidate" open onClose={() => setShowAdd(false)} />}
+      {showCustomize && <CustomizePipeline onClose={() => setShowCustomize(false)} />}
     </>
   );
 }

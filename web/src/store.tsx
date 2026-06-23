@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { Carrier, Candidate, Driver, Truck, Employee, Task, Role, Stage } from '@/types';
-import { CARRIERS, CANDIDATES, DRIVERS, TRUCKS, EMPLOYEES, TASKS } from '@/data/mock';
+import type { Carrier, Candidate, Driver, Truck, Employee, Task, ChecklistStep, Role, Stage } from '@/types';
+import { CARRIERS, CANDIDATES, DRIVERS, TRUCKS, EMPLOYEES, TASKS, CHECKLIST_TEMPLATE } from '@/data/mock';
 
 interface Store {
   role: Role;
@@ -25,6 +25,11 @@ interface Store {
   allTasks: Task[];
   // the signed-in user (for "assigned to me" / inbox)
   currentUser: string;
+  // hiring pipeline checklist template (customizable by full-access users)
+  checklistTemplate: ChecklistStep[];
+  reorderChecklist: (id: string, dir: 'up' | 'down') => void;
+  addChecklistStep: (step: { name: string; group: ChecklistStep['group']; description?: string }) => void;
+  removeChecklistStep: (id: string) => void;
   // mutations
   moveCandidate: (id: string, stage: Stage) => void;
   addCandidate: (c: Partial<Candidate>) => Candidate;
@@ -56,6 +61,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [trucks, setTrucks] = useState<Truck[]>(TRUCKS);
   const [employees, setEmployees] = useState<Employee[]>(EMPLOYEES);
   const [tasks, setTasks] = useState<Task[]>(TASKS);
+  const [checklistTemplate, setChecklistTemplate] = useState<ChecklistStep[]>(CHECKLIST_TEMPLATE);
   const currentUser = 'Fleet Admin';
 
   useEffect(() => {
@@ -87,6 +93,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     allEmployees: employees,
     allTasks: tasks,
     currentUser,
+    checklistTemplate,
+    reorderChecklist: (id, dir) => setChecklistTemplate((prev) => {
+      const idx = prev.findIndex((x) => x.id === id);
+      if (idx < 0) return prev;
+      const group = prev[idx].group;
+      let swap = -1;
+      if (dir === 'up') { for (let i = idx - 1; i >= 0; i--) if (prev[i].group === group) { swap = i; break; } }
+      else { for (let i = idx + 1; i < prev.length; i++) if (prev[i].group === group) { swap = i; break; } }
+      if (swap < 0) return prev;
+      const next = [...prev];
+      [next[idx], next[swap]] = [next[swap], next[idx]];
+      return next;
+    }),
+    addChecklistStep: (step) => setChecklistTemplate((prev) => [
+      ...prev, { id: uid('ck'), name: step.name, group: step.group, status: 'action', description: step.description },
+    ]),
+    removeChecklistStep: (id) => setChecklistTemplate((prev) => prev.filter((x) => x.id !== id)),
     moveCandidate: (id, stage) =>
       setCandidates((prev) =>
         prev.map((c) => (c.id === id ? { ...c, stage, stageEnteredAt: new Date().toISOString() } : c)),

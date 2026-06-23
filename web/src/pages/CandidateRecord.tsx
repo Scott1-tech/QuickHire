@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useStore } from '@/store';
 import { PageHeader, Pill, Empty, timeAgo } from '@/ui';
-import { CHECKLIST_TEMPLATE, DOC_TYPES_MAIN } from '@/data/mock';
+import { DOC_TYPES_MAIN } from '@/data/mock';
 import { STAGES, type ChecklistStep, type Stage } from '@/types';
 import CandidateScreening from '@/components/CandidateScreening';
 
@@ -51,7 +51,7 @@ export default function CandidateRecord() {
   const nav = useNavigate();
   const { candidateId } = useParams();
   const [tab, setTab] = useState('Pipeline');
-  const [steps, setSteps] = useState<ChecklistStep[]>(() => CHECKLIST_TEMPLATE.map((x) => ({ ...x })));
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, ChecklistStep['status']>>({});
   const [expanded, setExpanded] = useState<string | null>('clearinghouse');
   const [showTruck, setShowTruck] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
@@ -87,6 +87,8 @@ export default function CandidateRecord() {
   };
 
   const c = s.candidates.find((x) => x.id === candidateId);
+  // Steps come from the (customizable) store template; completion is per-candidate.
+  const steps = s.checklistTemplate.map((x) => ({ ...x, status: statusOverrides[x.id] ?? x.status }));
   const done = steps.filter((x) => x.status === 'complete').length;
   const allDone = c ? done === steps.length : false;
   const nextStage: Stage | null = c ? (STAGES[STAGES.indexOf(c.stage) + 1] ?? null) : null;
@@ -101,8 +103,10 @@ export default function CandidateRecord() {
 
   if (!c) return <><PageHeader crumbs={[{ label: 'Hiring' }]} /><Empty icon="🚫" title="Candidate not found" /></>;
 
-  const toggle = (id: string) =>
-    setSteps((prev) => prev.map((x) => x.id === id ? { ...x, status: x.status === 'complete' ? 'ready' : 'complete' } : x));
+  const toggle = (id: string) => {
+    const cur = steps.find((x) => x.id === id)?.status;
+    setStatusOverrides((prev) => ({ ...prev, [id]: cur === 'complete' ? 'ready' : 'complete' }));
+  };
 
   const addActivity = (type: Activity['type'], text: string) => {
     setActivity((prev) => [{ id: 'a' + Date.now(), type, author: recruiter, time: new Date().toISOString(), text }, ...prev]);
