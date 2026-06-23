@@ -97,8 +97,10 @@ export interface Employee {
 }
 
 export type TaskStatus = 'TO DO' | 'IN PROGRESS' | 'REVIEW NEEDED' | 'LONG-TERM' | 'COMPLETE';
+export type TaskPriority = 'Urgent' | 'High' | 'Normal' | 'Low';
 export interface TaskChecklistItem { id: string; text: string; done: boolean }
-export interface TaskComment { id: string; author: string; text: string; at: string }
+export interface TaskComment { id: string; author: string; text: string; at: string; replies?: TaskComment[] }
+export interface TaskActivityEvent { id: string; text: string; at: string; author?: string }
 export interface Task {
   id: string;
   carrierId: string;
@@ -107,7 +109,7 @@ export interface Task {
   assignee?: string;
   start?: string;
   due?: string;
-  priority?: 'Urgent' | 'High' | 'Normal';
+  priority?: TaskPriority;
   comments?: number;
   attachments?: number;
   // rich fields (ClickUp-style task record)
@@ -116,6 +118,8 @@ export interface Task {
   timeEstimate?: string;
   checklist?: TaskChecklistItem[];
   commentList?: TaskComment[];
+  activityLog?: TaskActivityEvent[];
+  reviewer?: string;
   createdBy?: string;
   source?: string;
   createdAt?: string;

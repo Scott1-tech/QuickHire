@@ -219,6 +219,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         timeEstimate: t.timeEstimate,
         checklist: t.checklist ?? [],
         commentList: t.commentList ?? [],
+        reviewer: t.reviewer,
         comments: 0,
         attachments: 0,
         createdBy: t.createdBy ?? currentUser,
