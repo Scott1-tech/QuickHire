@@ -113,6 +113,22 @@ const PATHS: Record<string, ReactNode> = {
       <circle cx="12" cy="12" r="2.5" />
     </>
   ),
+  check: <path d="M20 6 9 17l-5-5" />,
+  plus: <path d="M12 5v14M5 12h14" />,
+  layout: (
+    <>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M3 9h18M9 21V9" />
+    </>
+  ),
+  square: <rect x="4" y="4" width="16" height="16" rx="2" />,
+  maximize: <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3" />,
+  sidebarRight: (
+    <>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M15 3v18" />
+    </>
+  ),
 };
 
 export default function Icon({

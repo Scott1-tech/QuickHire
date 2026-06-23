@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { Carrier, Candidate, Driver, Truck, Employee, Role, Stage } from '@/types';
-import { CARRIERS, CANDIDATES, DRIVERS, TRUCKS, EMPLOYEES } from '@/data/mock';
+import type { Carrier, Candidate, Driver, Truck, Employee, Task, Role, Stage } from '@/types';
+import { CARRIERS, CANDIDATES, DRIVERS, TRUCKS, EMPLOYEES, TASKS } from '@/data/mock';
 
 interface Store {
   role: Role;
@@ -16,11 +16,15 @@ interface Store {
   drivers: Driver[];
   trucks: Truck[];
   employees: Employee[];
+  tasks: Task[];
   // full collections (global views like the dashboard)
   allCandidates: Candidate[];
   allDrivers: Driver[];
   allTrucks: Truck[];
   allEmployees: Employee[];
+  allTasks: Task[];
+  // the signed-in user (for "assigned to me" / inbox)
+  currentUser: string;
   // mutations
   moveCandidate: (id: string, stage: Stage) => void;
   addCandidate: (c: Partial<Candidate>) => Candidate;
@@ -28,7 +32,11 @@ interface Store {
   addTruck: (t: Partial<Truck>) => Truck;
   addCarrier: (c: Partial<Carrier>) => Carrier;
   addEmployee: (e: Partial<Employee>) => Employee;
+  addTask: (t: Partial<Task>) => Task;
+  updateTask: (id: string, patch: Partial<Task>) => void;
   assignTruck: (candidateId: string, truckId: string) => void;
+  assignTruckToCandidate: (candidateId: string, truckId: string | null) => void;
+  assignDriverToTruck: (truckId: string, driverId: string | null) => void;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -47,6 +55,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [drivers, setDrivers] = useState<Driver[]>(DRIVERS);
   const [trucks, setTrucks] = useState<Truck[]>(TRUCKS);
   const [employees, setEmployees] = useState<Employee[]>(EMPLOYEES);
+  const [tasks, setTasks] = useState<Task[]>(TASKS);
+  const currentUser = 'Fleet Admin';
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -70,10 +80,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     drivers: drivers.filter((d) => d.carrierId === currentCarrierId),
     trucks: trucks.filter((t) => t.carrierId === currentCarrierId),
     employees: employees.filter((e) => e.carrierId === currentCarrierId),
+    tasks: tasks.filter((t) => t.carrierId === currentCarrierId),
     allCandidates: candidates,
     allDrivers: drivers,
     allTrucks: trucks,
     allEmployees: employees,
+    allTasks: tasks,
+    currentUser,
     moveCandidate: (id, stage) =>
       setCandidates((prev) =>
         prev.map((c) => (c.id === id ? { ...c, stage, stageEnteredAt: new Date().toISOString() } : c)),
@@ -167,9 +180,56 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setEmployees((prev) => [created, ...prev]);
       return created;
     },
+    addTask: (t) => {
+      const now = new Date().toISOString();
+      const created: Task = {
+        id: uid('tk'),
+        carrierId: t.carrierId ?? currentCarrierId,
+        title: t.title ?? 'New Task',
+        status: t.status ?? 'TO DO',
+        assignee: t.assignee,
+        start: t.start,
+        due: t.due,
+        priority: t.priority,
+        tags: t.tags ?? [],
+        description: t.description ?? '',
+        timeEstimate: t.timeEstimate,
+        checklist: t.checklist ?? [],
+        commentList: t.commentList ?? [],
+        comments: 0,
+        attachments: 0,
+        createdBy: t.createdBy ?? currentUser,
+        source: t.source,
+        createdAt: now,
+      };
+      setTasks((prev) => [created, ...prev]);
+      return created;
+    },
+    updateTask: (id, patch) => setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t))),
     assignTruck: (candidateId, truckId) => {
       setCandidates((prev) => prev.map((c) => (c.id === candidateId ? { ...c, assignedTruckId: truckId } : c)));
       setTrucks((prev) => prev.map((t) => (t.id === truckId ? { ...t, status: 'Assigned' } : t)));
+    },
+    assignTruckToCandidate: (candidateId, truckId) => {
+      const prevTruckId = candidates.find((c) => c.id === candidateId)?.assignedTruckId ?? null;
+      setCandidates((prev) => prev.map((c) => (c.id === candidateId ? { ...c, assignedTruckId: truckId } : c)));
+      setTrucks((prev) => prev.map((t) => {
+        if (truckId && t.id === truckId) return { ...t, status: 'Assigned' as const };
+        if (t.id === prevTruckId && prevTruckId !== truckId) return { ...t, status: 'Available' as const };
+        return t;
+      }));
+    },
+    assignDriverToTruck: (truckId, driverId) => {
+      setTrucks((prev) => prev.map((t) => {
+        if (t.id === truckId) return { ...t, operatorDriverId: driverId, status: driverId ? 'Assigned' : 'Available' };
+        if (driverId && t.operatorDriverId === driverId) return { ...t, operatorDriverId: null, status: 'Available' };
+        return t;
+      }));
+      setDrivers((prev) => prev.map((d) => {
+        if (driverId && d.id === driverId) return { ...d, assignedTruckId: truckId };
+        if (d.assignedTruckId === truckId && d.id !== driverId) return { ...d, assignedTruckId: null };
+        return d;
+      }));
     },
   };
 

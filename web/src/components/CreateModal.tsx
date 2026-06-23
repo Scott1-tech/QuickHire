@@ -168,19 +168,23 @@ function CandidateForm({ onClose }: { onClose: () => void }) {
 function TruckForm({ onClose }: { onClose: () => void }) {
   const s = useStore();
   const [carrierId, setCarrierId] = useState(s.currentCarrierId);
-  const [f, setF] = useState({ unit: '', make: '', model: '', year: '', plate: '', vin: '', state: '', ownership: 'company' });
+  const [f, setF] = useState({ unit: '', make: '', model: '', year: '', plate: '', vin: '', state: '', ownership: 'company', status: 'Available', driverId: '' });
   const [msg, setMsg] = useState('');
   const set = (k: keyof typeof f) => (v: string) => setF({ ...f, [k]: v });
+  // Drivers of the chosen carrier — for the optional assignment.
+  const carrierDrivers = s.allDrivers.filter((d) => d.carrierId === carrierId && d.status !== 'terminated');
   const save = () => {
     if (!f.unit.trim() || !f.make.trim()) { setMsg('Unit number and make are required.'); return; }
-    s.addTruck({ unit: f.unit, make: f.make, model: f.model, year: f.year ? Number(f.year) : undefined,
-      plate: f.plate, vin: f.vin, state: f.state, ownership: f.ownership as 'company' | 'owner-operator', carrierId });
+    const truck = s.addTruck({ unit: f.unit, make: f.make, model: f.model, year: f.year ? Number(f.year) : undefined,
+      plate: f.plate, vin: f.vin, state: f.state, ownership: f.ownership as 'company' | 'owner-operator',
+      status: f.status as 'Available' | 'Assigned' | 'Shop' | 'In-Transit' | 'Inactive' | 'Yard', carrierId });
+    if (f.driverId) s.assignDriverToTruck(truck.id, f.driverId); // also sets status → Assigned
     onClose();
   };
   return (
     <div>
       <TitleInput autoFocus value={f.unit} onChange={set('unit')} placeholder="Unit number, e.g. 105" />
-      <CarrierPicker value={carrierId} onChange={setCarrierId} />
+      <CarrierPicker value={carrierId} onChange={(v) => { setCarrierId(v); setF((p) => ({ ...p, driverId: '' })); }} />
       <PropRow icon="truck" label="Make *"><Inp value={f.make} onChange={set('make')} placeholder="Peterbilt" /></PropRow>
       <PropRow icon="truck" label="Model"><Inp value={f.model} onChange={set('model')} placeholder="389" /></PropRow>
       <PropRow icon="calendar" label="Year"><Inp value={f.year} onChange={set('year')} placeholder="2024" type="number" /></PropRow>
@@ -189,6 +193,14 @@ function TruckForm({ onClose }: { onClose: () => void }) {
       <PropRow icon="mapPin" label="State"><Inp value={f.state} onChange={set('state')} placeholder="TX" /></PropRow>
       <PropRow icon="tag" label="Ownership"><Sel value={f.ownership} onChange={set('ownership')}>
         <option value="company">Company</option><option value="owner-operator">Owner Operator</option>
+      </Sel></PropRow>
+      <PropRow icon="circleDot" label="Status"><Sel value={f.status} onChange={set('status')}>
+        <option value="Available">Available</option><option value="Assigned">Assigned</option><option value="Shop">Shop</option>
+        <option value="In-Transit">In-Transit</option><option value="Yard">Yard</option><option value="Inactive">Inactive</option>
+      </Sel></PropRow>
+      <PropRow icon="wheel" label="Assign driver"><Sel value={f.driverId} onChange={set('driverId')}>
+        <option value="">— None —</option>
+        {carrierDrivers.map((d) => <option key={d.id} value={d.id}>{d.name}{d.assignedTruckId ? ' (reassign)' : ''}</option>)}
       </Sel></PropRow>
       <Banner msg={msg} />
       <Actions onSave={save} onClose={onClose} label="Create Truck" />

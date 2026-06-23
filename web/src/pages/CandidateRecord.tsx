@@ -167,6 +167,9 @@ export default function CandidateRecord() {
               <EditableField label="Email" value={edits.email ?? c.email} onSave={(v) => setEdits((p) => ({ ...p, email: v }))} link={`mailto:${edits.email ?? c.email}`} />
             </div>
 
+            {/* Assigned truck — editable: switch among available trucks */}
+            <AssignedTruck candidateId={c.id} assignedTruckId={c.assignedTruckId ?? null} />
+
             {/* Recent Activity feed — left side */}
             <div className="card overflow-hidden flex flex-col">
               <div className="px-4 py-3 border-b border-line flex items-center justify-between">
@@ -463,6 +466,31 @@ function Documents() {
           <label className="flex items-center gap-2 text-[13px] mb-3"><input type="checkbox" defaultChecked /> Extract with AI (OCR)</label>
           <div className="border-2 border-dashed border-line rounded-xl p-8 text-center text-sm text-muted">Drag & drop files here, or click to browse — up to 10 files, 10MB each</div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// Editable assigned-truck card on the candidate record — switch among available trucks.
+function AssignedTruck({ candidateId, assignedTruckId }: { candidateId: string; assignedTruckId: string | null }) {
+  const s = useStore();
+  const assigned = s.trucks.find((t) => t.id === assignedTruckId);
+  const options = s.trucks.filter((t) => t.status === 'Available' || t.id === assignedTruckId);
+  return (
+    <div className="card p-3">
+      <div className="text-[10px] font-bold text-muted uppercase mb-2">Assigned Truck</div>
+      <select className="input py-1.5" value={assignedTruckId ?? ''}
+        onChange={(e) => s.assignTruckToCandidate(candidateId, e.target.value || null)}>
+        <option value="">— Unassigned —</option>
+        {options.map((t) => <option key={t.id} value={t.id}>#{t.unit} · {t.make} {t.model}</option>)}
+      </select>
+      {assigned ? (
+        <div className="text-[11.5px] text-muted mt-2 flex items-center gap-2">
+          <span>{assigned.year} · {assigned.plate}</span>
+          <Pill kind={assigned.status}>{assigned.status}</Pill>
+        </div>
+      ) : (
+        <div className="text-[11.5px] text-muted mt-2">No truck assigned. Pick an available truck above.</div>
       )}
     </div>
   );
