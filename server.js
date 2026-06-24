@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import nodemailer from 'nodemailer';
 import * as anna from './anna/index.js';
+import * as docusign from './docusign/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -784,7 +785,8 @@ function serveFile(res, stored) {
 
 // ── App ──────────────────────────────────────────────────────────────────────
 const app = express();
-app.use(express.json({ limit: '50mb' }));
+// Capture the raw body so the DocuSign Connect webhook can verify its HMAC.
+app.use(express.json({ limit: '50mb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 function requireAdmin(req, res, next) {
   if (!ADMIN_PASSWORD) return next();
@@ -810,6 +812,8 @@ app.get('/api/config', (_req, res) => {
     hasTelegram: Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID),
     hasEmail: emailEnabled(),
     hasSms: smsEnabled(),
+    hasDocusign: true,
+    docusign: docusign.status(),
     linkTtlDays: LINK_TTL_DAYS,
   });
 });
@@ -1535,6 +1539,209 @@ app.post('/api/anna/portfolios/:id/decision', requireAdmin, async (req, res) => 
 
 // Recruiter-facing Anna portfolio queue (standalone static page).
 app.get('/anna', (_req, res) => res.redirect('/anna.html'));
+
+// ── DocuSign (e-signature) ───────────────────────────────────────────────────
+// Send QuickHire documents (offer letters, consents) to drivers for e-signature.
+// Contracts auto-fill from the driver's application data; the driver only reviews
+// & corrects. Envelopes are stored on the candidate record and tied to the
+// "Offer Letter Sent/Signed" checklist step. Runs in simulated mode until the
+// DOCUSIGN_* env vars are set (mirrors the MVR/PSP/Resend integrations).
+
+function candidateEnvelopes(c) { return c.docusign?.envelopes || []; }
+function saveEnvelope(c, record) {
+  c.docusign = c.docusign || { envelopes: [] };
+  const i = c.docusign.envelopes.findIndex((e) => e.envelopeId === record.envelopeId);
+  if (i === -1) c.docusign.envelopes.unshift(record); else c.docusign.envelopes[i] = record;
+}
+function findEnvelopeGlobal(envelopeId) {
+  for (const c of readAll()) {
+    const e = (c.docusign?.envelopes || []).find((x) => x.envelopeId === envelopeId);
+    if (e) return { candidate: c, record: e };
+  }
+  return null;
+}
+// On status transition, log to the audit trail and (for offer letters) advance
+// the checklist when the document is fully signed.
+function reconcileEnvelope(c, prev, updated) {
+  const label = docusign.DOC_TEMPLATES[updated.docType]?.label || 'Document';
+  if (updated.status === 'completed' && prev.status !== 'completed') {
+    if (updated.docType === 'offer_letter' && c.checklist?.offerLetter) {
+      const step = c.checklist.offerLetter;
+      step.status = 'complete';
+      step.completedAt = step.completedAt || new Date().toISOString();
+      step.completedBy = 'DocuSign';
+      step.result = step.result || 'signed';
+    }
+    addActivity(c, 'docusign_completed', updated.signer?.name || 'Signer',
+      `${label} e-signed via DocuSign${updated.simulated ? ' (simulated)' : ''}.`,
+      { channel: 'docusign', envelopeId: updated.envelopeId, docType: updated.docType });
+  }
+  if (updated.status === 'declined' && prev.status !== 'declined') {
+    addActivity(c, 'docusign_declined', updated.signer?.name || 'Signer',
+      `${label} was declined in DocuSign.`, { channel: 'docusign', envelopeId: updated.envelopeId });
+  }
+}
+
+// Integration status (mode, configured doc types, account).
+app.get('/api/docusign/status', requireAdmin, (_req, res) => res.json(docusign.status()));
+
+// Account templates (live mode only; simulated returns []).
+app.get('/api/docusign/templates', requireAdmin, async (_req, res) => {
+  try { res.json(await docusign.templates()); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// All envelopes across candidates — the console overview.
+app.get('/api/docusign/envelopes', requireAdmin, (_req, res) => {
+  const rows = [];
+  for (const c of readAll()) {
+    for (const e of candidateEnvelopes(c)) rows.push({ ...e, documentHtml: undefined, candidateId: c.id, candidateName: c.name });
+  }
+  rows.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json(rows);
+});
+
+// Envelopes for one candidate.
+app.get('/api/docusign/candidates/:id/envelopes', requireAdmin, (req, res) => {
+  const c = findById(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  res.json(candidateEnvelopes(c).map((e) => ({ ...e, documentHtml: undefined })));
+});
+
+// Preview the auto-filled contract (values pulled from the driver's application).
+app.post('/api/docusign/candidates/:id/preview', requireAdmin, (req, res) => {
+  const c = findById(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  try { res.json(docusign.preview({ candidate: c, docType: req.body?.docType, fields: req.body?.fields || {} })); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Send a document for e-signature.
+app.post('/api/docusign/candidates/:id/send', requireAdmin, async (req, res) => {
+  const c = findById(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  const { docType, fields, signer, embedded, emailSubject, message } = req.body || {};
+  try {
+    const record = await docusign.send({
+      candidate: c, docType, fields, signer, embedded,
+      returnUrl: `${baseUrl(req)}/docusign.html?signed=1`,
+      emailSubject, message,
+    });
+    saveEnvelope(c, record);
+    if (record.docType === 'offer_letter' && c.checklist?.offerLetter?.status === 'not_started') {
+      c.checklist.offerLetter.status = 'in_progress';
+    }
+    addActivity(c, 'docusign_sent', 'Admin',
+      `${docusign.DOC_TEMPLATES[record.docType]?.label || 'Document'} sent for e-signature to ${record.signer.email} via DocuSign${record.simulated ? ' (simulated)' : ''}.`,
+      { channel: 'docusign', envelopeId: record.envelopeId, docType: record.docType, simulated: record.simulated });
+    upsert(c);
+    res.json({ ...record, documentHtml: undefined });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Re-poll an envelope's live status.
+app.post('/api/docusign/envelopes/:envelopeId/refresh', requireAdmin, async (req, res) => {
+  const found = findEnvelopeGlobal(req.params.envelopeId);
+  if (!found) return res.status(404).json({ error: 'Envelope not found' });
+  try {
+    const updated = await docusign.refresh(found.record);
+    reconcileEnvelope(found.candidate, found.record, updated);
+    saveEnvelope(found.candidate, updated);
+    upsert(found.candidate);
+    res.json({ ...updated, documentHtml: undefined });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Embedded-signing URL (live: DocuSign recipient view · simulated: mock page).
+app.get('/api/docusign/envelopes/:envelopeId/signing-url', requireAdmin, async (req, res) => {
+  const found = findEnvelopeGlobal(req.params.envelopeId);
+  if (!found) return res.status(404).json({ error: 'Envelope not found' });
+  try { res.json(await docusign.recipientView(found.record, { returnUrl: `${baseUrl(req)}/docusign.html?signed=1` })); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Rendered contract HTML (auto-filled preview / what the driver reviews).
+app.get('/api/docusign/envelopes/:envelopeId/document.html', requireAdmin, (req, res) => {
+  const found = findEnvelopeGlobal(req.params.envelopeId);
+  if (!found) return res.status(404).send('Not found');
+  res.type('html').send(found.record.documentHtml || '<p>No preview available.</p>');
+});
+
+// Completed-document download (live: combined PDF · simulated: generated PDF).
+app.get('/api/docusign/envelopes/:envelopeId/document', requireAdmin, async (req, res) => {
+  const found = findEnvelopeGlobal(req.params.envelopeId);
+  if (!found) return res.status(404).json({ error: 'Envelope not found' });
+  try {
+    const { buffer, filename, contentType } = await docusign.download(found.record);
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    res.send(buffer);
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Void an in-flight envelope.
+app.post('/api/docusign/envelopes/:envelopeId/void', requireAdmin, async (req, res) => {
+  const found = findEnvelopeGlobal(req.params.envelopeId);
+  if (!found) return res.status(404).json({ error: 'Envelope not found' });
+  try {
+    const updated = await docusign.voidEnvelope(found.record, req.body?.reason || 'Voided by recruiter');
+    saveEnvelope(found.candidate, updated);
+    addActivity(found.candidate, 'docusign_voided', 'Admin', `DocuSign envelope voided: ${updated.voidedReason}`, { channel: 'docusign', envelopeId: updated.envelopeId });
+    upsert(found.candidate);
+    res.json({ ...updated, documentHtml: undefined });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Simulated-only: advance an envelope (used by the demo "complete signing" flow).
+// Returns { error } | { updated } so each route shapes its own response.
+function advanceSimulated(envelopeId, toStatus) {
+  const found = findEnvelopeGlobal(envelopeId);
+  if (!found) return { error: 404 };
+  if (!found.record.simulated) return { error: 400 };
+  const updated = docusign.simulateAdvance(found.record, toStatus);
+  reconcileEnvelope(found.candidate, found.record, updated);
+  saveEnvelope(found.candidate, updated);
+  upsert(found.candidate);
+  return { updated };
+}
+app.post('/api/docusign/envelopes/:envelopeId/simulate', requireAdmin, (req, res) => {
+  const r = advanceSimulated(req.params.envelopeId, req.body?.status || 'completed');
+  if (r.error === 404) return res.status(404).json({ error: 'Envelope not found' });
+  if (r.error === 400) return res.status(400).json({ error: 'Only simulated envelopes can be advanced manually. Configure DocuSign for live signing.' });
+  res.json({ ...r.updated, documentHtml: undefined });
+});
+// Public endpoint the simulated signing page posts to (no admin token in the
+// driver's browser). Returns minimal info — no signer PII on an open route.
+app.post('/api/docusign/public/:envelopeId/sign', (req, res) => {
+  const r = advanceSimulated(req.params.envelopeId, 'completed');
+  if (r.error) return res.status(404).json({ error: 'Not found' });
+  res.json({ ok: true, status: r.updated.status });
+});
+app.get('/api/docusign/public/:envelopeId', (req, res) => {
+  const found = findEnvelopeGlobal(req.params.envelopeId);
+  if (!found || !found.record.simulated) return res.status(404).json({ error: 'Not found' });
+  const r = found.record;
+  res.json({ envelopeId: r.envelopeId, status: r.status, documentName: r.documentName, signer: { name: r.signer?.name }, documentHtml: r.documentHtml });
+});
+
+// DocuSign Connect webhook — status updates pushed by DocuSign.
+app.post('/api/docusign/webhook', (req, res) => {
+  const { ok, event } = docusign.handleWebhook(req.rawBody, req.body, req.get('X-DocuSign-Signature-1'));
+  if (!ok) return res.status(401).json({ error: 'Invalid signature' });
+  if (event?.envelopeId) {
+    const found = findEnvelopeGlobal(event.envelopeId);
+    if (found) {
+      const updated = docusign.applyWebhookEvent(found.record, event);
+      reconcileEnvelope(found.candidate, found.record, updated);
+      saveEnvelope(found.candidate, updated);
+      upsert(found.candidate);
+    }
+  }
+  res.json({ ok: true });
+});
+
+// Recruiter-facing DocuSign console (standalone static page).
+app.get('/docusign', (_req, res) => res.redirect('/docusign.html'));
 
 // ── Static ─────────────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
