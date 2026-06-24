@@ -34,6 +34,7 @@ comes later, deliberately decoupled.
 | `matcher.js` | 1 — Matching | `evaluateGates`, `scoreSoft`, `matchDriver` (rank across all carriers), `suggestRematch`. |
 | `normalize.js` | 1 / 2 — Intake & scanning | `normalizeDriver` (lead → profile), `extractFromDocument` (license/cert vision). |
 | `portfolio.js` | 3 / 4 — Portfolio & compliance | `buildPortfolio` (+ recruiter assignment), `writeCompliance` (approve/reject). |
+| `integrations.js` | 4 — Compliance pull | MVR/PSP/Clearinghouse adapters behind a **consent gate**; real provider calls when configured, flagged simulated pulls otherwise. |
 | `queue.js` | cross-cutting | In-process job queue: bounded concurrency + exponential backoff. |
 | `claude.js` | cross-cutting | Dependency-free Anthropic Messages client (system caching, image/PDF blocks, JSON). |
 | `index.js` | — | Public API + `processLead` orchestrator (normalize → match → portfolio). |
@@ -88,6 +89,9 @@ const compliance = await writeCompliance({
 | `ANNA_FAST_MODEL` | Intake/normalization model (default `claude-haiku-4-5-20251001`). |
 | `ANNA_SMART_MODEL` | Compliance reasoning model (default `claude-opus-4-8`). |
 | `ANNA_CONCURRENCY` | Default queue concurrency (default 4). |
+| `MVR_API_URL` / `MVR_API_KEY` | MVR provider; both set ⇒ live pulls, else simulated. |
+| `PSP_API_URL` / `PSP_API_KEY` | PSP provider. |
+| `CLEARINGHOUSE_API_URL` / `CLEARINGHOUSE_API_KEY` | Clearinghouse provider. |
 
 ## Tests
 
@@ -114,10 +118,12 @@ cached on the carrier record (`structuredRequirements`). Portfolios persist to
 | `POST /api/anna/rematch` | Suggest other carriers for a `driver` (`excludeCarrierIds`). |
 | `GET /api/anna/portfolios` | List portfolio summaries. |
 | `GET /api/anna/portfolios/:id` | Full portfolio. |
-| `POST /api/anna/portfolios/:id/compliance` | Stage 4: submit pulled `records` → approve/reject verdict (records supersede self-reported data). |
+| `POST /api/anna/portfolios/:id/compliance` | Stage 4: `pull:true` + `consent` pulls MVR/PSP/Clearinghouse (consent enforced → 403 if missing), or pass `records` manually → approve/reject verdict (records supersede self-reported data). |
 | `POST /api/anna/portfolios/:id/decision` | Stage 5: `decision` (`approved`/`rejected`) + `reason`; rejection returns re-match suggestions. |
 
 ## Not yet wired (next steps)
 
-- Real MVR/PSP/Clearinghouse integration adapters (consent capture before pull).
-- A recruiter-facing UI for the portfolio queue and the human checkpoint.
+- Real provider request/response mapping in `integrations.js` (the `pull()` seam
+  is generic — adjust identity fields + `mapResponse` to each provider's contract).
+- Driver-facing consent capture wired to the application flow (the gate is
+  enforced server-side today; consent is passed per request).

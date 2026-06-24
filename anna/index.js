@@ -21,6 +21,7 @@ export { matchDriver, suggestRematch, evaluateGates, scoreSoft, STATUS } from '.
 export { normalizeDriver, extractFromDocument, lowConfidenceFields, DRIVER_SHAPE } from './normalize.js';
 export { buildPortfolio, writeCompliance, mergeRecords } from './portfolio.js';
 export { createQueue } from './queue.js';
+export { pullCompliance, checkConsent, ConsentError, INTEGRATIONS, integrationStatus } from './integrations.js';
 export { callClaude, callClaudeJSON, annaConfigured, MODELS } from './claude.js';
 
 import { normalizeDriver } from './normalize.js';

@@ -7,6 +7,7 @@ import { normalizeDriver } from '../normalize.js';
 import { buildPortfolio, writeCompliance } from '../portfolio.js';
 import { createQueue } from '../queue.js';
 import { extractCarrierSpec } from '../carrier.js';
+import { pullCompliance, checkConsent, ConsentError, integrationStatus } from '../integrations.js';
 
 let pass = 0, fail = 0;
 const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error('  ✗ ' + msg); } };
@@ -153,6 +154,28 @@ section('normalizeDriver (heuristic fallback, no API key)');
   ok(parsed.mvr.maxAccidents === 0, 'accidents 0 from "No accidents in the past 3 years" (timeframe ignored)');
   ok(parsed.mvr.maxDUI === 0, 'DUI 0 from "None in a lifetime"');
   ok((parsed.cdl.endorsements || []).includes('H'), 'hazmat "Yes" => H endorsement');
+
+  section('integrations: consent gate + adapters');
+  // Consent enforcement.
+  let threw = null;
+  try { checkConsent({ mvr: true }, ['mvr', 'psp']); } catch (e) { threw = e; }
+  ok(threw instanceof ConsentError && threw.missing.includes('psp'), 'checkConsent throws ConsentError naming missing types');
+  ok(checkConsent({ mvr: true, psp: true }, ['mvr', 'psp']) === true, 'passes when all consents present');
+
+  let pullThrew = null;
+  try { await pullCompliance({ driver: goodDriver, consent: {}, types: ['mvr'] }); } catch (e) { pullThrew = e; }
+  ok(pullThrew?.code === 'CONSENT_REQUIRED', 'pullCompliance refuses without consent');
+
+  // Simulated pull (no provider configured) returns flagged, empty records.
+  const pulled = await pullCompliance({ driver: goodDriver, consent: { mvr: true, psp: true, clearinghouse: true } });
+  ok(pulled.sources.every((s) => s.simulated), 'unconfigured providers report simulated');
+  ok(pulled.consent.verifiedAt, 'records consent verification timestamp');
+  ok(Object.keys(pulled.records.mvr).length === 0, 'simulated pull fabricates no MVR incidents (no false approve)');
+
+  // Seeded simulation flows through to a verdict.
+  const seeded = await pullCompliance({ driver: goodDriver, consent: { mvr: true }, types: ['mvr'], opts: { simulatedData: { mvr: { dui: 2 } } } });
+  ok(seeded.records.mvr.dui === 2, 'seeded simulation maps provider response');
+  ok(integrationStatus().mvr === 'simulated', 'integrationStatus reports simulated when unconfigured');
 
   // ── Report ──
   console.log(`\n${fail ? '❌' : '✅'} ${pass} passed, ${fail} failed`);

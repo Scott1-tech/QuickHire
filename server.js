@@ -806,6 +806,7 @@ app.get('/api/config', (_req, res) => {
     hasMolly: Boolean(ANTHROPIC_API_KEY),
     hasAnna: true,
     annaAi: Boolean(ANTHROPIC_API_KEY),
+    annaIntegrations: anna.integrationStatus(),
     hasTelegram: Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID),
     hasEmail: emailEnabled(),
     hasSms: smsEnabled(),
@@ -1436,19 +1437,32 @@ app.post('/api/anna/portfolios/:id/compliance', requireAdmin, async (req, res) =
   const carrier = findCarrierById(p.carrier.carrierId);
   if (!carrier) return res.status(404).json({ error: 'Matched carrier no longer exists.' });
   try {
+    let records = req.body?.records || {};
+    // If asked to pull from the integrations, enforce consent and fetch records
+    // (real providers when configured, otherwise flagged simulated pulls).
+    if (req.body?.pull) {
+      const consent = req.body?.consent || p.consent || {};
+      const pulled = await anna.pullCompliance({ driver: p.driver, consent, types: req.body?.types, queue: undefined, opts: annaOpts() });
+      records = { ...pulled.records, ...records }; // manual overrides win
+      p.consent = pulled.consent;
+      p.complianceSources = pulled.sources;
+    }
     const compliance = await anna.writeCompliance({
       carrier: { id: carrier.id, name: carrier.name, requirements: carrier.structuredRequirements || {} },
       driver: p.driver,
-      records: req.body?.records || {},
+      records,
       opts: { ...annaOpts(), narrate: Boolean(ANTHROPIC_API_KEY) },
     });
     p.compliance = compliance;
     // Official pulled records supersede self-reported data so any later re-match
     // reflects reality (e.g. a DUI found on the MVR follows the driver).
-    p.driver = anna.mergeRecords(p.driver, req.body?.records || {});
+    p.driver = anna.mergeRecords(p.driver, records);
     upsertPortfolio(p);
-    res.json(compliance);
-  } catch (e) { res.status(502).json({ error: e.message }); }
+    res.json({ ...compliance, sources: p.complianceSources || null });
+  } catch (e) {
+    if (e.code === 'CONSENT_REQUIRED') return res.status(403).json({ error: e.message, missingConsent: e.missing });
+    res.status(502).json({ error: e.message });
+  }
 });
 
 // Stage 5: human checkpoint — recruiter approves or rejects.
