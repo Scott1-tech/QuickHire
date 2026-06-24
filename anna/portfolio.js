@@ -102,7 +102,8 @@ export async function writeCompliance({ carrier, driver, records = {}, opts = {}
 }
 
 // Merge pulled compliance records into the driver profile (records win).
-function mergeRecords(driver, records) {
+// Exported so callers can persist the authoritative profile after a pull.
+export function mergeRecords(driver, records) {
   return {
     ...driver,
     mvr: { ...driver.mvr, ...records.mvr },

@@ -99,8 +99,25 @@ node anna/test/run.js
 scoring, cross-carrier ranking, near-miss/re-match, the heuristic normalizer,
 portfolio assignment, compliance verdicts, and the queue. No API key required.
 
+## HTTP API (wired into `server.js`)
+
+All routes require the admin token (`x-admin-token`) and live under `/api/anna`.
+Carrier free-text requirements are parsed into structured specs on first use and
+cached on the carrier record (`structuredRequirements`). Portfolios persist to
+`anna-portfolios.json` in `DATA_DIR`.
+
+| Method & path | Purpose |
+|---|---|
+| `POST /api/anna/match` | Normalize a `driver`/`lead` and rank it against all carriers (no persistence). |
+| `POST /api/anna/leads` | Stage 1→3: normalize → match → persist a portfolio for the best fit. |
+| `POST /api/anna/scan` | Scan a document (`dataUrl`, `docType`) → extracted fields (needs API key). |
+| `POST /api/anna/rematch` | Suggest other carriers for a `driver` (`excludeCarrierIds`). |
+| `GET /api/anna/portfolios` | List portfolio summaries. |
+| `GET /api/anna/portfolios/:id` | Full portfolio. |
+| `POST /api/anna/portfolios/:id/compliance` | Stage 4: submit pulled `records` → approve/reject verdict (records supersede self-reported data). |
+| `POST /api/anna/portfolios/:id/decision` | Stage 5: `decision` (`approved`/`rejected`) + `reason`; rejection returns re-match suggestions. |
+
 ## Not yet wired (next steps)
 
-- HTTP routes in `server.js` (`POST /api/anna/leads`, `POST /api/anna/compliance`).
 - Real MVR/PSP/Clearinghouse integration adapters (consent capture before pull).
-- Persisting portfolios/decisions and the human checkpoint UI.
+- A recruiter-facing UI for the portfolio queue and the human checkpoint.

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import nodemailer from 'nodemailer';
+import * as anna from './anna/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -28,11 +29,13 @@ const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const DB_FILE = path.join(DATA_DIR, 'candidates.json');
 const OPTOUT_FILE = path.join(DATA_DIR, 'optouts.json');
 const CARRIER_DB_FILE = path.join(DATA_DIR, 'carriers.json');
+const PORTFOLIO_FILE = path.join(DATA_DIR, 'anna-portfolios.json');
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '[]');
 if (!fs.existsSync(OPTOUT_FILE)) fs.writeFileSync(OPTOUT_FILE, '[]');
 if (!fs.existsSync(CARRIER_DB_FILE)) fs.writeFileSync(CARRIER_DB_FILE, '[]');
+if (!fs.existsSync(PORTFOLIO_FILE)) fs.writeFileSync(PORTFOLIO_FILE, '[]');
 
 // ── SMS opt-out registry (TCPA STOP handling) ────────────────────────────────
 function normPhone(p) {
@@ -801,6 +804,8 @@ app.get('/api/config', (_req, res) => {
     mainDocs: MAIN_DOCS,
     otherDocs: OTHER_DOCS,
     hasMolly: Boolean(ANTHROPIC_API_KEY),
+    hasAnna: true,
+    annaAi: Boolean(ANTHROPIC_API_KEY),
     hasTelegram: Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID),
     hasEmail: emailEnabled(),
     hasSms: smsEnabled(),
@@ -1323,6 +1328,145 @@ app.post('/api/carrier-intake/:token', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Anna: Driver Qualification AI Agent ──────────────────────────────────────
+// Standalone module in anna/ wired in here. Anna normalizes a lead, matches it
+// against every carrier, builds a portfolio, and produces a compliance verdict.
+const SPEC_PARSE_VERSION = 1;
+const annaOpts = () => ({ apiKey: ANTHROPIC_API_KEY });
+
+function readPortfolios() { try { return JSON.parse(fs.readFileSync(PORTFOLIO_FILE, 'utf8')); } catch { return []; } }
+function writePortfolios(rows) { fs.writeFileSync(PORTFOLIO_FILE, JSON.stringify(rows, null, 2)); }
+function upsertPortfolio(p) {
+  const all = readPortfolios();
+  const i = all.findIndex((x) => x.id === p.id);
+  if (i === -1) all.push(p); else all[i] = p;
+  writePortfolios(all);
+  return p;
+}
+function findPortfolio(id) { return readPortfolios().find((p) => p.id === id); }
+function portfolioSummary(p) {
+  return {
+    id: p.id, createdAt: p.createdAt,
+    driverName: p.driver?.name || '—',
+    carrierName: p.carrier?.carrierName || null,
+    fitScore: p.carrier?.fitScore ?? null,
+    reviewStatus: p.review?.status || 'pending',
+    recruiter: p.review?.assignedRecruiter || null,
+    complianceFlag: p.compliance?.flag || null,
+  };
+}
+
+// Parse each carrier's free-text requirements into Anna's structured shape once,
+// cache it on the carrier record, and return carriers shaped for the matcher.
+async function annaCarriers() {
+  const out = [];
+  for (const c of readCarriers()) {
+    if (!c.requirements || !Object.keys(c.requirements).length) continue; // nothing to match on yet
+    if (!c.structuredRequirements || c.structuredSpecVersion !== SPEC_PARSE_VERSION) {
+      const { requirements } = await anna.extractCarrierSpec(c.requirements, annaOpts());
+      c.structuredRequirements = requirements;
+      c.structuredSpecVersion = SPEC_PARSE_VERSION;
+      upsertCarrier(c);
+    }
+    out.push({ id: c.id, name: c.name, requirements: c.structuredRequirements, specVersion: SPEC_PARSE_VERSION });
+  }
+  return out;
+}
+
+// Scan a document (image/PDF) and return extracted fields for auto-fill.
+app.post('/api/anna/scan', requireAdmin, async (req, res) => {
+  const { dataUrl, docType } = req.body || {};
+  if (!dataUrl) return res.status(400).json({ error: 'dataUrl is required.' });
+  if (!ANTHROPIC_API_KEY) return res.status(503).json({ error: 'Document scanning requires ANTHROPIC_API_KEY.' });
+  try {
+    res.json(await anna.extractFromDocument({ dataUrl, docType, apiKey: ANTHROPIC_API_KEY }));
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Match a driver against all carriers (normalize first), without persisting.
+app.post('/api/anna/match', requireAdmin, async (req, res) => {
+  const { driver, lead } = req.body || {};
+  if (!driver && !lead) return res.status(400).json({ error: 'driver or lead is required.' });
+  try {
+    const { profile } = await anna.normalizeDriver(driver || lead, annaOpts());
+    const match = anna.matchDriver(profile, await annaCarriers(), { minScore: Number(req.body?.minScore) || 0 });
+    res.json({ profile, match });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Full Stage 1→3: normalize a lead, match all carriers, persist a portfolio.
+app.post('/api/anna/leads', requireAdmin, async (req, res) => {
+  const { lead, recruiterPool } = req.body || {};
+  if (!lead) return res.status(400).json({ error: 'lead is required.' });
+  try {
+    const result = await anna.processLead({
+      lead,
+      carriers: await annaCarriers(),
+      opts: { ...annaOpts(), recruiterPool: recruiterPool || [], minScore: Number(req.body?.minScore) || 0 },
+    });
+    if (result.portfolio) upsertPortfolio(result.portfolio);
+    res.json({ profile: result.profile, match: result.match, source: result.source, portfolio: result.portfolio || null });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Suggest other carriers for a (rejected) driver.
+app.post('/api/anna/rematch', requireAdmin, async (req, res) => {
+  const { driver, excludeCarrierIds } = req.body || {};
+  if (!driver) return res.status(400).json({ error: 'driver is required.' });
+  try {
+    const { profile } = await anna.normalizeDriver(driver, annaOpts());
+    res.json(anna.suggestRematch(profile, await annaCarriers(), { excludeCarrierIds: excludeCarrierIds || [] }));
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+app.get('/api/anna/portfolios', requireAdmin, (_req, res) => {
+  res.json(readPortfolios().map(portfolioSummary));
+});
+app.get('/api/anna/portfolios/:id', requireAdmin, (req, res) => {
+  const p = findPortfolio(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  res.json(p);
+});
+
+// Stage 4: pull/record compliance data and write the approve/reject verdict.
+app.post('/api/anna/portfolios/:id/compliance', requireAdmin, async (req, res) => {
+  const p = findPortfolio(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  if (!p.carrier?.carrierId) return res.status(400).json({ error: 'Portfolio has no matched carrier.' });
+  const carrier = findCarrierById(p.carrier.carrierId);
+  if (!carrier) return res.status(404).json({ error: 'Matched carrier no longer exists.' });
+  try {
+    const compliance = await anna.writeCompliance({
+      carrier: { id: carrier.id, name: carrier.name, requirements: carrier.structuredRequirements || {} },
+      driver: p.driver,
+      records: req.body?.records || {},
+      opts: { ...annaOpts(), narrate: Boolean(ANTHROPIC_API_KEY) },
+    });
+    p.compliance = compliance;
+    // Official pulled records supersede self-reported data so any later re-match
+    // reflects reality (e.g. a DUI found on the MVR follows the driver).
+    p.driver = anna.mergeRecords(p.driver, req.body?.records || {});
+    upsertPortfolio(p);
+    res.json(compliance);
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Stage 5: human checkpoint — recruiter approves or rejects.
+app.post('/api/anna/portfolios/:id/decision', requireAdmin, async (req, res) => {
+  const p = findPortfolio(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  const { decision, reason, by } = req.body || {};
+  if (!['approved', 'rejected'].includes(decision)) return res.status(400).json({ error: 'decision must be "approved" or "rejected".' });
+  p.review = { ...p.review, status: decision, decidedBy: by || 'Recruiter', decidedAt: new Date().toISOString(), decisionReason: reason || '' };
+  upsertPortfolio(p);
+  // On rejection, offer re-match suggestions to other carriers.
+  let rematch = null;
+  if (decision === 'rejected') {
+    try { rematch = anna.suggestRematch(p.driver, await annaCarriers(), { excludeCarrierIds: [p.carrier?.carrierId].filter(Boolean) }); } catch { /* best effort */ }
+  }
+  res.json({ ok: true, review: p.review, rematch });
+});
+
 // ── Static ─────────────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -1336,6 +1480,7 @@ app.listen(PORT, () => {
   if (!ADMIN_PASSWORD) console.log('WARNING: ADMIN_PASSWORD not set — dashboard is open.');
   console.log(`Email: ${RESEND_API_KEY ? 'Resend' : transporter ? 'SMTP fallback' : 'NOT configured (links shown in dashboard)'}`);
   console.log(`SMS:   ${smsEnabled() ? 'Twilio' : 'NOT configured'}`);
-  if (!ANTHROPIC_API_KEY) console.log('NOTE: ANTHROPIC_API_KEY not set — Molly AI disabled.');
+  if (!ANTHROPIC_API_KEY) console.log('NOTE: ANTHROPIC_API_KEY not set — Molly AI disabled; Anna runs in deterministic mode.');
+  console.log('Anna: driver-qualification agent mounted at /api/anna/*');
   console.log(`Link TTL: ${LINK_TTL_DAYS} days`);
 });

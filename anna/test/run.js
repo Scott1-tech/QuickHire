@@ -6,6 +6,7 @@ import { matchDriver, evaluateGates, scoreSoft, suggestRematch, STATUS } from '.
 import { normalizeDriver } from '../normalize.js';
 import { buildPortfolio, writeCompliance } from '../portfolio.js';
 import { createQueue } from '../queue.js';
+import { extractCarrierSpec } from '../carrier.js';
 
 let pass = 0, fail = 0;
 const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error('  ✗ ' + msg); } };
@@ -135,6 +136,23 @@ section('normalizeDriver (heuristic fallback, no API key)');
   let tries = 0;
   const val = await q.push(() => { tries++; if (tries < 2) throw new Error('boom'); return 42; });
   ok(val === 42 && tries === 2, 'retries a failing job then succeeds');
+
+  section('extractCarrierSpec (free-text parser)');
+  const { requirements: parsed, source: psrc } = await extractCarrierSpec({
+    minimumAge: 'At least 23 years of age',
+    minimumExperience: 'At least 2 yrs verifiable OTR in the last 3 yrs',
+    maxMovingViolations: 'No more than 1 in the past 3 years',
+    dotRecordableAccidents: 'No accidents in the past 3 years',
+    duiDwiPolicy: 'None in a lifetime',
+    hazmatRequired: 'Yes',
+  });
+  ok(psrc === 'heuristic', 'parses deterministically without AI');
+  ok(parsed.eligibility.minAge === 23, 'minAge 23 from "At least 23 years of age"');
+  ok(parsed.cdl.minExperienceYears === 2, 'experience 2 from "At least 2 yrs ... last 3 yrs"');
+  ok(parsed.mvr.maxMovingViolations === 1, 'moving violations 1 from "No more than 1 in the past 3 years"');
+  ok(parsed.mvr.maxAccidents === 0, 'accidents 0 from "No accidents in the past 3 years" (timeframe ignored)');
+  ok(parsed.mvr.maxDUI === 0, 'DUI 0 from "None in a lifetime"');
+  ok((parsed.cdl.endorsements || []).includes('H'), 'hazmat "Yes" => H endorsement');
 
   // ── Report ──
   console.log(`\n${fail ? '❌' : '✅'} ${pass} passed, ${fail} failed`);
