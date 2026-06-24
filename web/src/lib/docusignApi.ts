@@ -55,6 +55,15 @@ export const previewDoc = (candidateId: string, docType: string, fields: Record<
 export interface PlacedField {
   id: string; type: string; xPct: number; yPct: number; page: number;
   recipientId: string; label: string; required?: boolean; value?: string; readOnly?: boolean;
+  // Formatting
+  font?: string; fontSize?: string; color?: string; bold?: boolean; italic?: boolean; underline?: boolean;
+  fixedWidth?: boolean; hideAsterisks?: boolean;
+  // Validation
+  validation?: string; customPattern?: string; errorMessage?: string; collaborate?: boolean;
+  // Text
+  charLimit?: number; nameType?: string;
+  // Checkbox group
+  groupLabel?: string; checkboxValues?: string[]; selectRule?: string; selectNumber?: number;
 }
 export interface Recipient { id: string; name: string; email: string; colorIdx: number }
 

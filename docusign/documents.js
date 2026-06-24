@@ -294,19 +294,39 @@ const FIELD_TAB_GROUP = {
   name: 'fullNameTabs', title: 'titleTabs', company: 'companyTabs',
   email: 'textTabs', text: 'textTabs', number: 'numberTabs', checkbox: 'checkboxTabs',
 };
+// Named format presets → regex, matching the builder's Validation dropdown.
+const VALIDATION_PATTERNS = {
+  SSN: '\\d{3}-\\d{2}-\\d{4}', Email: '[^@]+@[^.]+\\..+', Numbers: '\\d+', Letters: '[A-Za-z]+',
+  Date: '\\d{1,2}/\\d{1,2}/\\d{4}', 'ZIP+4': '\\d{5}-\\d{4}', ZIP: '\\d{5}',
+};
 export function placedFieldsToTabs(placed = [], { pageW = 612, pageH = 792 } = {}) {
   const tabs = {};
   for (const f of placed) {
     const group = FIELD_TAB_GROUP[f.type] || 'textTabs';
-    (tabs[group] = tabs[group] || []).push({
+    const tab = {
       xPosition: String(Math.round((f.xPct || 0) * pageW)),
       yPosition: String(Math.round((f.yPct || 0) * pageH)),
       pageNumber: String(f.page || 1),
       documentId: '1',
       tabLabel: f.label || f.type,
       ...(f.required ? { required: 'true' } : {}),
+      ...(f.readOnly ? { locked: 'true' } : {}),
       ...(f.value ? { value: String(f.value) } : {}),
-    });
+      // Formatting
+      ...(f.font ? { font: f.font.replace(/\s+/g, '') } : {}),
+      ...(f.fontSize ? { fontSize: `size${f.fontSize}` } : {}),
+      ...(f.color ? { fontColor: f.color } : {}),
+      ...(f.bold ? { bold: 'true' } : {}),
+      ...(f.italic ? { italic: 'true' } : {}),
+      ...(f.underline ? { underline: 'true' } : {}),
+      ...(f.hideAsterisks ? { concealValueOnDocument: 'true' } : {}),
+    };
+    // Validation applies to free-text tabs.
+    if (group === 'textTabs') {
+      const pat = f.validation === 'Custom' ? f.customPattern : VALIDATION_PATTERNS[f.validation];
+      if (pat) { tab.validationPattern = pat; if (f.errorMessage) tab.validationMessage = f.errorMessage; }
+    }
+    (tabs[group] = tabs[group] || []).push(tab);
   }
   return tabs;
 }

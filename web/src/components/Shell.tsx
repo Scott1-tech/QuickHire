@@ -3,11 +3,7 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useStore } from '@/store';
 import Icon from '@/components/Icon';
 import TaskModal from '@/components/TaskModal';
-
 import { NOTIFICATIONS } from '@/data/mock';
-
-import AnnaAssistant from '@/components/AnnaAssistant';
-
 import type { Role } from '@/types';
 
 const ROLES: Role[] = ['Recruiter', 'Owner', 'Super Admin'];
@@ -29,6 +25,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const nav = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [roleOpen, setRoleOpen] = useState(false);
+  const [carrierOpen, setCarrierOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [quickTask, setQuickTask] = useState(false);
 
@@ -40,14 +37,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, []);
-
-  // The carrier you're working in follows the URL — there is no manual carrier
-  // switch. Opening /carriers/:id/* scopes drivers, trucks, hiring, etc. to that
-  // carrier; you change carriers by navigating into one from the Carriers list.
-  const routeCarrierId = loc.pathname.match(/^\/carriers\/(?!profile(?:\/|$))([^/]+)/)?.[1];
-  useEffect(() => {
-    if (routeCarrierId && routeCarrierId !== s.currentCarrierId) s.setCurrentCarrierId(routeCarrierId);
-  }, [routeCarrierId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cid = s.currentCarrierId;
   const link = (p: string) => `/carriers/${cid}/${p}`;
@@ -87,13 +76,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           )}
 
           {/* User switcher */}
-
           <div className="relative z-20">
             <button onClick={() => { setRoleOpen((o) => !o); setCarrierOpen(false); }}
-
-          <div className="relative">
-            <button onClick={() => setRoleOpen((o) => !o)}
-
               className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5">
               <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-purple grid place-items-center text-sm font-bold text-white flex-shrink-0">{s.role[0]}</div>
               {!collapsed && <div className="text-left flex-1 min-w-0">
@@ -118,11 +102,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <NavItem to="/dashboard" icon="layout" label="Dashboard" />
 
           <SectionLabel>Features</SectionLabel>
-
           <NavItem to="/notifications" icon="bell" label="Notifications" badge={notifCount} />
           <NavItem to="/inbox" icon="mail" label="Inbox" />
           <NavItem to="/tasks" icon="listChecklist" label="Tasks" badge={taskCount} />
           {can(s.role, 'research') && <NavItem to="/research" icon="search" label="Research" />}
+          <NavItem to="/docusign" icon="clipboardCheck" label="DocuSign — e-Sign" />
 
           {/* Carrier badge */}
           <div className="relative z-20 mt-3">
@@ -149,31 +133,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             )}
           </div>
 
-          <NavItem to="/notifications" icon="🔔" label="Notifications" badge="3" />
-          <NavItem to="/inbox" icon="✉" label="Inbox" />
-          <NavItem to="/tasks" icon="✓" label="Tasks" badge="5" />
-          {can(s.role, 'research') && <NavItem to="/research" icon="🔍" label="Research" />}
-          {/* Anna lives outside the SPA (standalone page), so use a real anchor. */}
-          <a href="/anna" className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition text-slate-300 hover:bg-white/5">
-            <span className="w-5 text-center">🤖</span>
-            {!collapsed && <span className="flex-1">Anna — AI Agent</span>}
-          </a>
-          <NavItem to="/docusign" icon="📄" label="DocuSign — e-Sign" />
-
-          {/* Carrier-in-context chip — read-only. Shows which carrier the
-              Manage section is scoped to; click to open that carrier, or use the
-              Carriers list to work in a different one. No live switching. */}
-          <Link to={cid ? `/carriers/${cid}` : '/carriers'} title="Carrier in context — open Carriers to switch"
-            className="mt-3 w-full flex items-center gap-2 p-2 rounded-lg bg-white/5 hover:bg-white/10">
-            <span className="w-2 h-2 rounded-full bg-success flex-shrink-0" />
-            {!collapsed && <div className="text-left flex-1 min-w-0">
-              <div className="text-[12px] font-semibold truncate">{s.currentCarrier.name}</div>
-              <div className="text-[10px] text-slate-400">DOT {s.currentCarrier.dot}</div>
-            </div>}
-            {!collapsed && <span className="text-slate-500 text-[10px]">↗</span>}
-          </Link>
-
-
           <SectionLabel>Manage</SectionLabel>
           <NavItem to={link('hiring')} icon="compass" label="Hiring" />
           <NavItem to={link('drivers')} icon="idCard" label="Drivers" />
@@ -182,17 +141,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           {can(s.role, 'people') && (
             <NavItem to="/employees" icon="users" label="Employees" />
           )}
-
           <NavItem to="/departments" icon="folder" label="Departments" />
           {can(s.role, 'admin') && <NavItem to={link('administration')} icon="cog" label="Administration" />}
           <NavItem to="/settings" icon="wrench" label="Settings" activeWhen={loc.pathname === '/settings' && loc.hash !== '#screening'} />
           <NavItem to="/settings#screening" icon="shield" label="Driver Screening" activeWhen={loc.pathname === '/settings' && loc.hash === '#screening'} />
-
-          <NavItem to="/departments" icon="🗂" label="Departments" />
-          {can(s.role, 'admin') && <NavItem to={link('administration')} icon="⚙" label="Administration" />}
-          <NavItem to="/settings" icon="🛠" label="Settings" />
-          <NavItem to="/settings#screening" icon="✅" label="Driver Screening" />
-
         </div>
 
         {/* Footer */}
@@ -217,9 +169,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         onGo={(to) => { nav(to); setPaletteOpen(false); }}
         onCreateTask={() => { setPaletteOpen(false); setQuickTask(true); }} />}
       {quickTask && <TaskModal createSeed={{ assignee: s.currentUser }} onClose={() => setQuickTask(false)} />}
-
-      {/* Anna — app-wide AI assistant (ask questions, assign tasks anywhere) */}
-      <AnnaAssistant />
     </div>
   );
 }
@@ -230,14 +179,11 @@ function CommandPalette({ onClose, onGo, onCreateTask }: { onClose: () => void; 
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => { ref.current?.focus(); }, []);
 
-  const carrierName = (id: string) => s.carriers.find((c) => c.id === id)?.name ?? '';
   const ql = q.toLowerCase().trim();
-  // Search spans every carrier (there is no single active carrier to scope to);
-  // each hit shows its carrier so you know where you're navigating.
   const hits = ql ? [
-    ...s.allDrivers.filter((d) => d.name.toLowerCase().includes(ql)).map((d) => ({ type: 'Driver', name: d.name, sub: carrierName(d.carrierId), to: `/carriers/${d.carrierId}/drivers/${d.id}` })),
-    ...s.allCandidates.filter((c) => c.name.toLowerCase().includes(ql)).map((c) => ({ type: 'Candidate', name: c.name, sub: carrierName(c.carrierId), to: `/carriers/${c.carrierId}/hiring/${c.id}` })),
-    ...s.allTrucks.filter((t) => t.unit.includes(ql) || t.vin.toLowerCase().includes(ql)).map((t) => ({ type: 'Truck', name: `Unit #${t.unit}`, sub: carrierName(t.carrierId), to: `/carriers/${t.carrierId}/trucks/${t.id}` })),
+    ...s.drivers.filter((d) => d.name.toLowerCase().includes(ql)).map((d) => ({ type: 'Driver', name: d.name, sub: d.license, to: `/carriers/${d.carrierId}/drivers/${d.id}` })),
+    ...s.candidates.filter((c) => c.name.toLowerCase().includes(ql)).map((c) => ({ type: 'Candidate', name: c.name, sub: c.email, to: `/carriers/${c.carrierId}/hiring/${c.id}` })),
+    ...s.trucks.filter((t) => t.unit.includes(ql) || t.vin.toLowerCase().includes(ql)).map((t) => ({ type: 'Truck', name: `Unit #${t.unit}`, sub: t.vin, to: `/carriers/${t.carrierId}/trucks/${t.id}` })),
     ...s.carriers.filter((c) => c.name.toLowerCase().includes(ql)).map((c) => ({ type: 'Carrier', name: c.name, sub: `DOT ${c.dot}`, to: `/carriers/${c.id}` })),
   ].slice(0, 8) : [];
 
