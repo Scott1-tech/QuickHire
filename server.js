@@ -1346,11 +1346,14 @@ function upsertPortfolio(p) {
 }
 function findPortfolio(id) { return readPortfolios().find((p) => p.id === id); }
 function portfolioSummary(p) {
+  // When no carrier is selected yet, surface how many Anna recommends.
+  const eligibleCount = (p.recommendations || []).filter((r) => r.status === 'ELIGIBLE').length;
   return {
     id: p.id, createdAt: p.createdAt,
     driverName: p.driver?.name || '—',
     carrierName: p.carrier?.carrierName || null,
     fitScore: p.carrier?.fitScore ?? null,
+    recommendationCount: eligibleCount,
     reviewStatus: p.review?.status || 'pending',
     recruiter: p.review?.assignedRecruiter || null,
     complianceFlag: p.compliance?.flag || null,
@@ -1448,6 +1451,20 @@ app.get('/api/anna/portfolios/:id', requireAdmin, (req, res) => {
   res.json(p);
 });
 
+// Recruiter picks the best-fit carrier from Anna's ranked recommendations.
+// Anna only recommends; a human chooses and advances.
+app.post('/api/anna/portfolios/:id/select-carrier', requireAdmin, (req, res) => {
+  const p = findPortfolio(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  const { carrierId, by } = req.body || {};
+  if (!carrierId) return res.status(400).json({ error: 'carrierId is required.' });
+  try {
+    anna.selectCarrier(p, carrierId, by || p.review?.assignedRecruiter || 'Recruiter');
+    upsertPortfolio(p);
+    res.json({ ok: true, carrier: p.carrier, review: p.review });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // Record the driver's signed consent to pull MVR/PSP/Clearinghouse records.
 // Represents the consent captured in the application flow; feeds the gate.
 app.post('/api/anna/portfolios/:id/consent', requireAdmin, (req, res) => {
@@ -1465,7 +1482,7 @@ app.post('/api/anna/portfolios/:id/consent', requireAdmin, (req, res) => {
 app.post('/api/anna/portfolios/:id/compliance', requireAdmin, async (req, res) => {
   const p = findPortfolio(req.params.id);
   if (!p) return res.status(404).json({ error: 'Not found' });
-  if (!p.carrier?.carrierId) return res.status(400).json({ error: 'Portfolio has no matched carrier.' });
+  if (!p.carrier?.carrierId) return res.status(400).json({ error: 'Select a carrier first — the recruiter picks the best fit before compliance runs.' });
   const carrier = findCarrierById(p.carrier.carrierId);
   if (!carrier) return res.status(404).json({ error: 'Matched carrier no longer exists.' });
   try {

@@ -4,7 +4,7 @@
 import { compileSpec } from '../spec.js';
 import { matchDriver, evaluateGates, scoreSoft, suggestRematch, STATUS } from '../matcher.js';
 import { normalizeDriver } from '../normalize.js';
-import { buildPortfolio, writeCompliance } from '../portfolio.js';
+import { buildPortfolio, writeCompliance, selectCarrier as anna_selectCarrier } from '../portfolio.js';
 import { createQueue } from '../queue.js';
 import { extractCarrierSpec } from '../carrier.js';
 import { pullCompliance, checkConsent, ConsentError, integrationStatus, normalizeConsent } from '../integrations.js';
@@ -112,12 +112,23 @@ section('normalizeDriver (heuristic fallback, no API key)');
   ok(profile.cdl.experienceYears === 4, 'maps flat experienceYears into cdl');
   ok(profile.mvr.movingViolations === 1, 'maps flat violations into mvr');
 
-  section('buildPortfolio + recruiter assignment');
-  const { top } = matchDriver(goodDriver, [carrierA, carrierB]);
-  const p = buildPortfolio({ driver: goodDriver, match: top, recruiterPool: ['Jenna', 'Marco'] });
+  section('buildPortfolio recommends (does NOT auto-select carrier)');
+  const fullMatch = matchDriver(goodDriver, [carrierA, carrierB]);
+  const p = buildPortfolio({ driver: goodDriver, match: fullMatch, recruiterPool: ['Jenna', 'Marco'] });
   ok(p.review.assignedRecruiter === 'Jenna', 'round-robin assigns first recruiter');
-  ok(p.review.task.includes('Jenna'), 'task names the recruiter');
-  ok(p.carrier.carrierId === top.carrierId, 'portfolio tied to matched carrier');
+  ok(p.carrier === null, 'no carrier auto-selected — awaits recruiter');
+  ok(p.review.status === 'awaiting_carrier', 'review starts in awaiting_carrier');
+  ok(p.recommendations.length === 2, 'ranked recommendations are listed');
+  ok(p.suggestedTop === fullMatch.top.carrierId, 'top fit is highlighted (advisory only)');
+
+  section('selectCarrier (recruiter picks the company)');
+  const picked = fullMatch.matches[1].carrierId; // recruiter can pick a non-top option
+  anna_selectCarrier(p, picked, 'Jenna');
+  ok(p.carrier.carrierId === picked, 'recruiter selection binds the carrier');
+  ok(p.review.status === 'pending' && p.review.carrierSelectedBy === 'Jenna', 'moves to pending, records who picked');
+  let badPick = null;
+  try { anna_selectCarrier(p, 'nonexistent'); } catch (e) { badPick = e; }
+  ok(badPick, 'rejects a carrier not in the recommendation list');
 
   section('writeCompliance (deterministic verdict)');
   const clean = await writeCompliance({ carrier: carrierA, driver: goodDriver });

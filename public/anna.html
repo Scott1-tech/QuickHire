@@ -52,7 +52,7 @@
       <button id="leadClose" class="text-gray-400 hover:text-gray-700 text-xl leading-none">&times;</button>
     </div>
     <div class="p-5 space-y-3">
-      <p class="text-xs text-gray-500">Anna will normalize this, match it against every carrier, and create a portfolio for the best fit.</p>
+      <p class="text-xs text-gray-500">Anna will normalize this and rank every carrier by fit. You'll pick the carrier to proceed with — Anna recommends, you decide.</p>
       <div class="grid grid-cols-2 gap-3">
         <label class="block"><span class="text-xs font-semibold text-gray-600">Name</span><input id="f_name" class="inp" placeholder="Pat Driver" /></label>
         <label class="block"><span class="text-xs font-semibold text-gray-600">Age</span><input id="f_age" type="number" class="inp" placeholder="30" /></label>
@@ -96,10 +96,11 @@ const fmtScore = (n) => (n == null ? '—' : n + '%');
 // ── Status styling ──
 const statusStyle = {
   ELIGIBLE: 'bg-green-100 text-green-700', NEEDS_DATA: 'bg-amber-100 text-amber-700', INELIGIBLE: 'bg-gray-200 text-gray-600',
-  pending: 'bg-amber-100 text-amber-700', approved: 'bg-green-100 text-green-700', rejected: 'bg-red-100 text-red-700',
+  awaiting_carrier: 'bg-blue-100 text-blue-700', pending: 'bg-amber-100 text-amber-700', approved: 'bg-green-100 text-green-700', rejected: 'bg-red-100 text-red-700',
   approve: 'bg-green-100 text-green-700', reject: 'bg-red-100 text-red-700', review: 'bg-amber-100 text-amber-700',
 };
 const badge = (txt, key) => `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${statusStyle[key] || 'bg-gray-100 text-gray-600'}">${esc(txt)}</span>`;
+const prettyStatus = (s) => ({ awaiting_carrier: 'Awaiting carrier', pending: 'Pending review', approved: 'Approved', rejected: 'Rejected' }[s] || String(s).toUpperCase());
 
 // ── Queue ──
 async function loadQueue() {
@@ -112,10 +113,10 @@ async function loadQueue() {
     <button data-id="${p.id}" class="qitem w-full text-left px-4 py-3 hover:bg-gray-50 ${p.id === selectedId ? 'bg-accent-50' : ''}">
       <div class="flex items-center justify-between gap-2">
         <span class="font-semibold text-sm truncate">${esc(p.driverName)}</span>
-        ${badge(p.reviewStatus, p.reviewStatus)}
+        ${badge(prettyStatus(p.reviewStatus), p.reviewStatus)}
       </div>
       <div class="flex items-center justify-between mt-1">
-        <span class="text-xs text-gray-500 truncate">${esc(p.carrierName || 'No match')}</span>
+        <span class="text-xs text-gray-500 truncate">${p.carrierName ? esc(p.carrierName) : (p.recommendationCount ? `${p.recommendationCount} carrier${p.recommendationCount > 1 ? 's' : ''} recommended — pick one` : 'No eligible carrier')}</span>
         <span class="text-xs font-semibold text-gray-700">${fmtScore(p.fitScore)}</span>
       </div>
       <div class="mt-1 flex items-center gap-2">
@@ -153,17 +154,24 @@ function driverLine(d) {
   return bits.join(' · ') || 'No data';
 }
 
-function renderMatch(match, assignedCarrierId) {
+// Anna recommends; the recruiter selects. selectedId = chosen carrier (or null).
+// suggestedTop = Anna's highest fit (advisory highlight only).
+function renderMatch(match, selectedId, suggestedTop) {
   if (!match) return '';
+  const chosen = !!selectedId;
   return match.matches.map((m) => {
-    const isAssigned = m.carrierId === assignedCarrierId;
+    const isSelected = m.carrierId === selectedId;
+    const isTopPick = !chosen && m.carrierId === suggestedTop;
     const reasons = (m.gateResults || []).filter((g) => g.status !== 'PASS');
-    return `<div class="border ${isAssigned ? 'border-accent-500' : 'border-gray-200'} rounded-xl p-3">
+    const canSelect = !chosen && m.status !== 'INELIGIBLE';
+    return `<div class="border ${isSelected ? 'border-accent-500 bg-accent-50' : isTopPick ? 'border-accent-300' : 'border-gray-200'} rounded-xl p-3">
       <div class="flex items-center justify-between gap-2">
-        <span class="font-semibold text-sm">${esc(m.carrierName)} ${isAssigned ? '<span class="text-[10px] text-accent-600 font-bold">● ASSIGNED</span>' : ''}</span>
+        <span class="font-semibold text-sm">${esc(m.carrierName)}
+          ${isSelected ? '<span class="text-[10px] text-accent-600 font-bold">● SELECTED</span>' : isTopPick ? '<span class="text-[10px] text-accent-500 font-bold">★ Anna\'s top pick</span>' : ''}</span>
         <span class="flex items-center gap-2">${badge(m.status, m.status)}<span class="text-xs font-bold text-gray-700">${fmtScore(m.status === 'INELIGIBLE' ? null : m.fitScore)}</span></span>
       </div>
       ${reasons.length ? `<ul class="mt-2 space-y-1">${reasons.map((r) => `<li class="text-xs ${r.status === 'FAIL' ? 'text-red-600' : 'text-amber-600'}">• ${esc(r.reason)}</li>`).join('')}</ul>` : '<p class="text-xs text-green-600 mt-1">All gates pass.</p>'}
+      ${canSelect ? `<button data-select="${esc(m.carrierId)}" class="selectCarrierBtn mt-2 text-xs font-semibold px-3 py-1.5 rounded-lg bg-accent-500 hover:bg-accent-600 text-white">Select this carrier</button>` : ''}
     </div>`;
   }).join('');
 }
@@ -244,7 +252,7 @@ function renderDecision(p) {
   const r = p.review || {};
   if (r.status && r.status !== 'pending') {
     return `<div class="space-y-1">
-      <div>${badge(r.status.toUpperCase(), r.status)} <span class="text-xs text-gray-400">by ${esc(r.decidedBy || '—')} · ${r.decidedAt ? new Date(r.decidedAt).toLocaleString() : ''}</span></div>
+      <div>${badge(prettyStatus(r.status), r.status)} <span class="text-xs text-gray-400">by ${esc(r.decidedBy || '—')} · ${r.decidedAt ? new Date(r.decidedAt).toLocaleString() : ''}</span></div>
       ${r.decisionReason ? `<p class="text-sm text-gray-600">${esc(r.decisionReason)}</p>` : ''}
       <div id="rematchBox"></div>
     </div>`;
@@ -267,16 +275,20 @@ function renderDetail(p, match) {
         <h2 class="text-lg font-bold">${esc(p.driver?.name || 'Driver')}</h2>
         <p class="text-sm text-gray-500">${esc(driverLine(p.driver || {}))}</p>
       </div>
-      <div class="text-right">${badge((p.review?.status || 'pending').toUpperCase(), p.review?.status || 'pending')}
+      <div class="text-right">${badge(prettyStatus(p.review?.status || 'pending'), p.review?.status || 'pending')}
         <p class="text-xs text-gray-400 mt-1">${esc(p.review?.task || '')}</p></div>
     </div>
     ${(p.documentWarnings || []).length ? `<div class="mb-4 text-xs bg-amber-50 text-amber-700 rounded-lg p-2">⚠ ${p.documentWarnings.map(esc).join('<br>')}</div>` : ''}
 
+    ${!p.carrier ? `<div class="mb-4 text-sm bg-accent-50 text-accent-600 rounded-xl p-3 font-medium">Anna ranked the best-fit carriers below — pick one to proceed. Anna recommends; you decide.</div>`
+      : `<div class="mb-4 text-sm bg-gray-50 rounded-xl p-3"><span class="font-semibold">Selected carrier:</span> ${esc(p.carrier.carrierName)} (${fmtScore(p.carrier.fitScore)} fit)${p.review?.carrierSelectedBy ? ` · picked by ${esc(p.review.carrierSelectedBy)}` : ''}</div>`}
+
     <div class="mb-5">
-      <h3 class="text-xs font-bold uppercase text-gray-400 mb-2">Match analysis</h3>
-      <div class="space-y-2">${renderMatch(match, p.carrier?.carrierId) || '<p class="text-sm text-gray-400">No carriers to match against.</p>'}</div>
+      <h3 class="text-xs font-bold uppercase text-gray-400 mb-2">${p.carrier ? 'Match analysis' : "Anna's ranked recommendations"}</h3>
+      <div class="space-y-2">${renderMatch(match, p.carrier?.carrierId, p.suggestedTop) || '<p class="text-sm text-gray-400">No carriers to match against.</p>'}</div>
     </div>
 
+    ${p.carrier ? `
     <div class="mb-5">
       <h3 class="text-xs font-bold uppercase text-gray-400 mb-2">Driver consent</h3>
       ${renderConsent(p)}
@@ -290,7 +302,16 @@ function renderDetail(p, match) {
     <div>
       <h3 class="text-xs font-bold uppercase text-gray-400 mb-2">Recruiter decision</h3>
       ${renderDecision(p)}
-    </div>`;
+    </div>` : `<p class="text-xs text-gray-400">Consent, compliance, and the approve/reject decision unlock once you select a carrier.</p>`}`;
+
+  // Wire carrier selection (recruiter picks from Anna's ranked list)
+  detail.querySelectorAll('.selectCarrierBtn').forEach((btn) => btn.addEventListener('click', async () => {
+    btn.disabled = true; btn.textContent = 'Selecting…';
+    try {
+      await api('/api/anna/portfolios/' + p.id + '/select-carrier', { method: 'POST', body: JSON.stringify({ carrierId: btn.dataset.select }) });
+      await selectPortfolio(p.id); await loadQueue();
+    } catch (e) { alert(e.message); btn.disabled = false; btn.textContent = 'Select this carrier'; }
+  }));
 
   // Wire consent capture
   const recordConsent = async () => {
