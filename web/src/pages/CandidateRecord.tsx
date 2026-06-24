@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useStore } from '@/store';
-import { PageHeader, Pill, Empty, timeAgo } from '@/ui';
+import { PageHeader, Pill, Empty, timeAgo, AssignmentIcon } from '@/ui';
 import { DOC_TYPES_MAIN } from '@/data/mock';
 import { type ChecklistStep, type Stage } from '@/types';
 import CandidateScreening from '@/components/CandidateScreening';
@@ -86,7 +86,8 @@ export default function CandidateRecord() {
     document.body.style.userSelect = 'none';
   };
 
-  const c = s.candidates.find((x) => x.id === candidateId);
+  const c = s.allCandidates.find((x) => x.id === candidateId);
+  const candidateCarrier = s.carriers.find((x) => x.id === c?.carrierId);
   // Steps come from the (customizable) store template; completion is per-candidate.
   const steps = s.checklistTemplate.map((x) => ({ ...x, status: statusOverrides[x.id] ?? x.status }));
   const done = steps.filter((x) => x.status === 'complete').length;
@@ -127,7 +128,7 @@ export default function CandidateRecord() {
   return (
     <>
       <PageHeader
-        crumbs={[{ label: 'Carriers', to: '/carriers' }, { label: s.currentCarrier.name, to: `/carriers/${c.carrierId}` }, { label: 'Hiring', to: `/carriers/${c.carrierId}/hiring` }, { label: c.name }]}
+        crumbs={[{ label: 'Carriers', to: '/carriers' }, { label: candidateCarrier?.name ?? '—', to: `/carriers/${c.carrierId}` }, { label: 'Hiring', to: `/carriers/${c.carrierId}/hiring` }, { label: c.name }]}
         actions={<div className="flex gap-2"><button onClick={() => setShowScreen(true)} className="btn-primary">✓ Run AI Screening</button><button onClick={() => setShowEdit(true)} className="btn-ghost">Edit</button><button onClick={() => { if (confirm(`Archive ${c.name}?`)) nav(`/carriers/${c.carrierId}/hiring`); }} className="btn-ghost text-danger">Archive</button></div>}
       />
 
@@ -174,7 +175,7 @@ export default function CandidateRecord() {
             </div>
 
             {/* Assigned truck — editable: switch among available trucks */}
-            <AssignedTruck candidateId={c.id} assignedTruckId={c.assignedTruckId ?? null} />
+            <AssignedTruck candidateId={c.id} carrierId={c.carrierId} assignedTruckId={c.assignedTruckId ?? null} />
 
             {/* Recent Activity feed — left side */}
             <div className="card overflow-hidden flex flex-col">
@@ -318,7 +319,7 @@ export default function CandidateRecord() {
         </div>
       </div>
 
-      {showTruck && <SelectTruck onClose={() => setShowTruck(false)} onPick={(tid) => { s.assignTruck(c.id, tid); s.moveCandidate(c.id, lastStage); addActivity('Stage', `Moved to ${lastStage} and truck assigned.`); setShowTruck(false); }} />}
+      {showTruck && <SelectTruck carrierId={c.carrierId} onClose={() => setShowTruck(false)} onPick={(tid) => { s.assignTruck(c.id, tid); s.moveCandidate(c.id, lastStage); addActivity('Stage', `Moved to ${lastStage} and truck assigned.`); setShowTruck(false); }} />}
       {action && <ActionModal kind={action} candidate={c} recruiter={recruiter} onClose={() => setAction(null)} onLog={addActivity} />}
       {showEdit && <EditCandidate name={c.name} email={c.email} phone={c.phone ?? ''} onClose={() => setShowEdit(false)} />}
     </>
@@ -477,11 +478,12 @@ function Documents() {
   );
 }
 
-// Editable assigned-truck card on the candidate record — switch among available trucks.
-function AssignedTruck({ candidateId, assignedTruckId }: { candidateId: string; assignedTruckId: string | null }) {
+// Editable assigned-truck card on the candidate record — switch among the
+// candidate's carrier's available trucks (you don't assign across carriers).
+function AssignedTruck({ candidateId, carrierId, assignedTruckId }: { candidateId: string; carrierId: string; assignedTruckId: string | null }) {
   const s = useStore();
-  const assigned = s.trucks.find((t) => t.id === assignedTruckId);
-  const options = s.trucks.filter((t) => t.status === 'Available' || t.id === assignedTruckId);
+  const assigned = s.allTrucks.find((t) => t.id === assignedTruckId);
+  const options = s.allTrucks.filter((t) => t.carrierId === carrierId && (t.status === 'Available' || t.id === assignedTruckId));
   return (
     <div className="card p-3">
       <div className="text-[10px] font-bold text-muted uppercase mb-2">Assigned Truck</div>
@@ -492,6 +494,7 @@ function AssignedTruck({ candidateId, assignedTruckId }: { candidateId: string; 
       </select>
       {assigned ? (
         <div className="text-[11.5px] text-muted mt-2 flex items-center gap-2">
+          <AssignmentIcon assigned size={14} />
           <span>{assigned.year} · {assigned.plate}</span>
           <Pill kind={assigned.status}>{assigned.status}</Pill>
         </div>
@@ -502,19 +505,23 @@ function AssignedTruck({ candidateId, assignedTruckId }: { candidateId: string; 
   );
 }
 
-function SelectTruck({ onClose, onPick }: { onClose: () => void; onPick: (id: string) => void }) {
+function SelectTruck({ carrierId, onClose, onPick }: { carrierId: string; onClose: () => void; onPick: (id: string) => void }) {
   const s = useStore();
-  const available = s.trucks.filter((t) => t.status === 'Available');
+  const carrier = s.carriers.find((c) => c.id === carrierId);
+  const available = s.allTrucks.filter((t) => t.carrierId === carrierId && t.status === 'Available');
   return (
     <div className="fixed inset-0 bg-black/40 z-50 grid place-items-center p-4" onClick={onClose}>
       <div className="card p-6 w-[480px] max-w-full shadow-pop" onClick={(e) => e.stopPropagation()}>
         <div className="text-lg font-extrabold text-ink mb-1">Select Truck for Onboarding</div>
-        <div className="text-xs text-muted mb-4">Only Available trucks are shown.</div>
-        {available.length === 0 && <Empty icon="🚛" title="No available trucks" sub="Add a truck (Owner/Admin) to continue." />}
+        <div className="text-xs text-muted mb-4">Available trucks for <span className="font-semibold text-ink">{carrier?.name ?? 'this carrier'}</span>.</div>
+        {available.length === 0 && <Empty icon="🚛" title="No available trucks" sub="Add a truck to this carrier to continue." />}
         {available.map((t) => (
-          <button key={t.id} onClick={() => onPick(t.id)} className="w-full text-left p-3 rounded-lg border border-line hover:border-primary mb-2 transition-all">
-            <div className="font-bold text-ink">Unit #{t.unit} — {t.make} {t.model} {t.year}</div>
-            <div className="text-xs text-muted">{t.plate} · {s.currentCarrier.name}</div>
+          <button key={t.id} onClick={() => onPick(t.id)} className="w-full text-left p-3 rounded-lg border border-line hover:border-primary mb-2 transition-all flex items-center gap-3">
+            <AssignmentIcon assigned={false} size={18} />
+            <div className="flex-1 min-w-0">
+              <div className="font-bold text-ink">Unit #{t.unit} — {t.make} {t.model} {t.year}</div>
+              <div className="text-xs text-muted">{t.plate} · {carrier?.name ?? ''}</div>
+            </div>
           </button>
         ))}
         <button onClick={onClose} className="btn-ghost w-full mt-2">Cancel</button>

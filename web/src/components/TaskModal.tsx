@@ -165,6 +165,10 @@ export default function TaskModal({ taskId, createSeed, onClose }: {
                 </Prop>
               </div>
               <div>
+                <Prop icon="building" label="Carrier">
+                  <CarrierPick value={draft.carrierId} carriers={s.carriers}
+                    onChange={(v) => patch({ carrierId: v, assignee: undefined, reviewer: undefined })} />
+                </Prop>
                 <Prop icon="user" label="Assignees">
                   <AssigneePick value={draft.assignee} employees={employees} onChange={(v) => patch({ assignee: v })} />
                 </Prop>
@@ -322,6 +326,51 @@ function PersonRow({ name, onClick, selected }: { name: string; onClick: () => v
       <Avatar name={name} size={24} /> <span className="flex-1 truncate">{name}</span>
       {selected && <Icon name="check" size={14} className="text-[#7b68ee]" />}
     </button>
+  );
+}
+
+// Per-task carrier selector — pick which carrier this task belongs to, the same
+// way you pick an assignee. Drives the breadcrumb and the assignee list below it.
+function CarrierPick({ value, carriers, onChange }: {
+  value?: string; carriers: { id: string; name: string; dot: string }[]; onChange: (v: string) => void;
+}) {
+  const [q, setQ] = useState('');
+  const current = carriers.find((c) => c.id === value);
+  const filtered = carriers.filter((c) => c.name.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <Pop width={300} trigger={(toggle) => (
+      <button onClick={toggle} className="flex items-center gap-2 text-[13px]">
+        {current
+          ? <span className="w-[22px] h-[22px] rounded-md grid place-items-center text-white text-[10px] font-bold flex-shrink-0" style={{ background: '#e25563' }}>{current.name[0]}</span>
+          : <span className="w-[22px] h-[22px] rounded-full border border-dashed border-[#c2c6cc] grid place-items-center text-[#c2c6cc]"><Icon name="plus" size={11} /></span>}
+        <span style={{ color: current ? '#1d2430' : '#a3a8b0' }}>{current?.name ?? 'Select carrier'}</span>
+        <Icon name="chevronDown" size={13} className="text-[#a3a8b0]" />
+      </button>
+    )}>
+      {(close) => (
+        <div className="p-2">
+          <div className="flex items-center gap-2 border border-[#e8eaed] rounded-md px-2 py-1.5 mb-1">
+            <Icon name="search" size={14} className="text-[#a3a8b0]" />
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search carriers…" className="bg-transparent outline-none text-[13px] flex-1" />
+          </div>
+          <div className="max-h-56 overflow-y-auto">
+            <div className="text-[11px] font-bold text-[#a3a8b0] px-1 pt-1.5 pb-1">Carriers</div>
+            {filtered.map((c) => (
+              <button key={c.id} onClick={() => { onChange(c.id); close(); }}
+                className="w-full flex items-center gap-2.5 px-1.5 py-1.5 rounded-lg hover:bg-[#f4f5f7] text-[13px] text-left">
+                <span className="w-6 h-6 rounded-md grid place-items-center text-white text-[10px] font-bold flex-shrink-0" style={{ background: '#e25563' }}>{c.name[0]}</span>
+                <span className="flex-1 min-w-0">
+                  <span className="block truncate font-medium text-[#1d2430]">{c.name}</span>
+                  <span className="block text-[11px] text-[#a3a8b0]">DOT {c.dot}</span>
+                </span>
+                {c.id === value && <Icon name="check" size={14} className="text-[#7b68ee]" />}
+              </button>
+            ))}
+            {filtered.length === 0 && <div className="px-2 py-2 text-[12.5px] text-[#a3a8b0]">No matches.</div>}
+          </div>
+        </div>
+      )}
+    </Pop>
   );
 }
 
