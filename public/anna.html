@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Anna — Driver Qualification</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config={theme:{extend:{colors:{accent:{50:'#fef2f4',100:'#fde4e8',500:'#b01d30',600:'#8f1727'}},fontFamily:{sans:['Inter','sans-serif']}}}}</script>
+<style>body{font-family:'Inter',sans-serif;} .scroll::-webkit-scrollbar{width:8px} .scroll::-webkit-scrollbar-thumb{background:#e5e7eb;border-radius:4px}</style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+
+<!-- Top bar -->
+<header class="bg-white border-b border-gray-200 sticky top-0 z-10">
+  <div class="max-w-7xl mx-auto px-5 py-3 flex items-center gap-3">
+    <div class="w-9 h-9 rounded-xl bg-accent-500 text-white font-black flex items-center justify-center">A</div>
+    <div>
+      <h1 class="text-base font-bold leading-tight">Anna — Driver Qualification</h1>
+      <p class="text-xs text-gray-500 leading-tight">Lead matching · compliance · recruiter review</p>
+    </div>
+    <span id="aiBadge" class="hidden ml-2 text-[11px] font-semibold px-2 py-0.5 rounded-full"></span>
+    <div class="ml-auto flex items-center gap-2">
+      <button id="newLeadBtn" class="text-sm font-semibold px-3 py-2 rounded-lg bg-accent-500 hover:bg-accent-600 text-white">+ New lead</button>
+      <a href="/" class="text-sm font-medium px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50">Dashboard</a>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-5 py-5 grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5">
+  <!-- Queue -->
+  <section class="bg-white rounded-2xl border border-gray-200 overflow-hidden flex flex-col" style="max-height:calc(100vh - 110px)">
+    <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+      <h2 class="font-bold text-sm">Portfolio queue</h2>
+      <button id="refreshBtn" class="text-xs text-gray-500 hover:text-accent-500 font-medium">Refresh</button>
+    </div>
+    <div id="queue" class="overflow-y-auto scroll divide-y divide-gray-100 flex-1"></div>
+  </section>
+
+  <!-- Detail -->
+  <section id="detail" class="bg-white rounded-2xl border border-gray-200 p-6 min-h-[400px]">
+    <div class="text-center text-gray-400 py-24">
+      <p class="text-sm">Select a portfolio from the queue, or create a new lead.</p>
+    </div>
+  </section>
+</main>
+
+<!-- New lead modal -->
+<div id="leadModal" class="hidden fixed inset-0 bg-black/40 z-20 flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto scroll">
+    <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+      <h3 class="font-bold">New driver lead</h3>
+      <button id="leadClose" class="text-gray-400 hover:text-gray-700 text-xl leading-none">&times;</button>
+    </div>
+    <div class="p-5 space-y-3">
+      <p class="text-xs text-gray-500">Anna will normalize this, match it against every carrier, and create a portfolio for the best fit.</p>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="block"><span class="text-xs font-semibold text-gray-600">Name</span><input id="f_name" class="inp" placeholder="Pat Driver" /></label>
+        <label class="block"><span class="text-xs font-semibold text-gray-600">Age</span><input id="f_age" type="number" class="inp" placeholder="30" /></label>
+        <label class="block"><span class="text-xs font-semibold text-gray-600">CDL class</span>
+          <select id="f_class" class="inp"><option value="">—</option><option>A</option><option>B</option><option>C</option></select></label>
+        <label class="block"><span class="text-xs font-semibold text-gray-600">Experience (yrs)</span><input id="f_exp" type="number" class="inp" placeholder="5" /></label>
+        <label class="block col-span-2"><span class="text-xs font-semibold text-gray-600">Endorsements (comma)</span><input id="f_end" class="inp" placeholder="H, N" /></label>
+        <label class="block"><span class="text-xs font-semibold text-gray-600">Moving violations</span><input id="f_mv" type="number" class="inp" placeholder="0" /></label>
+        <label class="block"><span class="text-xs font-semibold text-gray-600">Accidents</span><input id="f_acc" type="number" class="inp" placeholder="0" /></label>
+        <label class="block"><span class="text-xs font-semibold text-gray-600">DUI / DWI</span><input id="f_dui" type="number" class="inp" placeholder="0" /></label>
+        <label class="block"><span class="text-xs font-semibold text-gray-600">Recruiter</span><input id="f_rec" class="inp" placeholder="Jenna" /></label>
+      </div>
+      <details class="text-xs text-gray-500">
+        <summary class="cursor-pointer font-semibold">Or paste raw lead text/JSON</summary>
+        <textarea id="f_raw" class="inp mt-2 h-24 font-mono text-xs" placeholder='Free text or JSON — e.g. "drove for Swift 2018-2021, clean record"'></textarea>
+      </details>
+      <p id="leadErr" class="text-sm text-red-600 hidden"></p>
+      <button id="leadSubmit" class="w-full py-2.5 bg-accent-500 hover:bg-accent-600 text-white rounded-xl font-semibold">Match & create portfolio</button>
+    </div>
+  </div>
+</div>
+
+<style>.inp{width:100%;margin-top:2px;padding:.5rem .65rem;border:1.5px solid #e5e7eb;border-radius:.6rem;outline:none;font-size:.875rem}.inp:focus{border-color:#b01d30;box-shadow:0 0 0 3px #fde4e8}</style>
+
+<script>
+const TOKEN_KEY = 'qh_admin';
+let CFG = {};
+let selectedId = null;
+
+function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { 'Content-Type': 'application/json', 'x-admin-token': token(), ...(opts.headers || {}) } });
+  if (res.status === 401) { location.href = '/login.html'; throw new Error('unauthorized'); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { const err = new Error(data.error || `Error ${res.status}`); Object.assign(err, data); throw err; }
+  return data;
+}
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const fmtScore = (n) => (n == null ? '—' : n + '%');
+
+// ── Status styling ──
+const statusStyle = {
+  ELIGIBLE: 'bg-green-100 text-green-700', NEEDS_DATA: 'bg-amber-100 text-amber-700', INELIGIBLE: 'bg-gray-200 text-gray-600',
+  pending: 'bg-amber-100 text-amber-700', approved: 'bg-green-100 text-green-700', rejected: 'bg-red-100 text-red-700',
+  approve: 'bg-green-100 text-green-700', reject: 'bg-red-100 text-red-700', review: 'bg-amber-100 text-amber-700',
+};
+const badge = (txt, key) => `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${statusStyle[key] || 'bg-gray-100 text-gray-600'}">${esc(txt)}</span>`;
+
+// ── Queue ──
+async function loadQueue() {
+  const list = await api('/api/anna/portfolios');
+  const q = document.getElementById('queue');
+  if (!list.length) { q.innerHTML = '<div class="p-6 text-center text-sm text-gray-400">No portfolios yet. Create a lead to start.</div>'; return; }
+  // Newest first.
+  list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  q.innerHTML = list.map((p) => `
+    <button data-id="${p.id}" class="qitem w-full text-left px-4 py-3 hover:bg-gray-50 ${p.id === selectedId ? 'bg-accent-50' : ''}">
+      <div class="flex items-center justify-between gap-2">
+        <span class="font-semibold text-sm truncate">${esc(p.driverName)}</span>
+        ${badge(p.reviewStatus, p.reviewStatus)}
+      </div>
+      <div class="flex items-center justify-between mt-1">
+        <span class="text-xs text-gray-500 truncate">${esc(p.carrierName || 'No match')}</span>
+        <span class="text-xs font-semibold text-gray-700">${fmtScore(p.fitScore)}</span>
+      </div>
+      <div class="mt-1 flex items-center gap-2">
+        ${p.recruiter ? `<span class="text-[11px] text-gray-400">${esc(p.recruiter)}</span>` : ''}
+        ${p.complianceFlag ? badge('compliance: ' + p.complianceFlag, p.complianceFlag) : ''}
+      </div>
+    </button>`).join('');
+  q.querySelectorAll('.qitem').forEach((el) => el.addEventListener('click', () => selectPortfolio(el.dataset.id)));
+}
+
+// ── Detail ──
+async function selectPortfolio(id) {
+  selectedId = id;
+  document.querySelectorAll('.qitem').forEach((el) => el.classList.toggle('bg-accent-50', el.dataset.id === id));
+  const detail = document.getElementById('detail');
+  detail.innerHTML = '<div class="text-center text-gray-400 py-24 text-sm">Loading…</div>';
+  const p = await api('/api/anna/portfolios/' + id);
+  // Re-run match on the stored (authoritative) driver to show full gate reasons + alternatives.
+  let match = null;
+  try { match = (await api('/api/anna/match', { method: 'POST', body: JSON.stringify({ driver: p.driver }) })).match; } catch {}
+  renderDetail(p, match);
+}
+
+function driverLine(d) {
+  const c = d.cdl || {}, m = d.mvr || {};
+  const bits = [
+    d.age != null ? d.age + ' yrs' : null,
+    c.class ? 'Class ' + c.class : null,
+    c.experienceYears != null ? c.experienceYears + ' yr exp' : null,
+    (c.endorsements || []).length ? 'End: ' + c.endorsements.join(',') : null,
+    m.dui != null ? m.dui + ' DUI' : null,
+    m.movingViolations != null ? m.movingViolations + ' mv' : null,
+    m.accidents != null ? m.accidents + ' acc' : null,
+  ].filter(Boolean);
+  return bits.join(' · ') || 'No data';
+}
+
+function renderMatch(match, assignedCarrierId) {
+  if (!match) return '';
+  return match.matches.map((m) => {
+    const isAssigned = m.carrierId === assignedCarrierId;
+    const reasons = (m.gateResults || []).filter((g) => g.status !== 'PASS');
+    return `<div class="border ${isAssigned ? 'border-accent-500' : 'border-gray-200'} rounded-xl p-3">
+      <div class="flex items-center justify-between gap-2">
+        <span class="font-semibold text-sm">${esc(m.carrierName)} ${isAssigned ? '<span class="text-[10px] text-accent-600 font-bold">● ASSIGNED</span>' : ''}</span>
+        <span class="flex items-center gap-2">${badge(m.status, m.status)}<span class="text-xs font-bold text-gray-700">${fmtScore(m.status === 'INELIGIBLE' ? null : m.fitScore)}</span></span>
+      </div>
+      ${reasons.length ? `<ul class="mt-2 space-y-1">${reasons.map((r) => `<li class="text-xs ${r.status === 'FAIL' ? 'text-red-600' : 'text-amber-600'}">• ${esc(r.reason)}</li>`).join('')}</ul>` : '<p class="text-xs text-green-600 mt-1">All gates pass.</p>'}
+    </div>`;
+  }).join('');
+}
+
+function providerStatusLine() {
+  const s = CFG.annaIntegrations || {};
+  return Object.entries(s).map(([k, v]) => `<span class="text-[11px] px-1.5 py-0.5 rounded ${v === 'live' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}">${esc(k)}: ${esc(v)}</span>`).join(' ');
+}
+
+function consentTypes(c) {
+  return ['mvr', 'psp', 'clearinghouse'].filter((t) => c && c[t]);
+}
+
+function renderConsent(p) {
+  const c = p.consent;
+  if (c && consentTypes(c).length) {
+    const when = c.signedAt || c.capturedAt;
+    return `<div class="flex items-center justify-between bg-green-50 rounded-xl p-3">
+      <div>
+        <p class="text-sm text-green-800 font-semibold">✓ Consent on file: ${consentTypes(c).map((t) => t.toUpperCase()).join(', ')}</p>
+        <p class="text-[11px] text-green-700">${when ? 'signed ' + new Date(when).toLocaleString() : ''}${c.by ? ' · ' + esc(c.by) : ''}</p>
+      </div>
+      <button id="editConsent" class="text-xs text-gray-500 hover:text-accent-500 font-medium">Update</button>
+    </div>`;
+  }
+  return consentForm();
+}
+
+function consentForm() {
+  return `<div id="consentForm" class="space-y-2 bg-gray-50 rounded-xl p-3">
+    <p class="text-xs text-gray-500">Record the driver's signed authorization (from the application). Required before any record pull.</p>
+    <div class="flex flex-wrap gap-3 text-xs">
+      <label class="flex items-center gap-1"><input id="cons_mvr" type="checkbox" checked> MVR</label>
+      <label class="flex items-center gap-1"><input id="cons_psp" type="checkbox" checked> PSP</label>
+      <label class="flex items-center gap-1"><input id="cons_ch" type="checkbox" checked> Clearinghouse</label>
+      <input id="cons_by" class="inp flex-1" style="min-width:140px" placeholder="Signed by (driver name)">
+    </div>
+    <button id="recordConsent" class="px-3 py-2 bg-accent-500 hover:bg-accent-600 text-white rounded-lg text-sm font-semibold">Record consent</button>
+  </div>`;
+}
+
+function renderCompliance(p) {
+  if (p.compliance) {
+    const c = p.compliance;
+    const src = p.complianceSources || c.sources;
+    return `<div class="space-y-2">
+      <div class="flex items-center gap-2">${badge(c.flag.toUpperCase(), c.flag)}<span class="text-xs text-gray-400">checked ${new Date(c.checkedAt).toLocaleString()}</span></div>
+      <p class="text-sm text-gray-700">${esc(c.summary)}</p>
+      <div class="grid gap-1">${(c.categories || []).map((cat) => `<div class="text-xs ${cat.pass ? 'text-gray-500' : 'text-red-600'}"><b>${esc(cat.key)}:</b> ${esc(cat.reason)}</div>`).join('')}</div>
+      ${src ? `<div class="text-[11px] text-gray-400 pt-1">Sources: ${src.map((s) => `${esc(s.type)} (${s.simulated ? 'simulated' : 'live'})`).join(', ')}</div>` : ''}
+    </div>`;
+  }
+  // Pull uses the consent already on file (no checkboxes here). Manual entry override below.
+  const hasConsent = consentTypes(p.consent).length > 0;
+  return `<div class="space-y-3">
+    <div class="flex items-center justify-between">
+      <p class="text-xs text-gray-500">${hasConsent ? 'Pull ' + consentTypes(p.consent).map((t) => t.toUpperCase()).join(' / ') + ' and write the verdict.' : 'Record driver consent above to enable a record pull.'}</p>
+      <span>${providerStatusLine()}</span>
+    </div>
+    <button id="pullCompliance" ${hasConsent ? '' : 'disabled'} class="px-3 py-2 rounded-lg text-sm font-semibold ${hasConsent ? 'bg-accent-500 hover:bg-accent-600 text-white' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}">Pull records & write verdict</button>
+    <details class="text-xs text-gray-500">
+      <summary class="cursor-pointer font-semibold">Manual entry (override / no provider)</summary>
+      <p class="text-[11px] text-gray-400 mt-1 mb-2">Entered values supersede pulled + self-reported data.</p>
+      <div class="grid grid-cols-3 gap-2">
+        <label>MVR DUIs<input id="c_dui" type="number" class="inp" placeholder="0"></label>
+        <label>MVR violations<input id="c_mv" type="number" class="inp" placeholder="0"></label>
+        <label>MVR accidents<input id="c_acc" type="number" class="inp" placeholder="0"></label>
+        <label>PSP crashes<input id="c_cr" type="number" class="inp" placeholder="0"></label>
+        <label>PSP OOS<input id="c_oos" type="number" class="inp" placeholder="0"></label>
+        <label class="flex items-center gap-1 mt-5"><input id="c_ch" type="checkbox"> Clearinghouse prohibited</label>
+      </div>
+      <button id="runCompliance" class="mt-2 px-3 py-2 bg-gray-900 hover:bg-black text-white rounded-lg text-sm font-semibold">Write verdict (manual)</button>
+    </details>
+  </div>`;
+}
+
+function renderDecision(p) {
+  const r = p.review || {};
+  if (r.status && r.status !== 'pending') {
+    return `<div class="space-y-1">
+      <div>${badge(r.status.toUpperCase(), r.status)} <span class="text-xs text-gray-400">by ${esc(r.decidedBy || '—')} · ${r.decidedAt ? new Date(r.decidedAt).toLocaleString() : ''}</span></div>
+      ${r.decisionReason ? `<p class="text-sm text-gray-600">${esc(r.decisionReason)}</p>` : ''}
+      <div id="rematchBox"></div>
+    </div>`;
+  }
+  return `<div class="space-y-2">
+    <textarea id="d_reason" class="inp h-16" placeholder="Decision reason (optional for approve, recommended for reject)"></textarea>
+    <div class="flex gap-2">
+      <button id="approveBtn" class="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold text-sm">Approve & advance</button>
+      <button id="rejectBtn" class="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-semibold text-sm">Reject</button>
+    </div>
+    <div id="rematchBox"></div>
+  </div>`;
+}
+
+function renderDetail(p, match) {
+  const detail = document.getElementById('detail');
+  detail.innerHTML = `
+    <div class="flex items-start justify-between gap-3 mb-4">
+      <div>
+        <h2 class="text-lg font-bold">${esc(p.driver?.name || 'Driver')}</h2>
+        <p class="text-sm text-gray-500">${esc(driverLine(p.driver || {}))}</p>
+      </div>
+      <div class="text-right">${badge((p.review?.status || 'pending').toUpperCase(), p.review?.status || 'pending')}
+        <p class="text-xs text-gray-400 mt-1">${esc(p.review?.task || '')}</p></div>
+    </div>
+    ${(p.documentWarnings || []).length ? `<div class="mb-4 text-xs bg-amber-50 text-amber-700 rounded-lg p-2">⚠ ${p.documentWarnings.map(esc).join('<br>')}</div>` : ''}
+
+    <div class="mb-5">
+      <h3 class="text-xs font-bold uppercase text-gray-400 mb-2">Match analysis</h3>
+      <div class="space-y-2">${renderMatch(match, p.carrier?.carrierId) || '<p class="text-sm text-gray-400">No carriers to match against.</p>'}</div>
+    </div>
+
+    <div class="mb-5">
+      <h3 class="text-xs font-bold uppercase text-gray-400 mb-2">Driver consent</h3>
+      ${renderConsent(p)}
+    </div>
+
+    <div class="mb-5">
+      <h3 class="text-xs font-bold uppercase text-gray-400 mb-2">Compliance (MVR · PSP · Clearinghouse)</h3>
+      ${renderCompliance(p)}
+    </div>
+
+    <div>
+      <h3 class="text-xs font-bold uppercase text-gray-400 mb-2">Recruiter decision</h3>
+      ${renderDecision(p)}
+    </div>`;
+
+  // Wire consent capture
+  const recordConsent = async () => {
+    const body = {
+      mvr: document.getElementById('cons_mvr').checked,
+      psp: document.getElementById('cons_psp').checked,
+      clearinghouse: document.getElementById('cons_ch').checked,
+      by: document.getElementById('cons_by').value.trim() || (p.driver?.name || ''),
+    };
+    if (!body.mvr && !body.psp && !body.clearinghouse) { alert('Select at least one authorization.'); return; }
+    await api('/api/anna/portfolios/' + p.id + '/consent', { method: 'POST', body: JSON.stringify(body) });
+    await selectPortfolio(p.id);
+  };
+  document.getElementById('recordConsent')?.addEventListener('click', recordConsent);
+  // "Update" re-opens the consent form in place.
+  document.getElementById('editConsent')?.addEventListener('click', () => {
+    const sec = document.getElementById('editConsent').closest('.mb-5');
+    sec.querySelector('div').outerHTML = consentForm();
+    document.getElementById('recordConsent').addEventListener('click', recordConsent);
+  });
+
+  // Wire consent-gated pull (uses consent already on file)
+  const pullBtn = document.getElementById('pullCompliance');
+  if (pullBtn) pullBtn.addEventListener('click', async () => {
+    pullBtn.disabled = true; pullBtn.textContent = 'Pulling…';
+    try {
+      await api('/api/anna/portfolios/' + p.id + '/compliance', { method: 'POST', body: JSON.stringify({ pull: true }) });
+      await selectPortfolio(p.id); await loadQueue();
+    } catch (e) {
+      alert(e.missingConsent ? 'Missing consent for: ' + e.missingConsent.join(', ') : e.message);
+      pullBtn.disabled = false; pullBtn.textContent = 'Pull records & write verdict';
+    }
+  });
+
+  // Wire compliance
+  const runBtn = document.getElementById('runCompliance');
+  if (runBtn) runBtn.addEventListener('click', async () => {
+    const n = (id) => { const v = document.getElementById(id).value; return v === '' ? undefined : Number(v); };
+    const records = { mvr: clean({ dui: n('c_dui'), movingViolations: n('c_mv'), accidents: n('c_acc') }), psp: clean({ crashes: n('c_cr'), oosInspections: n('c_oos') }) };
+    if (document.getElementById('c_ch').checked) records.clearinghouse = { prohibited: true };
+    runBtn.disabled = true; runBtn.textContent = 'Checking…';
+    try { await api('/api/anna/portfolios/' + p.id + '/compliance', { method: 'POST', body: JSON.stringify({ records }) }); await selectPortfolio(p.id); await loadQueue(); }
+    catch (e) { alert(e.message); runBtn.disabled = false; runBtn.textContent = 'Run compliance check'; }
+  });
+
+  // Wire decision
+  const decide = async (decision) => {
+    const reason = document.getElementById('d_reason')?.value || '';
+    const out = await api('/api/anna/portfolios/' + p.id + '/decision', { method: 'POST', body: JSON.stringify({ decision, reason, by: p.review?.assignedRecruiter || 'Recruiter' }) });
+    await loadQueue();
+    if (decision === 'rejected' && out.rematch) showRematch(out.rematch);
+    else await selectPortfolio(p.id);
+  };
+  document.getElementById('approveBtn')?.addEventListener('click', () => decide('approved'));
+  document.getElementById('rejectBtn')?.addEventListener('click', () => decide('rejected'));
+}
+
+function showRematch(rematch) {
+  const box = document.getElementById('rematchBox');
+  if (!box) return;
+  const e = rematch.eligible || [], s = rematch.stretch || [];
+  box.innerHTML = `<div class="mt-3 bg-gray-50 rounded-xl p-3">
+    <p class="text-xs font-bold uppercase text-gray-400 mb-2">Re-match suggestions</p>
+    ${e.length ? e.map((m) => `<div class="text-sm text-green-700">✓ ${esc(m.carrierName)} — ${fmtScore(m.fitScore)} fit</div>`).join('') : '<p class="text-sm text-gray-500">No carriers this driver currently qualifies for.</p>'}
+    ${s.length ? '<p class="text-xs font-semibold text-gray-400 mt-2">Stretch (one gate away):</p>' + s.map((m) => `<div class="text-xs text-amber-600">• ${esc(m.carrierName)} — ${esc(m.nearMiss)}</div>`).join('') : ''}
+  </div>`;
+}
+
+const clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+
+// ── New lead modal ──
+const modal = document.getElementById('leadModal');
+const openModal = () => { modal.classList.remove('hidden'); document.getElementById('f_name').focus(); };
+const closeModal = () => modal.classList.add('hidden');
+document.getElementById('newLeadBtn').addEventListener('click', openModal);
+document.getElementById('leadClose').addEventListener('click', closeModal);
+modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+document.getElementById('leadSubmit').addEventListener('click', async () => {
+  const err = document.getElementById('leadErr'); err.classList.add('hidden');
+  const raw = document.getElementById('f_raw').value.trim();
+  let lead;
+  if (raw) {
+    try { lead = JSON.parse(raw); } catch { lead = { notes: raw }; } // free text -> Claude normalizes (or heuristic ignores)
+  } else {
+    const v = (id) => document.getElementById(id).value.trim();
+    const n = (id) => { const x = v(id); return x === '' ? undefined : Number(x); };
+    lead = clean({
+      name: v('f_name'), age: n('f_age'), cdlClass: v('f_class') || undefined,
+      experienceYears: n('f_exp'),
+      endorsements: v('f_end') ? v('f_end').split(',').map((s) => s.trim().toUpperCase()).filter(Boolean) : undefined,
+      movingViolations: n('f_mv'), accidents: n('f_acc'), dui: n('f_dui'),
+    });
+    if (!lead.name) { err.textContent = 'Name is required.'; err.classList.remove('hidden'); return; }
+  }
+  const recruiter = document.getElementById('f_rec').value.trim();
+  const btn = document.getElementById('leadSubmit'); btn.disabled = true; btn.textContent = 'Matching…';
+  try {
+    const out = await api('/api/anna/leads', { method: 'POST', body: JSON.stringify({ lead, recruiterPool: recruiter ? [recruiter] : [] }) });
+    closeModal();
+    await loadQueue();
+    if (out.portfolio) await selectPortfolio(out.portfolio.id);
+    else alert('No matching carrier found for this lead — no portfolio created.');
+  } catch (e) { err.textContent = e.message; err.classList.remove('hidden'); }
+  finally { btn.disabled = false; btn.textContent = 'Match & create portfolio'; }
+});
+
+document.getElementById('refreshBtn').addEventListener('click', loadQueue);
+
+// ── Boot ──
+(async () => {
+  try { CFG = await (await fetch('/api/config')).json(); } catch {}
+  if (CFG.requiresPassword && !token()) { location.href = '/login.html'; return; }
+  const ab = document.getElementById('aiBadge');
+  if (CFG.annaAi) { ab.textContent = 'AI on'; ab.className = 'ml-2 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-700'; }
+  else { ab.textContent = 'deterministic mode'; ab.className = 'ml-2 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500'; }
+  ab.classList.remove('hidden');
+  await loadQueue();
+})();
+</script>
+</body>
+</html>
