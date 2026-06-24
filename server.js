@@ -1467,6 +1467,9 @@ app.post('/api/anna/portfolios/:id/decision', requireAdmin, async (req, res) => 
   res.json({ ok: true, review: p.review, rematch });
 });
 
+// Recruiter-facing Anna portfolio queue (standalone static page).
+app.get('/anna', (_req, res) => res.redirect('/anna.html'));
+
 // ── Static ─────────────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
 
