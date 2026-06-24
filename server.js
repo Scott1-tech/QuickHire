@@ -1374,6 +1374,17 @@ async function annaCarriers() {
   return out;
 }
 
+// Conversational assistant: answer questions + emit actions (e.g. create_task).
+// Available app-wide via the floating "Ask Anna" panel.
+app.post('/api/anna/chat', requireAdmin, async (req, res) => {
+  const { messages, context } = req.body || {};
+  if (!Array.isArray(messages) || !messages.length) return res.status(400).json({ error: 'messages[] is required.' });
+  try {
+    const out = await anna.chat({ messages, context: context || {}, opts: annaOpts() });
+    res.json(out);
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
 // Scan a document (image/PDF) and return extracted fields for auto-fill.
 app.post('/api/anna/scan', requireAdmin, async (req, res) => {
   const { dataUrl, docType } = req.body || {};

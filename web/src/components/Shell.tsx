@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useStore } from '@/store';
 import Icon from '@/components/Icon';
 import TaskModal from '@/components/TaskModal';
+import AnnaAssistant from '@/components/AnnaAssistant';
 import type { Role } from '@/types';
 
 const ROLES: Role[] = ['Recruiter', 'Owner', 'Super Admin'];
@@ -163,6 +164,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         onGo={(to) => { nav(to); setPaletteOpen(false); }}
         onCreateTask={() => { setPaletteOpen(false); setQuickTask(true); }} />}
       {quickTask && <TaskModal createSeed={{ assignee: s.currentUser }} onClose={() => setQuickTask(false)} />}
+
+      {/* Anna — app-wide AI assistant (ask questions, assign tasks anywhere) */}
+      <AnnaAssistant />
     </div>
   );
 }
