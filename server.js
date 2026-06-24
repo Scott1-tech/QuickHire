@@ -1620,12 +1620,12 @@ app.post('/api/docusign/candidates/:id/preview', requireAdmin, (req, res) => {
 app.post('/api/docusign/candidates/:id/send', requireAdmin, async (req, res) => {
   const c = findById(req.params.id);
   if (!c) return res.status(404).json({ error: 'Not found' });
-  const { docType, fields, signer, embedded, emailSubject, message } = req.body || {};
+  const { docType, fields, signer, embedded, emailSubject, message, recipients, placedFields } = req.body || {};
   try {
     const record = await docusign.send({
       candidate: c, docType, fields, signer, embedded,
       returnUrl: `${baseUrl(req)}/docusign.html?signed=1`,
-      emailSubject, message,
+      emailSubject, message, recipients, placedFields,
     });
     saveEnvelope(c, record);
     if (record.docType === 'offer_letter' && c.checklist?.offerLetter?.status === 'not_started') {

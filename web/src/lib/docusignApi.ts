@@ -52,7 +52,16 @@ export const previewDoc = (candidateId: string, docType: string, fields: Record<
   fetch(`/api/docusign/candidates/${candidateId}/preview`, { method: 'POST', headers: headers(), body: JSON.stringify({ docType, fields }) })
     .then((r) => json<PreviewResult>(r));
 
-export const sendDoc = (candidateId: string, payload: { docType: string; fields?: Record<string, string>; embedded?: boolean }) =>
+export interface PlacedField {
+  id: string; type: string; xPct: number; yPct: number; page: number;
+  recipientId: string; label: string; required?: boolean; value?: string; readOnly?: boolean;
+}
+export interface Recipient { id: string; name: string; email: string; colorIdx: number }
+
+export const sendDoc = (candidateId: string, payload: {
+  docType: string; fields?: Record<string, string>; embedded?: boolean;
+  emailSubject?: string; message?: string; recipients?: Recipient[]; placedFields?: PlacedField[];
+}) =>
   fetch(`/api/docusign/candidates/${candidateId}/send`, { method: 'POST', headers: headers(), body: JSON.stringify(payload) })
     .then((r) => json<Envelope>(r));
 

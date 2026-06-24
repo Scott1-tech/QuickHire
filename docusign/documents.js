@@ -285,6 +285,38 @@ export function buildSignerTabs(profile = {}) {
   };
 }
 
+// ── Free-placed fields → DocuSign tabs ───────────────────────────────────────
+// The envelope builder lets a sender drop fields anywhere on the document. Each
+// placed field carries page-relative coordinates (0..1); map them to DocuSign's
+// absolute tab positions (points, 612×792 US-Letter) for the live API.
+const FIELD_TAB_GROUP = {
+  signature: 'signHereTabs', initial: 'initialHereTabs', date: 'dateSignedTabs',
+  name: 'fullNameTabs', title: 'titleTabs', company: 'companyTabs',
+  email: 'textTabs', text: 'textTabs', number: 'numberTabs', checkbox: 'checkboxTabs',
+};
+export function placedFieldsToTabs(placed = [], { pageW = 612, pageH = 792 } = {}) {
+  const tabs = {};
+  for (const f of placed) {
+    const group = FIELD_TAB_GROUP[f.type] || 'textTabs';
+    (tabs[group] = tabs[group] || []).push({
+      xPosition: String(Math.round((f.xPct || 0) * pageW)),
+      yPosition: String(Math.round((f.yPct || 0) * pageH)),
+      pageNumber: String(f.page || 1),
+      documentId: '1',
+      tabLabel: f.label || f.type,
+      ...(f.required ? { required: 'true' } : {}),
+      ...(f.value ? { value: String(f.value) } : {}),
+    });
+  }
+  return tabs;
+}
+/** Concatenate two tab maps (e.g. anchored auto-fill + free-placed) by group. */
+export function mergeTabs(a = {}, b = {}) {
+  const out = { ...a };
+  for (const [k, v] of Object.entries(b)) out[k] = [...(out[k] || []), ...v];
+  return out;
+}
+
 // ── Minimal PDF generator (SIMULATED completed-document download) ─────────────
 export function simplePdf(title, lines = []) {
   const escPdf = (s) => String(s).replace(/([\\()])/g, '\\$1');

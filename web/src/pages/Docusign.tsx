@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '@/store';
 import { PageHeader, Pill, Empty, timeAgo } from '@/ui';
 import {
-  getDocusignStatus, listEnvelopes, listCandidates, previewDoc, sendDoc,
+  getDocusignStatus, listEnvelopes, listCandidates,
   signingUrl, voidEnvelope, simulateComplete, docHtmlUrl, docPdfUrl, statusMeta,
-  type Envelope, type DocType, type DocusignStatus, type CandidateLite, type PreviewResult,
+  type Envelope, type DocType, type DocusignStatus, type CandidateLite,
 } from '@/lib/docusignApi';
+import EnvelopeBuilder from '@/pages/EnvelopeBuilder';
 
 type View = 'home' | 'agreements' | 'templates' | 'reports' | 'admin';
 type Folder = 'inbox' | 'sent' | 'completed' | 'action';
@@ -82,7 +83,7 @@ export default function Docusign() {
       </div>
 
       {send && status && (
-        <SendModal preset={send} candidates={candidates} docTypes={docTypes} mode={status.mode}
+        <EnvelopeBuilder preset={send} candidates={candidates} docTypes={docTypes} mode={status.mode}
           onClose={() => setSend(null)} onSent={() => { setSend(null); reload(); }} />
       )}
     </>
@@ -344,125 +345,3 @@ function Admin({ status }: { status: DocusignStatus | null }) {
   );
 }
 
-// ── Send modal ───────────────────────────────────────────────────────────────
-const FIELD_DEFS: Record<string, { id: string; label: string; ph: string }[]> = {
-  offer_letter: [
-    { id: 'position', label: 'Position', ph: 'Company Driver (CDL-A)' },
-    { id: 'payRate', label: 'Compensation', ph: '$0.62 / mile' },
-    { id: 'startDate', label: 'Start / Orientation', ph: '2026-07-01' },
-    { id: 'supervisor', label: 'Reports To', ph: 'Safety & Driver Mgmt' },
-  ],
-  owner_operator_agreement: [
-    { id: 'payRate', label: 'Settlement / Pay', ph: '70% of line-haul' },
-    { id: 'equipment', label: 'Equipment', ph: 'Contractor tractor' },
-    { id: 'term', label: 'Term', ph: 'At-will, 30-day notice' },
-  ],
-  company_driver_agreement: [
-    { id: 'payRate', label: 'Pay', ph: '$0.60 / mile' },
-    { id: 'runType', label: 'Run Type', ph: 'OTR' },
-    { id: 'startDate', label: 'Start Date', ph: '2026-07-01' },
-  ],
-  lease_agreement: [
-    { id: 'equipment', label: 'Equipment', ph: 'Tractor unit #' },
-    { id: 'payRate', label: 'Lease Rate', ph: '$650 / week' },
-    { id: 'term', label: 'Term', ph: 'Month-to-month' },
-  ],
-};
-
-function SendModal({ preset, candidates, docTypes, mode, onClose, onSent }: {
-  preset: { candidateId?: string; docType?: string }; candidates: CandidateLite[]; docTypes: DocType[];
-  mode: 'live' | 'simulated'; onClose: () => void; onSent: () => void;
-}) {
-  const [candidateId, setCandidateId] = useState(preset.candidateId || candidates[0]?.id || '');
-  const [docType, setDocType] = useState(preset.docType || docTypes[0]?.type || '');
-  const [fields, setFields] = useState<Record<string, string>>({});
-  const [embedded, setEmbedded] = useState(false);
-  const [preview, setPreview] = useState<PreviewResult | null>(null);
-  const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const fieldDefs = FIELD_DEFS[docType] || [];
-  const setField = (id: string, v: string) => setFields((f) => ({ ...f, [id]: v }));
-
-  const doPreview = async () => {
-    setErr('');
-    if (!candidateId) { setErr('Pick a driver first.'); return; }
-    try { setPreview(await previewDoc(candidateId, docType, fields)); }
-    catch (e) { setErr((e as Error).message); }
-  };
-  const doSend = async () => {
-    setErr(''); if (!candidateId) { setErr('Pick a driver first.'); return; }
-    setBusy(true);
-    try {
-      const env = await sendDoc(candidateId, { docType, fields, embedded });
-      if (embedded) { const { url } = await signingUrl(env.envelopeId); window.open(url, '_blank'); }
-      onSent();
-    } catch (e) { setErr((e as Error).message); setBusy(false); }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/40 z-50 grid place-items-center p-4" onClick={onClose}>
-      <div className="card w-[820px] max-w-full max-h-[90vh] overflow-y-auto shadow-pop" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-line sticky top-0 bg-surface">
-          <div className="text-lg font-extrabold text-ink">Send for signature</div>
-          <button onClick={onClose} className="text-muted hover:text-ink text-xl leading-none">×</button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 p-5">
-          {/* form */}
-          <div>
-            <label className="field-label">Driver</label>
-            <select value={candidateId} onChange={(e) => { setCandidateId(e.target.value); setPreview(null); }} className="input mb-3">
-              {candidates.length === 0 && <option value="">No drivers in pipeline</option>}
-              {candidates.map((c) => <option key={c.id} value={c.id}>{c.name} — {c.email}{c.submittedAt ? '' : ' (no application)'}</option>)}
-            </select>
-
-            <label className="field-label">Document</label>
-            <select value={docType} onChange={(e) => { setDocType(e.target.value); setPreview(null); }} className="input mb-1">
-              {docTypes.map((d) => <option key={d.type} value={d.type}>{d.label}</option>)}
-            </select>
-            <p className="text-[11.5px] text-muted mb-3">{docTypes.find((d) => d.type === docType)?.description}</p>
-
-            {fieldDefs.map((f) => (
-              <div key={f.id} className="mb-3">
-                <label className="field-label">{f.label}</label>
-                <input value={fields[f.id] || ''} onChange={(e) => setField(f.id, e.target.value)} placeholder={f.ph} className="input" />
-              </div>
-            ))}
-
-            <label className="flex items-center gap-2 text-[13px] text-ink mt-1">
-              <input type="checkbox" checked={embedded} onChange={(e) => setEmbedded(e.target.checked)} /> In-app signing (embedded) instead of email
-            </label>
-
-            {err && <div className="text-[12.5px] text-danger mt-3">{err}</div>}
-            <div className="flex gap-2 mt-4">
-              <button onClick={doPreview} className="btn-ghost flex-1">Preview auto-fill</button>
-              <button onClick={doSend} disabled={busy} className="btn-primary flex-1 disabled:opacity-50">{busy ? 'Sending…' : 'Send'}</button>
-            </div>
-          </div>
-
-          {/* preview */}
-          <div className="border-l border-line pl-5">
-            <div className="text-[13px] font-bold text-ink mb-2">Auto-fill preview</div>
-            {!preview ? (
-              <div className="text-[12.5px] text-muted">Pick a driver & document, then <b>Preview auto-fill</b> to see every field pre-populated from their QuickHire record.</div>
-            ) : (
-              <>
-                <div className="flex flex-wrap gap-1.5 mb-3">
-                  {preview.fields.map((f) => (
-                    <span key={f.key} className={`text-[11px] px-2 py-0.5 rounded-full border ${f.value ? 'bg-[#f0fdf4] text-[#15803d] border-[#bbf7d0]' : 'bg-[#fef2f4] text-[#b91c1c] border-[#f7c4cc]'}`}>
-                      {f.label}: {f.value || 'missing'}
-                    </span>
-                  ))}
-                </div>
-                {preview.missing.length > 0 && <div className="text-[11.5px] text-danger mb-2">⚠ {preview.missing.length} blank field(s) — the driver fills these in when reviewing.</div>}
-                <iframe title="preview" srcDoc={preview.html} className="w-full h-64 border border-line rounded-lg bg-white" />
-              </>
-            )}
-            <div className="text-[11px] text-muted mt-3">{mode === 'simulated' ? 'Simulated mode — no email is actually sent.' : 'Live — a real DocuSign envelope will be created.'}</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
