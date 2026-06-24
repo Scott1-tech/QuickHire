@@ -173,6 +173,38 @@ function providerStatusLine() {
   return Object.entries(s).map(([k, v]) => `<span class="text-[11px] px-1.5 py-0.5 rounded ${v === 'live' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}">${esc(k)}: ${esc(v)}</span>`).join(' ');
 }
 
+function consentTypes(c) {
+  return ['mvr', 'psp', 'clearinghouse'].filter((t) => c && c[t]);
+}
+
+function renderConsent(p) {
+  const c = p.consent;
+  if (c && consentTypes(c).length) {
+    const when = c.signedAt || c.capturedAt;
+    return `<div class="flex items-center justify-between bg-green-50 rounded-xl p-3">
+      <div>
+        <p class="text-sm text-green-800 font-semibold">✓ Consent on file: ${consentTypes(c).map((t) => t.toUpperCase()).join(', ')}</p>
+        <p class="text-[11px] text-green-700">${when ? 'signed ' + new Date(when).toLocaleString() : ''}${c.by ? ' · ' + esc(c.by) : ''}</p>
+      </div>
+      <button id="editConsent" class="text-xs text-gray-500 hover:text-accent-500 font-medium">Update</button>
+    </div>`;
+  }
+  return consentForm();
+}
+
+function consentForm() {
+  return `<div id="consentForm" class="space-y-2 bg-gray-50 rounded-xl p-3">
+    <p class="text-xs text-gray-500">Record the driver's signed authorization (from the application). Required before any record pull.</p>
+    <div class="flex flex-wrap gap-3 text-xs">
+      <label class="flex items-center gap-1"><input id="cons_mvr" type="checkbox" checked> MVR</label>
+      <label class="flex items-center gap-1"><input id="cons_psp" type="checkbox" checked> PSP</label>
+      <label class="flex items-center gap-1"><input id="cons_ch" type="checkbox" checked> Clearinghouse</label>
+      <input id="cons_by" class="inp flex-1" style="min-width:140px" placeholder="Signed by (driver name)">
+    </div>
+    <button id="recordConsent" class="px-3 py-2 bg-accent-500 hover:bg-accent-600 text-white rounded-lg text-sm font-semibold">Record consent</button>
+  </div>`;
+}
+
 function renderCompliance(p) {
   if (p.compliance) {
     const c = p.compliance;
@@ -184,15 +216,14 @@ function renderCompliance(p) {
       ${src ? `<div class="text-[11px] text-gray-400 pt-1">Sources: ${src.map((s) => `${esc(s.type)} (${s.simulated ? 'simulated' : 'live'})`).join(', ')}</div>` : ''}
     </div>`;
   }
-  // Consent-gated pull, with manual entry as an override.
+  // Pull uses the consent already on file (no checkboxes here). Manual entry override below.
+  const hasConsent = consentTypes(p.consent).length > 0;
   return `<div class="space-y-3">
-    <div class="flex items-center justify-between"><p class="text-xs font-semibold text-gray-600">Driver consent on file for:</p><span>${providerStatusLine()}</span></div>
-    <div class="flex flex-wrap gap-3 text-xs">
-      <label class="flex items-center gap-1"><input id="cons_mvr" type="checkbox" checked> MVR</label>
-      <label class="flex items-center gap-1"><input id="cons_psp" type="checkbox" checked> PSP</label>
-      <label class="flex items-center gap-1"><input id="cons_ch" type="checkbox" checked> Clearinghouse</label>
+    <div class="flex items-center justify-between">
+      <p class="text-xs text-gray-500">${hasConsent ? 'Pull ' + consentTypes(p.consent).map((t) => t.toUpperCase()).join(' / ') + ' and write the verdict.' : 'Record driver consent above to enable a record pull.'}</p>
+      <span>${providerStatusLine()}</span>
     </div>
-    <button id="pullCompliance" class="px-3 py-2 bg-accent-500 hover:bg-accent-600 text-white rounded-lg text-sm font-semibold">Pull records & write verdict</button>
+    <button id="pullCompliance" ${hasConsent ? '' : 'disabled'} class="px-3 py-2 rounded-lg text-sm font-semibold ${hasConsent ? 'bg-accent-500 hover:bg-accent-600 text-white' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}">Pull records & write verdict</button>
     <details class="text-xs text-gray-500">
       <summary class="cursor-pointer font-semibold">Manual entry (override / no provider)</summary>
       <p class="text-[11px] text-gray-400 mt-1 mb-2">Entered values supersede pulled + self-reported data.</p>
@@ -247,6 +278,11 @@ function renderDetail(p, match) {
     </div>
 
     <div class="mb-5">
+      <h3 class="text-xs font-bold uppercase text-gray-400 mb-2">Driver consent</h3>
+      ${renderConsent(p)}
+    </div>
+
+    <div class="mb-5">
       <h3 class="text-xs font-bold uppercase text-gray-400 mb-2">Compliance (MVR · PSP · Clearinghouse)</h3>
       ${renderCompliance(p)}
     </div>
@@ -256,18 +292,32 @@ function renderDetail(p, match) {
       ${renderDecision(p)}
     </div>`;
 
-  // Wire consent-gated pull
+  // Wire consent capture
+  const recordConsent = async () => {
+    const body = {
+      mvr: document.getElementById('cons_mvr').checked,
+      psp: document.getElementById('cons_psp').checked,
+      clearinghouse: document.getElementById('cons_ch').checked,
+      by: document.getElementById('cons_by').value.trim() || (p.driver?.name || ''),
+    };
+    if (!body.mvr && !body.psp && !body.clearinghouse) { alert('Select at least one authorization.'); return; }
+    await api('/api/anna/portfolios/' + p.id + '/consent', { method: 'POST', body: JSON.stringify(body) });
+    await selectPortfolio(p.id);
+  };
+  document.getElementById('recordConsent')?.addEventListener('click', recordConsent);
+  // "Update" re-opens the consent form in place.
+  document.getElementById('editConsent')?.addEventListener('click', () => {
+    const sec = document.getElementById('editConsent').closest('.mb-5');
+    sec.querySelector('div').outerHTML = consentForm();
+    document.getElementById('recordConsent').addEventListener('click', recordConsent);
+  });
+
+  // Wire consent-gated pull (uses consent already on file)
   const pullBtn = document.getElementById('pullCompliance');
   if (pullBtn) pullBtn.addEventListener('click', async () => {
-    const types = [];
-    if (document.getElementById('cons_mvr').checked) types.push('mvr');
-    if (document.getElementById('cons_psp').checked) types.push('psp');
-    if (document.getElementById('cons_ch').checked) types.push('clearinghouse');
-    if (!types.length) { alert('Select at least one check the driver has consented to.'); return; }
-    const consent = { mvr: types.includes('mvr'), psp: types.includes('psp'), clearinghouse: types.includes('clearinghouse'), signedAt: new Date().toISOString() };
     pullBtn.disabled = true; pullBtn.textContent = 'Pulling…';
     try {
-      await api('/api/anna/portfolios/' + p.id + '/compliance', { method: 'POST', body: JSON.stringify({ pull: true, types, consent }) });
+      await api('/api/anna/portfolios/' + p.id + '/compliance', { method: 'POST', body: JSON.stringify({ pull: true }) });
       await selectPortfolio(p.id); await loadQueue();
     } catch (e) {
       alert(e.missingConsent ? 'Missing consent for: ' + e.missingConsent.join(', ') : e.message);

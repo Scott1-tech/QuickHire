@@ -1405,7 +1405,15 @@ app.post('/api/anna/leads', requireAdmin, async (req, res) => {
       carriers: await annaCarriers(),
       opts: { ...annaOpts(), recruiterPool: recruiterPool || [], minScore: Number(req.body?.minScore) || 0 },
     });
-    if (result.portfolio) upsertPortfolio(result.portfolio);
+    if (result.portfolio) {
+      // Carry any consent captured at intake (direct flags or application-style
+      // consentMvr/consentPsp/consentEmployment fields on the lead) onto the
+      // portfolio so the compliance gate reads it automatically.
+      const consentInput = req.body?.consent || lead;
+      const consent = anna.normalizeConsent(consentInput);
+      if (consent.mvr || consent.psp || consent.clearinghouse) result.portfolio.consent = consent;
+      upsertPortfolio(result.portfolio);
+    }
     res.json({ profile: result.profile, match: result.match, source: result.source, portfolio: result.portfolio || null });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
@@ -1429,6 +1437,19 @@ app.get('/api/anna/portfolios/:id', requireAdmin, (req, res) => {
   res.json(p);
 });
 
+// Record the driver's signed consent to pull MVR/PSP/Clearinghouse records.
+// Represents the consent captured in the application flow; feeds the gate.
+app.post('/api/anna/portfolios/:id/consent', requireAdmin, (req, res) => {
+  const p = findPortfolio(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  const consent = anna.normalizeConsent(req.body || {});
+  consent.capturedAt = new Date().toISOString();
+  consent.ip = req.ip;
+  p.consent = consent;
+  upsertPortfolio(p);
+  res.json({ ok: true, consent });
+});
+
 // Stage 4: pull/record compliance data and write the approve/reject verdict.
 app.post('/api/anna/portfolios/:id/compliance', requireAdmin, async (req, res) => {
   const p = findPortfolio(req.params.id);
@@ -1442,7 +1463,10 @@ app.post('/api/anna/portfolios/:id/compliance', requireAdmin, async (req, res) =
     // (real providers when configured, otherwise flagged simulated pulls).
     if (req.body?.pull) {
       const consent = req.body?.consent || p.consent || {};
-      const pulled = await anna.pullCompliance({ driver: p.driver, consent, types: req.body?.types, queue: undefined, opts: annaOpts() });
+      // Default to the checks the driver actually consented to.
+      const types = req.body?.types || ['mvr', 'psp', 'clearinghouse'].filter((t) => consent[t]);
+      if (!types.length) return res.status(403).json({ error: 'No driver consent on file — capture consent before pulling records.', missingConsent: ['mvr', 'psp', 'clearinghouse'] });
+      const pulled = await anna.pullCompliance({ driver: p.driver, consent, types, queue: undefined, opts: annaOpts() });
       records = { ...pulled.records, ...records }; // manual overrides win
       p.consent = pulled.consent;
       p.complianceSources = pulled.sources;

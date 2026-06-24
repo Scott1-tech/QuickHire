@@ -7,7 +7,7 @@ import { normalizeDriver } from '../normalize.js';
 import { buildPortfolio, writeCompliance } from '../portfolio.js';
 import { createQueue } from '../queue.js';
 import { extractCarrierSpec } from '../carrier.js';
-import { pullCompliance, checkConsent, ConsentError, integrationStatus } from '../integrations.js';
+import { pullCompliance, checkConsent, ConsentError, integrationStatus, normalizeConsent } from '../integrations.js';
 
 let pass = 0, fail = 0;
 const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error('  ✗ ' + msg); } };
@@ -176,6 +176,16 @@ section('normalizeDriver (heuristic fallback, no API key)');
   const seeded = await pullCompliance({ driver: goodDriver, consent: { mvr: true }, types: ['mvr'], opts: { simulatedData: { mvr: { dui: 2 } } } });
   ok(seeded.records.mvr.dui === 2, 'seeded simulation maps provider response');
   ok(integrationStatus().mvr === 'simulated', 'integrationStatus reports simulated when unconfigured');
+
+  section('normalizeConsent (application flow -> gate)');
+  const fromApp = normalizeConsent({ consentMvr: true, consentPsp: true, consentEmployment: true, consentCompletedAt: '2026-01-02T00:00:00Z' });
+  ok(fromApp.mvr && fromApp.psp && fromApp.clearinghouse, 'maps consentMvr/Psp/Employment -> mvr/psp/clearinghouse');
+  ok(fromApp.signedAt === '2026-01-02T00:00:00Z', 'preserves consentCompletedAt as signedAt');
+  const direct = normalizeConsent({ mvr: true });
+  ok(direct.mvr && !direct.psp && direct.signedAt, 'direct flags set signedAt when any consent given');
+  ok(normalizeConsent({}).signedAt === null, 'no consent => null signedAt');
+  // The consent normalizer composes with the gate.
+  ok(checkConsent(fromApp, ['mvr', 'clearinghouse']) === true, 'normalized application consent passes the gate');
 
   // ── Report ──
   console.log(`\n${fail ? '❌' : '✅'} ${pass} passed, ${fail} failed`);

@@ -35,6 +35,28 @@ export function checkConsent(consent = {}, types = []) {
 }
 
 const nowIso = () => new Date().toISOString();
+
+/**
+ * Normalize a consent input into Anna's consent shape. Accepts either direct
+ * flags ({ mvr, psp, clearinghouse }) or the driver application's consent fields
+ * ({ consentMvr, consentPsp, consentEmployment }) so consent captured during the
+ * application flows straight into the gate. Under FMCSA, the employment/PSP
+ * authorization covers the Clearinghouse query.
+ * @returns {{ mvr, psp, clearinghouse, signedAt, signature, by }}
+ */
+export function normalizeConsent(input = {}) {
+  const b = (v) => v === true || v === 'true' || v === 'on' || v === 1;
+  const mvr = b(input.mvr) || b(input.consentMvr);
+  const psp = b(input.psp) || b(input.consentPsp);
+  const clearinghouse = b(input.clearinghouse) || b(input.consentClearinghouse) || b(input.consentEmployment);
+  const any = mvr || psp || clearinghouse;
+  return {
+    mvr, psp, clearinghouse,
+    signedAt: input.signedAt || input.consentCompletedAt || (any ? nowIso() : null),
+    signature: input.signature || null,
+    by: input.by || null,
+  };
+}
 const numFields = (o, keys) => {
   const out = {};
   for (const k of keys) if (o && o[k] != null && o[k] !== '') out[k] = Number(o[k]);
