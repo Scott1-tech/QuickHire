@@ -262,6 +262,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const created: Task = {
         id: uid('tk'),
         carrierId: t.carrierId ?? currentCarrierId,
+        driverId: t.driverId,
         title: t.title ?? 'New Task',
         status: t.status ?? 'TO DO',
         assignee: t.assignee,

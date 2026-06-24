@@ -74,13 +74,19 @@ function Card({ task, onOpen }: { task: Task; onOpen: () => void }) {
   const done = (task.checklist ?? []).filter((c) => c.done).length;
   const total = (task.checklist ?? []).length;
   const carrier = s.carriers.find((c) => c.id === task.carrierId);
+  const driver = task.driverId ? s.allDrivers.find((d) => d.id === task.driverId) : undefined;
   return (
     <div onClick={onOpen} className="card p-3 cursor-pointer hover:shadow-card transition">
       <div className="text-[13.5px] font-semibold text-ink mb-1.5">{task.title}</div>
       {carrier && (
-        <div className="flex items-center gap-1.5 mb-1.5 text-[11px] text-muted">
+        <div className="flex items-center gap-1.5 mb-1 text-[11px] text-muted">
           <span className="w-3.5 h-3.5 rounded grid place-items-center text-white text-[8px] font-bold flex-shrink-0" style={{ background: '#e25563' }}>{carrier.name[0]}</span>
           <span className="truncate">{carrier.name}</span>
+        </div>
+      )}
+      {driver && (
+        <div className="flex items-center gap-1 mb-1.5 text-[11px] text-muted">
+          <Icon name="wheel" size={12} /> <span className="truncate">For {driver.name}</span>
         </div>
       )}
       <div className="flex items-center gap-1.5 flex-wrap">

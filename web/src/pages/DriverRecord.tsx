@@ -79,11 +79,10 @@ export default function DriverRecord() {
               </div>
             </Link>
 
-            {([['Dispatcher / Recruiter', d.dispatcher ?? '—'], ['Driver status', d.driverStatus ?? '—']] as [string, string][]).map(([k, v]) => (
-              <div key={k} className="flex justify-between py-2 border-b border-line/60">
-                <span className="text-[12px] text-muted">{k}</span><span className="text-[12px] font-semibold text-ink text-right">{v}</span>
-              </div>
-            ))}
+            <div className="flex justify-between py-2 border-b border-line/60">
+              <span className="text-[12px] text-muted">Driver status</span>
+              <span className="text-[12px] font-semibold text-ink text-right">{d.driverStatus ?? '—'}</span>
+            </div>
 
             {/* Vehicle pairing */}
             <div className="flex items-center gap-2.5 py-2.5">
