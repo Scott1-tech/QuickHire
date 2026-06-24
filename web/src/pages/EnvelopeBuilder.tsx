@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { previewDoc, sendDoc, signingUrl, type DocType, type CandidateLite, type PreviewResult, type PlacedField } from '@/lib/docusignApi';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { previewDoc, sendDoc, type DocType, type CandidateLite, type PreviewResult, type PlacedField } from '@/lib/docusignApi';
 
 // Full-screen DocuSign-style envelope builder: Set Up Envelope → Add Fields → Send.
 
@@ -27,6 +27,14 @@ const DEFAULTS: Record<FType, { label: string; w: number }> = {
 };
 const uid = () => 'f' + Math.random().toString(36).slice(2, 9);
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
+const initials = (n?: string) => (n || '?').split(' ').map((x) => x[0]).slice(0, 2).join('');
+
+// Field-property option lists (match DocuSign).
+const FONTS = ['Arial', 'Calibri', 'Courier New', 'Lucida Console', 'Tahoma', 'Times New Roman', 'Trebuchet', 'Verdana', 'MS Gothic', 'MS Mincho'];
+const FONT_SIZES = ['7', '8', '9', '10', '11', '12', '14', '16', '18', '20', '22', '24', '26', '28', '36', '48', '72'];
+const COLORS = ['Black', 'White', 'Red', 'Green', 'Blue', 'Purple'];
+const VALIDATIONS = ['None', 'SSN', 'Email', 'Numbers', 'Letters', 'Date', 'ZIP+4', 'ZIP', 'Custom'];
+const PDF_W = 612, PDF_H = 792; // DocuSign US-Letter point space (matches backend tab mapping)
 
 interface Recip { id: string; name: string; email: string; colorIdx: number }
 
@@ -147,7 +155,7 @@ export default function EnvelopeBuilder({ preset, candidates, docTypes, mode, on
           {/* LEFT: palette or properties */}
           <div className="w-[300px] border-r flex flex-col" style={{ borderColor: '#eceef2' }}>
             {selected
-              ? <Properties field={selected} recip={recipColor(selected.recipientId)} onChange={(p) => updateField(selected.id, p)} onDelete={() => removeField(selected.id)} onBack={() => setSelId(null)} />
+              ? <Properties field={selected} recipients={recipients} onChange={(p) => updateField(selected.id, p)} onDelete={() => removeField(selected.id)} onBack={() => setSelId(null)} onRecip={(rid) => updateField(selected.id, { recipientId: rid })} />
               : <Palette recipients={recipients} curRecip={curRecip} setCurRecip={setCurRecip} tool={tool} setTool={setTool} onEditRecipients={() => setStep('setup')} />}
           </div>
 
@@ -361,43 +369,135 @@ function Palette({ recipients, curRecip, setCurRecip, tool, setTool, onEditRecip
 }
 
 // ── Properties ───────────────────────────────────────────────────────────────
-function Section({ title }: { title: string }) {
-  return <div className="flex items-center justify-between py-3 border-t text-sm font-medium cursor-default" style={{ borderColor: '#eceef2' }}><span>{title}</span><span className="text-gray-400">▾</span></div>;
+function Toggle({ on, set }: { on?: boolean; set: (v: boolean) => void }) {
+  return <button onClick={() => set(!on)} className="w-10 h-5 rounded-full relative transition flex-shrink-0" style={{ background: on ? '#3b1d82' : '#cbd2dc' }}><span className="absolute top-0.5 w-4 h-4 bg-white rounded-full transition" style={{ left: on ? 22 : 2 }} /></button>;
 }
-function Toggle({ on, set }: { on: boolean; set: (v: boolean) => void }) {
-  return <button onClick={() => set(!on)} className="w-10 h-5 rounded-full relative transition" style={{ background: on ? '#3b1d82' : '#cbd2dc' }}><span className="absolute top-0.5 w-4 h-4 bg-white rounded-full transition" style={{ left: on ? 22 : 2 }} /></button>;
+function Label({ children }: { children: ReactNode }) { return <label className="block text-[12px] font-medium text-gray-500 mb-1 mt-2">{children}</label>; }
+function Pick({ value, options, onChange, className }: { value: string; options: string[]; onChange: (v: string) => void; className?: string }) {
+  return <select value={value} onChange={(e) => onChange(e.target.value)} className={`border rounded-md px-2 py-2 text-sm w-full ${className || ''}`} style={{ borderColor: '#d6d9e0' }}>{options.map((o) => <option key={o} value={o}>{o}</option>)}</select>;
 }
-function Properties({ field, recip, onChange, onDelete, onBack }: { field: PlacedField; recip: { solid: string }; onChange: (p: Partial<PlacedField>) => void; onDelete: () => void; onBack: () => void }) {
+function CheckRow({ label, on, set }: { label: string; on?: boolean; set: (v: boolean) => void }) {
+  return <label className="flex items-center gap-2 py-1.5 text-sm cursor-pointer"><input type="checkbox" checked={!!on} onChange={(e) => set(e.target.checked)} className="w-4 h-4" />{label}</label>;
+}
+function Collapse({ title, children, defaultOpen }: { title: string; children?: ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return (
+    <div className="border-t" style={{ borderColor: '#eceef2' }}>
+      <button onClick={() => setOpen(!open)} className="flex items-center justify-between w-full py-3 text-sm font-medium"><span>{title}</span><span className="text-gray-400">{open ? '▴' : '▾'}</span></button>
+      {open && <div className="pb-3">{children}</div>}
+    </div>
+  );
+}
+function BIU({ active, onClick, children }: { active?: boolean; onClick: () => void; children: ReactNode }) {
+  return <button onClick={onClick} className="w-9 h-9 grid place-items-center border rounded-md text-sm font-bold flex-shrink-0" style={{ borderColor: active ? '#3b1d82' : '#d6d9e0', background: active ? '#ede9fe' : '#fff' }}>{children}</button>;
+}
+const inp = { className: 'w-full border rounded-md px-2 py-2 text-sm', style: { borderColor: '#d6d9e0' } };
+
+function Properties({ field, recipients, onChange, onDelete, onBack, onRecip }: {
+  field: PlacedField; recipients: Recip[]; onChange: (p: Partial<PlacedField>) => void; onDelete: () => void; onBack: () => void; onRecip: (id: string) => void;
+}) {
+  const [rOpen, setROpen] = useState(false);
   const isInput = ['text', 'number', 'email', 'company', 'title'].includes(field.type);
-  const title = field.type === 'name' ? 'Name' : field.type.charAt(0).toUpperCase() + field.type.slice(1);
+  const isCheckbox = field.type === 'checkbox';
+  const title = isCheckbox ? 'Checkbox Group' : field.type === 'name' ? 'Name' : field.type.charAt(0).toUpperCase() + field.type.slice(1);
+  const cur = recipients.find((r) => r.id === field.recipientId);
+  const rc = color(cur?.colorIdx ?? 0);
+  const cv = field.checkboxValues?.length ? field.checkboxValues : ['', ''];
+
+  const Formatting = (
+    <Collapse title="Formatting" defaultOpen>
+      <div className="grid grid-cols-2 gap-2">
+        <div><Label>Font</Label><Pick value={field.font || 'Arial'} options={FONTS} onChange={(v) => onChange({ font: v })} /></div>
+        <div><Label>Font size</Label><Pick value={field.fontSize || '10'} options={FONT_SIZES} onChange={(v) => onChange({ fontSize: v })} /></div>
+      </div>
+      <Label>Color</Label>
+      <div className="flex items-center gap-1.5">
+        <Pick value={field.color || 'Black'} options={COLORS} onChange={(v) => onChange({ color: v })} className="flex-1" />
+        <BIU active={field.bold} onClick={() => onChange({ bold: !field.bold })}>B</BIU>
+        <BIU active={field.italic} onClick={() => onChange({ italic: !field.italic })}><i>I</i></BIU>
+        <BIU active={field.underline} onClick={() => onChange({ underline: !field.underline })}><u>U</u></BIU>
+      </div>
+      <CheckRow label="Fixed width" on={field.fixedWidth} set={(v) => onChange({ fixedWidth: v })} />
+      <CheckRow label="Hide text with asterisks" on={field.hideAsterisks} set={(v) => onChange({ hideAsterisks: v })} />
+    </Collapse>
+  );
+  const Location = (
+    <Collapse title="Location and Autoplace" defaultOpen>
+      <div className="grid grid-cols-2 gap-2">
+        <div><Label>Pixels from left</Label><input type="number" value={Math.round(field.xPct * PDF_W)} onChange={(e) => onChange({ xPct: clamp(Number(e.target.value) / PDF_W) })} {...inp} /></div>
+        <div><Label>Pixels from top</Label><input type="number" value={Math.round(field.yPct * PDF_H)} onChange={(e) => onChange({ yPct: clamp(Number(e.target.value) / PDF_H) })} {...inp} /></div>
+      </div>
+      <button className="w-full mt-2 py-2 border rounded-md text-sm" style={{ borderColor: '#d6d9e0', background: '#f6f7f9' }}>Set Up Autoplace</button>
+    </Collapse>
+  );
+  const ConditionalLogic = <Collapse title="Conditional Logic"><button className="w-full py-2 border rounded-md text-sm font-medium" style={{ borderColor: '#d6d9e0' }}>Create Rule</button></Collapse>;
+
   return (
     <div className="flex-1 overflow-y-auto p-4">
-      <div className="flex items-center justify-between mb-4"><span className="font-bold text-lg">{title}</span><button onClick={onBack} className="text-gray-500">→</button></div>
-      <div className="flex items-center gap-2 px-3 py-2 rounded-full text-sm mb-4" style={{ background: '#D1FAE5' }}>
-        <span className="w-6 h-6 rounded-full" style={{ background: recip.solid }} /><span className="flex-1 truncate">Recipient</span><span>▾</span>
+      <div className="flex items-center justify-between mb-3"><span className="font-bold text-lg">{title}</span><button onClick={onBack} className="text-gray-500 text-lg">←</button></div>
+
+      {/* recipient pill */}
+      <div className="relative mb-3">
+        <button onClick={() => setROpen(!rOpen)} className="w-full flex items-center gap-2 px-3 py-2 rounded-full text-sm font-medium" style={{ background: rc.pill }}>
+          <span className="w-6 h-6 rounded-full grid place-items-center text-white text-[11px] font-bold" style={{ background: rc.solid }}>{initials(cur?.name)}</span>
+          <span className="flex-1 text-left truncate">{cur?.name || 'Recipient'}</span><span>▾</span>
+        </button>
+        {rOpen && <div className="absolute z-10 mt-1 w-full bg-white border rounded-lg shadow-lg py-1" style={{ borderColor: '#eceef2' }} onMouseLeave={() => setROpen(false)}>
+          {recipients.map((r) => <button key={r.id} onClick={() => { onRecip(r.id); setROpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-gray-50"><span className="w-5 h-5 rounded-full" style={{ background: color(r.colorIdx).solid }} />{r.name || 'Recipient'}</button>)}
+        </div>}
       </div>
 
-      {field.type === 'name' && (
-        <div className="mb-2"><label className="block text-sm font-medium mb-1">Name Type</label>
-          <select value={field.value || 'Full Name'} onChange={(e) => onChange({ value: e.target.value })} className="w-full border rounded-md px-3 py-2 text-sm" style={{ borderColor: '#d6d9e0' }}>
-            <option>Full Name</option><option>First Name</option><option>Last Name</option></select></div>
-      )}
-
-      {isInput && (
+      {isCheckbox ? (
         <>
-          <div className="flex items-center justify-between py-2"><span className="text-sm">Read only</span><Toggle on={!!field.readOnly} set={(v) => onChange({ readOnly: v })} /></div>
-          <div className="flex items-center justify-between py-2"><span className="text-sm">Required</span><Toggle on={!!field.required} set={(v) => onChange({ required: v })} /></div>
-          <label className="block text-sm font-medium mt-2 mb-1">Default text</label>
-          <textarea value={field.value || ''} onChange={(e) => onChange({ value: e.target.value })} rows={2} className="w-full border rounded-md px-3 py-2 text-sm" style={{ borderColor: '#d6d9e0' }} />
-          <label className="block text-sm font-medium mt-3 mb-1">Character limit</label>
-          <input defaultValue={4000} className="w-full border rounded-md px-3 py-2 text-sm" style={{ borderColor: '#d6d9e0' }} />
-          <Section title="Conditional Logic" /><Section title="Formatting" /><Section title="Validation" /><Section title="Location and Autoplace" /><Section title="Collaboration" /><Section title="Advanced" />
+          <div className="flex items-center justify-between py-2"><span className="text-sm">Read only</span><Toggle on={field.readOnly} set={(v) => onChange({ readOnly: v })} /></div>
+          {cv.map((val, i) => (
+            <div key={i} className="flex items-center gap-2 mb-2"><input type="checkbox" className="w-4 h-4" /><input value={val} placeholder="Checkbox value" onChange={(e) => { const next = [...cv]; next[i] = e.target.value; onChange({ checkboxValues: next }); }} {...inp} /></div>
+          ))}
+          <button onClick={() => onChange({ checkboxValues: [...cv, ''] })} className="text-sm text-violet-600 mb-3">+ Add option</button>
+          <Label>Group label</Label>
+          <textarea value={field.groupLabel ?? `Checkbox Group ${field.id}`} onChange={(e) => onChange({ groupLabel: e.target.value })} rows={2} {...inp} />
+          {ConditionalLogic}{Formatting}{Location}
+          <Collapse title="Validation" defaultOpen>
+            <Label>Select at least</Label>
+            <Pick value={field.selectRule || 'Select at least'} options={['Select at least', 'Select at most', 'Select exactly']} onChange={(v) => onChange({ selectRule: v })} />
+            <Label>Number</Label>
+            <Pick value={String(field.selectNumber ?? 0)} options={['0', '1', '2', '3', '4']} onChange={(v) => onChange({ selectNumber: Number(v) })} />
+          </Collapse>
+        </>
+      ) : field.type === 'name' ? (
+        <>
+          <Label>Name Type</Label>
+          <Pick value={field.nameType || 'Full Name'} options={['Full Name', 'First Name', 'Last Name']} onChange={(v) => onChange({ nameType: v, label: v })} />
+          {Formatting}{Location}<Collapse title="Advanced" />
+        </>
+      ) : isInput ? (
+        <>
+          <div className="flex items-center justify-between py-2"><span className="text-sm">Read only</span><Toggle on={field.readOnly} set={(v) => onChange({ readOnly: v })} /></div>
+          <div className="flex items-center justify-between py-2"><span className="text-sm">Required</span><Toggle on={field.required} set={(v) => onChange({ required: v })} /></div>
+          <Label>Default text</Label>
+          <textarea value={field.value || ''} onChange={(e) => onChange({ value: e.target.value })} rows={2} {...inp} />
+          <Label>Character limit</Label>
+          <input type="number" value={field.charLimit ?? 4000} onChange={(e) => onChange({ charLimit: Number(e.target.value) })} {...inp} />
+          {ConditionalLogic}{Formatting}
+          <Collapse title="Validation" defaultOpen>
+            <Label>Require a specific format for this field</Label>
+            <Pick value={field.validation || 'None'} options={VALIDATIONS} onChange={(v) => onChange({ validation: v })} />
+            {field.validation === 'Custom' && <>
+              <Label>Custom pattern</Label>
+              <input value={field.customPattern || ''} onChange={(e) => onChange({ customPattern: e.target.value })} placeholder="Ex: ^[2-9]\d{2}-\d{3}-\d{4}" {...inp} />
+              <Label>Error message</Label>
+              <input value={field.errorMessage || ''} onChange={(e) => onChange({ errorMessage: e.target.value })} placeholder="Ex: Use the format ###-###" {...inp} />
+            </>}
+            <div className="flex items-center justify-between py-2 mt-1"><span className="text-sm">Allow recipients to collaborate</span><Toggle on={field.collaborate} set={(v) => onChange({ collaborate: v })} /></div>
+          </Collapse>
+          {Location}<Collapse title="Collaboration" /><Collapse title="Advanced" />
+        </>
+      ) : (
+        <>
+          <div className="flex items-center justify-between py-2"><span className="text-sm">Required</span><Toggle on={field.required} set={(v) => onChange({ required: v })} /></div>
+          {Location}<Collapse title="Advanced" />
         </>
       )}
-      {!isInput && field.type !== 'name' && (
-        <div className="flex items-center justify-between py-2"><span className="text-sm">Required</span><Toggle on={!!field.required} set={(v) => onChange({ required: v })} /></div>
-      )}
-      {field.type === 'name' && (<><Section title="Formatting" /><Section title="Location and Autoplace" /><Section title="Advanced" /></>)}
 
       <button className="w-full mt-4 py-2.5 border rounded-md text-sm font-medium" style={{ borderColor: '#d6d9e0' }}>Save As Custom Field</button>
       <button onClick={onDelete} className="w-full mt-2 py-2.5 rounded-md text-sm font-semibold text-white" style={{ background: '#c8102e' }}>Delete</button>
@@ -465,6 +565,11 @@ function FieldTag({ f, c, selected, onPointerDown, onPointerMove, onPointerUp, o
         style={{ width: isCheckbox ? 22 : w, height: isCheckbox ? 22 : 24, background: c.bg, border: `1.5px solid ${selected ? c.solid : c.border}`, borderRadius: 3, cursor: 'move', color: '#0f3d2e', outline: selected ? `2px solid ${c.solid}55` : 'none' }}>
         {isCheckbox ? '☐' : (f.label || f.type)}
       </div>
+      {/* add-to-group affordance for a selected checkbox */}
+      {selected && isCheckbox && (
+        <button onClick={(e) => { e.stopPropagation(); onDup(); }} title="Add to group"
+          className="absolute left-1/2 -translate-x-1/2 w-5 h-5 rounded grid place-items-center text-white text-[13px] leading-none" style={{ top: 26, background: '#7c3aed' }}>+</button>
+      )}
     </div>
   );
 }
