@@ -19,9 +19,10 @@ export { compileSpec, OPS } from './spec.js';
 export { extractCarrierSpec } from './carrier.js';
 export { matchDriver, suggestRematch, evaluateGates, scoreSoft, STATUS } from './matcher.js';
 export { normalizeDriver, extractFromDocument, lowConfidenceFields, DRIVER_SHAPE } from './normalize.js';
-export { buildPortfolio, writeCompliance, mergeRecords } from './portfolio.js';
+export { buildPortfolio, writeCompliance, mergeRecords, selectCarrier } from './portfolio.js';
 export { createQueue } from './queue.js';
 export { pullCompliance, checkConsent, ConsentError, INTEGRATIONS, integrationStatus, normalizeConsent } from './integrations.js';
+export { chat } from './chat.js';
 export { callClaude, callClaudeJSON, annaConfigured, MODELS } from './claude.js';
 
 import { normalizeDriver } from './normalize.js';
@@ -50,8 +51,8 @@ export async function processLead({ lead, carriers, opts = {} }) {
   const { profile, confidence, source } = await queue.push(() => normalizeDriver(lead, opts), 'normalizeDriver');
   // Matching is pure CPU → no queue needed.
   const match = matchDriver(profile, carriers, { minScore: opts.minScore });
-  const portfolio = match.top
-    ? buildPortfolio({ driver: profile, match: match.top, recruiterPool: opts.recruiterPool || [] })
-    : null;
+  // Build a portfolio with Anna's ranked recommendations. No carrier is selected
+  // here — a human recruiter picks one from the list (selectCarrier).
+  const portfolio = buildPortfolio({ driver: profile, match, recruiterPool: opts.recruiterPool || [] });
   return { profile, confidence, match, portfolio, source };
 }

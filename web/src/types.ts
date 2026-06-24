@@ -1,7 +1,32 @@
 export type Role = 'Recruiter' | 'Owner' | 'Super Admin';
 
-export type Stage = 'Lead' | 'Screening' | 'Background Check' | 'Offer' | 'Onboarding';
-export const STAGES: Stage[] = ['Lead', 'Screening', 'Background Check', 'Offer', 'Onboarding'];
+/** A pipeline stage is now just a name — stages are fully customizable at
+ * runtime (add / rename / reorder / recolor), so the value is a free string
+ * rather than a fixed union. */
+export type Stage = string;
+
+/** The colour palette a stage column can use. Maps 1:1 to the `.pill-*`
+ * classes in index.css. */
+export type StageColor = 'slate' | 'blue' | 'amber' | 'purple' | 'green' | 'red' | 'teal' | 'pink' | 'indigo' | 'orange';
+export const STAGE_COLORS: StageColor[] = ['slate', 'blue', 'amber', 'purple', 'green', 'red', 'teal', 'pink', 'indigo', 'orange'];
+
+export interface PipelineStage {
+  id: string;
+  name: string;
+  color: StageColor;
+}
+
+/** Default pipeline used to seed a carrier that has no custom configuration. */
+export const DEFAULT_PIPELINE: PipelineStage[] = [
+  { id: 'st-lead', name: 'Lead', color: 'slate' },
+  { id: 'st-screening', name: 'Screening', color: 'blue' },
+  { id: 'st-background', name: 'Background Check', color: 'amber' },
+  { id: 'st-offer', name: 'Offer', color: 'purple' },
+  { id: 'st-onboarding', name: 'Onboarding', color: 'green' },
+];
+
+/** @deprecated kept for any consumer that still reads the flat name list. */
+export const STAGES: Stage[] = DEFAULT_PIPELINE.map((s) => s.name);
 
 export interface Carrier {
   id: string;
@@ -104,6 +129,9 @@ export interface TaskActivityEvent { id: string; text: string; at: string; autho
 export interface Task {
   id: string;
   carrierId: string;
+  /** Optional driver this task is "for" — lets the task bar show who the
+   *  driver is working with (carrier + vehicle) and assign in one step. */
+  driverId?: string;
   title: string;
   status: TaskStatus;
   assignee?: string;
