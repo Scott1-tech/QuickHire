@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { stageColorForName, stagePillClass } from '@/lib/pipeline';
 
 const PILL_MAP: Record<string, string> = {
   // stages
@@ -17,7 +18,10 @@ const PILL_MAP: Record<string, string> = {
 };
 
 export function Pill({ children, kind }: { children: ReactNode; kind?: string }) {
-  const cls = PILL_MAP[kind ?? String(children)] ?? 'pill-slate';
+  const key = kind ?? String(children);
+  // Custom pipeline stages take priority so renamed/added stages keep their colour.
+  const stageColor = stageColorForName(key);
+  const cls = stageColor ? stagePillClass(stageColor) : (PILL_MAP[key] ?? 'pill-slate');
   return <span className={`pill ${cls}`}>{children}</span>;
 }
 
