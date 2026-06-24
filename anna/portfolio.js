@@ -43,6 +43,7 @@ export function buildPortfolio({ driver, match, documents = {}, recruiter, recru
     carrierName: m.carrierName,
     status: m.status,
     fitScore: m.fitScore,
+    fitSummary: m.fitSummary || null,
     nearMiss: m.nearMiss || null,
     topReason: (m.reasons && m.reasons[0]) || null,
   }));

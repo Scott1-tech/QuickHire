@@ -170,8 +170,9 @@ function renderMatch(match, selectedId, suggestedTop) {
           ${isSelected ? '<span class="text-[10px] text-accent-600 font-bold">● SELECTED</span>' : isTopPick ? '<span class="text-[10px] text-accent-500 font-bold">★ Anna\'s top pick</span>' : ''}</span>
         <span class="flex items-center gap-2">${badge(m.status, m.status)}<span class="text-xs font-bold text-gray-700">${fmtScore(m.status === 'INELIGIBLE' ? null : m.fitScore)}</span></span>
       </div>
-      ${reasons.length ? `<ul class="mt-2 space-y-1">${reasons.map((r) => `<li class="text-xs ${r.status === 'FAIL' ? 'text-red-600' : 'text-amber-600'}">• ${esc(r.reason)}</li>`).join('')}</ul>` : '<p class="text-xs text-green-600 mt-1">All gates pass.</p>'}
-      ${canSelect ? `<button data-select="${esc(m.carrierId)}" class="selectCarrierBtn mt-2 text-xs font-semibold px-3 py-1.5 rounded-lg bg-accent-500 hover:bg-accent-600 text-white">Select this carrier</button>` : ''}
+      ${m.fitSummary ? `<p class="text-xs text-gray-700 mt-1.5"><span class="font-semibold text-gray-500">Why this fits:</span> ${esc(m.fitSummary)}</p>` : ''}
+      ${reasons.length ? `<ul class="mt-2 space-y-1">${reasons.map((r) => `<li class="text-xs ${r.status === 'FAIL' ? 'text-red-600' : 'text-amber-600'}">• ${esc(r.reason)}</li>`).join('')}</ul>` : (m.fitSummary ? '' : '<p class="text-xs text-green-600 mt-1">All gates pass.</p>')}
+      ${canSelect ? `<button data-select="${esc(m.carrierId)}" class="selectCarrierBtn mt-2 text-xs font-semibold px-3 py-1.5 rounded-lg bg-accent-500 hover:bg-accent-600 text-white">Select & send this offer</button>` : ''}
     </div>`;
   }).join('');
 }
@@ -284,7 +285,7 @@ function renderDetail(p, match) {
       : `<div class="mb-4 text-sm bg-gray-50 rounded-xl p-3"><span class="font-semibold">Selected carrier:</span> ${esc(p.carrier.carrierName)} (${fmtScore(p.carrier.fitScore)} fit)${p.review?.carrierSelectedBy ? ` · picked by ${esc(p.review.carrierSelectedBy)}` : ''}</div>`}
 
     <div class="mb-5">
-      <h3 class="text-xs font-bold uppercase text-gray-400 mb-2">${p.carrier ? 'Match analysis' : "Anna's ranked recommendations"}</h3>
+      <h3 class="text-xs font-bold uppercase text-gray-400 mb-2">${p.carrier ? 'Carrier offer' : 'Carrier offers — ranked by fit'}</h3>
       <div class="space-y-2">${renderMatch(match, p.carrier?.carrierId, p.suggestedTop) || '<p class="text-sm text-gray-400">No carriers to match against.</p>'}</div>
     </div>
 
@@ -310,7 +311,7 @@ function renderDetail(p, match) {
     try {
       await api('/api/anna/portfolios/' + p.id + '/select-carrier', { method: 'POST', body: JSON.stringify({ carrierId: btn.dataset.select }) });
       await selectPortfolio(p.id); await loadQueue();
-    } catch (e) { alert(e.message); btn.disabled = false; btn.textContent = 'Select this carrier'; }
+    } catch (e) { alert(e.message); btn.disabled = false; btn.textContent = 'Select & send this offer'; }
   }));
 
   // Wire consent capture

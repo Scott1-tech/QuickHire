@@ -86,6 +86,9 @@ section('matchDriver across carriers');
   ok(top && top.status === STATUS.ELIGIBLE, 'top pick is eligible');
   ok(matches[0].fitScore >= matches[matches.length - 1].fitScore || matches[matches.length - 1].status !== STATUS.ELIGIBLE, 'sorted by eligibility then fit');
   ok(summary.eligible >= 2, `multiple eligible carriers (${summary.eligible})`);
+  // Every eligible carrier gets a plain-language "why this fits" summary (the offer rationale).
+  ok(matches.filter((m) => m.status === 'ELIGIBLE').every((m) => typeof m.fitSummary === 'string' && m.fitSummary.length > 0), 'eligible carriers carry a fitSummary');
+  ok(/experience/.test(top.fitSummary) && new RegExp(top.carrierName).test(top.fitSummary), 'fitSummary names the carrier and cites experience');
 
   // A driver with 1 violation: near-miss for Hazmat (max 0), fine for A/B.
   const oneViol = { ...goodDriver, mvr: { movingViolations: 1, accidents: 0, dui: 0 } };
