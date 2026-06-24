@@ -19,10 +19,15 @@ let _seq = 0;
 const id = (p) => `${p}_${Date.now().toString(36)}${(_seq++).toString(36)}`;
 
 /**
- * Build a driver portfolio and assign a recruiter.
+ * Build a driver portfolio with Anna's RANKED carrier recommendations.
+ *
+ * Anna does NOT pick the carrier — she ranks the best fits and a human recruiter
+ * selects one (see selectCarrier). So the portfolio starts with `carrier: null`
+ * and a `recommendations` list, awaiting recruiter selection.
+ *
  * @param {Object} p
  * @param {Object} p.driver          Normalized DriverProfile.
- * @param {Object} p.match           Result entry from matchDriver (the chosen carrier).
+ * @param {Object} p.match           Full result from matchDriver ({ matches, top, summary }).
  * @param {Object} [p.documents]     { docType: { fields, confidence, warnings } }.
  * @param {string} [p.recruiter]     Pre-assigned recruiter, else round-robin.
  * @param {string[]} [p.recruiterPool]
@@ -31,21 +36,53 @@ const id = (p) => `${p}_${Date.now().toString(36)}${(_seq++).toString(36)}`;
 export function buildPortfolio({ driver, match, documents = {}, recruiter, recruiterPool = [] }) {
   const assigned = recruiter || pickRecruiter(recruiterPool);
   const docWarnings = Object.entries(documents).flatMap(([t, d]) => (d.warnings || []).map((w) => `${t}: ${w}`));
+  const matches = (match && match.matches) || [];
+  // Compact, ranked recommendation list for the recruiter to choose from.
+  const recommendations = matches.map((m) => ({
+    carrierId: m.carrierId,
+    carrierName: m.carrierName,
+    status: m.status,
+    fitScore: m.fitScore,
+    fitSummary: m.fitSummary || null,
+    nearMiss: m.nearMiss || null,
+    topReason: (m.reasons && m.reasons[0]) || null,
+  }));
   return {
     id: id('portfolio'),
     createdAt: new Date().toISOString(),
     driver,
-    carrier: match ? { carrierId: match.carrierId, carrierName: match.carrierName, fitScore: match.fitScore, status: match.status } : null,
+    recommendations,            // Anna's ranked best-fit list (advisory)
+    suggestedTop: match?.top?.carrierId || null, // highlight only; NOT auto-selected
+    carrier: null,              // set by the recruiter via selectCarrier()
     documents,
     documentWarnings: docWarnings,
-    compliance: null, // filled in by writeCompliance()
+    compliance: null,           // filled in by writeCompliance() after a carrier is picked
     review: {
       assignedRecruiter: assigned,
-      task: assigned ? `${assigned}, please review this driver portfolio.` : 'Unassigned — needs a recruiter.',
-      status: 'pending', // pending | approved | rejected
+      task: assigned ? `${assigned}, please review this driver and pick the best-fit carrier.` : 'Unassigned — needs a recruiter.',
+      status: 'awaiting_carrier', // awaiting_carrier | pending | approved | rejected
+      carrierSelectedBy: null, carrierSelectedAt: null,
       decidedBy: null, decidedAt: null, decisionReason: null,
     },
   };
+}
+
+/**
+ * Recruiter picks a carrier from the recommendations (the human-in-the-loop step).
+ * Binds the portfolio to that carrier and moves it to 'pending' review.
+ * @returns {Object} the updated portfolio (mutated in place).
+ */
+export function selectCarrier(portfolio, carrierId, by = 'Recruiter') {
+  const rec = (portfolio.recommendations || []).find((r) => r.carrierId === carrierId);
+  if (!rec) throw new Error('That carrier is not in this driver\'s recommendation list.');
+  portfolio.carrier = { carrierId: rec.carrierId, carrierName: rec.carrierName, fitScore: rec.fitScore, status: rec.status };
+  portfolio.review = {
+    ...portfolio.review,
+    status: portfolio.review.status === 'awaiting_carrier' ? 'pending' : portfolio.review.status,
+    carrierSelectedBy: by,
+    carrierSelectedAt: new Date().toISOString(),
+  };
+  return portfolio;
 }
 
 let _rr = 0;

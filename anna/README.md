@@ -20,6 +20,9 @@ comes later, deliberately decoupled.
 - **Two-layer matching.** Hard gates (pass/fail disqualifiers) decide
   eligibility; soft weights only *rank* carriers a driver already qualifies for.
   Missing data is `NEEDS_DATA`, never an auto-reject.
+- **Anna recommends, a human decides.** Anna never auto-selects the carrier — she
+  produces a ranked best-fit list and a recruiter picks the company (`selectCarrier`).
+  Compliance and the approve/reject decision only unlock after that human choice.
 - **Async by default.** API-bound steps run through a concurrency-limited queue
   with retry/backoff (the blueprint's scale model).
 - **Latest models, prompt caching.** Defaults to Haiku 4.5 for intake and
@@ -113,7 +116,8 @@ cached on the carrier record (`structuredRequirements`). Portfolios persist to
 | Method & path | Purpose |
 |---|---|
 | `POST /api/anna/match` | Normalize a `driver`/`lead` and rank it against all carriers (no persistence). |
-| `POST /api/anna/leads` | Stage 1→3: normalize → match → persist a portfolio for the best fit. |
+| `POST /api/anna/leads` | Stage 1→3: normalize → match → persist a portfolio with Anna's **ranked recommendations** (no carrier auto-selected). |
+| `POST /api/anna/portfolios/:id/select-carrier` | Recruiter picks the carrier from the recommendations (human-in-the-loop). Unlocks compliance/decision. |
 | `POST /api/anna/scan` | Scan a document (`dataUrl`, `docType`) → extracted fields (needs API key). |
 | `POST /api/anna/rematch` | Suggest other carriers for a `driver` (`excludeCarrierIds`). |
 | `GET /api/anna/portfolios` | List portfolio summaries. |

@@ -125,6 +125,37 @@ function margin(actual, cap) {
 }
 
 /**
+ * Plain-language "why this carrier fits this driver" summary — the offer rationale
+ * shown in the driver profile. Positive framing for ELIGIBLE/NEEDS_DATA; for an
+ * INELIGIBLE carrier the gate reasons already explain why not, so returns null.
+ */
+export function buildFitSummary(spec, driver, status, score) {
+  if (status === STATUS.INELIGIBLE) return null;
+  const reqs = spec.raw || {};
+  const pts = [];
+
+  const exp = num(driver.cdl?.experienceYears), minExp = num(reqs.cdl?.minExperienceYears);
+  if (exp != null && minExp != null) pts.push(`${exp} yr${exp === 1 ? '' : 's'} experience vs ${minExp} required`);
+  else if (exp != null) pts.push(`${exp} yr${exp === 1 ? '' : 's'} experience`);
+
+  const incidents = [driver.mvr?.movingViolations, driver.mvr?.accidents, driver.mvr?.dui, driver.psp?.crashes, driver.psp?.oosInspections].filter((x) => x != null);
+  if (incidents.length && incidents.every((x) => Number(x) === 0)) pts.push('clean driving & safety record');
+  else if (incidents.length) pts.push('violations within this carrier\'s limits');
+
+  const wanted = reqs.cdl?.endorsements || [];
+  if (wanted.length) {
+    const have = driver.cdl?.endorsements || [];
+    if (wanted.every((e) => have.includes(e))) pts.push(`holds required endorsement${wanted.length > 1 ? 's' : ''} (${wanted.join(', ')})`);
+  }
+  if (num(driver.cdl?.expiresInDays) != null && num(reqs.cdl?.minValidityDays) != null) pts.push(`CDL valid ${driver.cdl.expiresInDays} days`);
+  if (num(driver.age) != null && num(reqs.eligibility?.minAge) != null) pts.push(`meets the ${reqs.eligibility.minAge}+ age requirement`);
+
+  const lead = status === STATUS.ELIGIBLE ? (score >= 80 ? 'Strong fit' : 'Qualifies') : 'Likely fit, pending records';
+  const tail = status === STATUS.NEEDS_DATA ? ' MVR/PSP/Clearinghouse not pulled yet.' : '';
+  return pts.length ? `${lead} for ${spec.carrierName} — ${pts.join(', ')}.${tail}` : `${lead} for ${spec.carrierName}.${tail}`;
+}
+
+/**
  * Match ONE driver against MANY carriers and rank the results.
  *
  * @param {Object} driver   Normalized DriverProfile (see normalize.js).
@@ -147,6 +178,7 @@ export function matchDriver(driver, carriers = [], opts = {}) {
       scoreBreakdown: breakdown,
       gateResults,
       reasons: [...failed, ...unknown].map((r) => r.reason),
+      fitSummary: buildFitSummary(spec, driver, status, score),
       // "near miss" => ineligible on a single gate; useful for re-match suggestions.
       nearMiss: status === STATUS.INELIGIBLE && failed.length === 1 ? failed[0].reason : null,
     };

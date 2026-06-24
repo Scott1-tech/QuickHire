@@ -5,9 +5,10 @@ import { PageHeader, Pill, Empty, timeAgo, AssignmentIcon } from '@/ui';
 import { DOC_TYPES_MAIN } from '@/data/mock';
 import { type ChecklistStep, type Stage } from '@/types';
 import CandidateScreening from '@/components/CandidateScreening';
+import AnnaOffers from '@/components/AnnaOffers';
 import TaskModal from '@/components/TaskModal';
 
-const TABS = ['Pipeline', 'Application', 'PEV', 'Documents'];
+const TABS = ['Pipeline', 'Anna', 'Application', 'PEV', 'Documents'];
 const GROUPS: ChecklistStep['group'][] = ['Compliance & Eligibility', 'Risk Screening', 'Health & Safety', 'Employment Setup'];
 const RECRUITERS: Record<string, string> = { u1: 'Nina Patel', u2: 'Dana Reed', u3: 'Sam Pike' };
 
@@ -279,6 +280,7 @@ export default function CandidateRecord() {
             )}
 
             {tab === 'Documents' && <Documents />}
+            {tab === 'Anna' && <AnnaOffers candidate={c} />}
             {(tab === 'Application' || tab === 'PEV') && <Empty icon="📄" title={`${tab} tab`} sub="Connect to API to render submitted application data." />}
           </main>
 

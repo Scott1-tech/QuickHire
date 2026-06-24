@@ -32,9 +32,10 @@ export function annaConfigured(apiKey = process.env.ANTHROPIC_API_KEY) {
  * @param {string|Array} [p.system]  String, or content blocks (use cache flag for caching).
  * @param {Array}  p.messages
  * @param {boolean} [p.cacheSystem]  Wrap a string system prompt with cache_control.
+ * @param {Array}  [p.tools]  Tool definitions for tool-use.
  * @returns {Promise<{ text, raw, usage }>}
  */
-export async function callClaude({ apiKey = process.env.ANTHROPIC_API_KEY, model = MODELS.fast, maxTokens = 1024, system, messages, cacheSystem = false } = {}) {
+export async function callClaude({ apiKey = process.env.ANTHROPIC_API_KEY, model = MODELS.fast, maxTokens = 1024, system, messages, cacheSystem = false, tools } = {}) {
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured');
 
   let systemField = system;
@@ -49,7 +50,7 @@ export async function callClaude({ apiKey = process.env.ANTHROPIC_API_KEY, model
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
     },
-    body: JSON.stringify({ model, max_tokens: maxTokens, ...(systemField ? { system: systemField } : {}), messages }),
+    body: JSON.stringify({ model, max_tokens: maxTokens, ...(systemField ? { system: systemField } : {}), ...(tools ? { tools } : {}), messages }),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
