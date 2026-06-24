@@ -186,6 +186,52 @@ export const DOC_TEMPLATES = {
          Subpart G.</p>
       ${review}`),
   },
+  owner_operator_agreement: {
+    label: 'Owner-Operator Agreement',
+    description: 'Independent Contractor (owner-operator) lease & operating agreement.',
+    build: (c, f = {}, review = '') => page('Independent Contractor Agreement — Owner-Operator', `
+      <p>This Independent Contractor Agreement is entered into between ${esc(COMPANY)} ("Carrier") and the
+         contractor identified below ("Contractor") for the lease of equipment and provision of
+         transportation services under the Carrier's operating authority.</p>
+      ${kv([
+        ['Settlement / Pay', f.payRate || 'Percentage of line-haul per settlement schedule'],
+        ['Equipment', f.equipment || 'Contractor-provided tractor'],
+        ['Term', f.term || 'At-will, 30-day written termination'],
+      ])}
+      ${review}
+      <h2>Agreement</h2>
+      <p>By signing, the Contractor agrees to operate as an independent contractor under 49 CFR Part 376,
+         maintain required insurance and qualifications, and confirms the information above is accurate.</p>`),
+  },
+  company_driver_agreement: {
+    label: 'Company Driver Agreement',
+    description: 'Employment agreement for a company (W-2) CDL driver.',
+    build: (c, f = {}, review = '') => page('Company Driver Agreement', `
+      <p>This agreement sets the terms of employment between ${esc(COMPANY)} and the driver named below as a
+         company (W-2) commercial driver.</p>
+      ${kv([
+        ['Pay', f.payRate || 'Per company pay schedule'],
+        ['Run Type', f.runType || 'OTR'],
+        ['Start Date', f.startDate || 'To be scheduled'],
+      ])}
+      ${review}
+      <h2>Acceptance</h2>
+      <p>By signing, the driver accepts employment on the terms above, agrees to company safety and DOT
+         policies, and confirms the information is accurate.</p>`),
+  },
+  lease_agreement: {
+    label: 'Equipment Lease Agreement',
+    description: 'Lease of a tractor/trailer between the carrier and driver.',
+    build: (c, f = {}, review = '') => page('Equipment Lease Agreement', `
+      <p>${esc(COMPANY)} agrees to lease the equipment described below to the lessee named herein, subject to
+         the terms of this agreement and 49 CFR Part 376.</p>
+      ${kv([
+        ['Equipment', f.equipment || 'Tractor (unit # to be assigned)'],
+        ['Lease Rate', f.payRate || 'Per lease schedule'],
+        ['Term', f.term || 'Month-to-month'],
+      ])}
+      ${review}`),
+  },
 };
 
 /** Catalog for UIs: [{ type, label, description }]. */
