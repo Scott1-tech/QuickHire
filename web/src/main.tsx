@@ -20,6 +20,7 @@ import Departments from '@/pages/Departments';
 import Tasks from '@/pages/Tasks';
 import Notifications from '@/pages/Notifications';
 import Inbox from '@/pages/Inbox';
+import Docusign from '@/pages/Docusign';
 import Administration from '@/pages/Administration';
 import Research from '@/pages/Research';
 import Settings from '@/pages/Settings';
@@ -50,6 +51,7 @@ const router = createBrowserRouter([
   { path: '/departments', element: <App><Departments /></App> },
   { path: '/notifications', element: <App><Notifications /></App> },
   { path: '/inbox', element: <App><Inbox /></App> },
+  { path: '/docusign', element: <App><Docusign /></App> },
   { path: '/tasks', element: <App><Tasks /></App> },
   { path: '/research', element: <App><Research /></App> },
   { path: '/settings', element: <App><Settings /></App> },

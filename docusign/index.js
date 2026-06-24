@@ -23,7 +23,7 @@ import * as env from './envelopes.js';
 import * as templatesApi from './templates.js';
 import * as embedded from './embeddedSigning.js';
 import * as webhooks from './webhooks.js';
-import { DOC_TEMPLATES, DATA_FIELDS, documentCatalog, buildDocumentHtml, htmlDocument, buildSignerTabs, driverProfile, missingFields, simplePdf } from './documents.js';
+import { DOC_TEMPLATES, DATA_FIELDS, documentCatalog, buildDocumentHtml, htmlDocument, buildSignerTabs, driverProfile, missingFields, placedFieldsToTabs, mergeTabs, simplePdf } from './documents.js';
 
 const nowIso = () => new Date().toISOString();
 
@@ -74,6 +74,8 @@ function normalize(partial) {
     embedded: Boolean(partial.embedded),
     returnUrl: partial.returnUrl || null,
     signer: partial.signer,
+    recipients: partial.recipients || null,
+    placedFields: partial.placedFields || [],
     documentHtml: partial.documentHtml || null,
     createdAt: partial.createdAt || nowIso(),
     sentAt: partial.sentAt || nowIso(),
@@ -109,7 +111,7 @@ function pushStatus(record, status, extra = {}) {
  * @param {string} [p.message]
  * @returns {Promise<object>} normalized envelope record.
  */
-export async function send({ candidate, docType, fields = {}, signer, embedded: useEmbedded = false, returnUrl, emailSubject, message }) {
+export async function send({ candidate, docType, fields = {}, signer, embedded: useEmbedded = false, returnUrl, emailSubject, message, recipients, placedFields = [] }) {
   if (!DOC_TEMPLATES[docType]) throw new Error(`Unknown document type "${docType}".`);
   const who = {
     name: signer?.name || candidate?.name,
@@ -151,7 +153,8 @@ export async function send({ candidate, docType, fields = {}, signer, embedded: 
           recipientId: '1',
           routingOrder: '1',
           ...(clientUserId ? { clientUserId } : {}),
-          tabs: buildSignerTabs(profile),
+          // Anchored auto-fill tabs + any fields the sender placed in the builder.
+          tabs: mergeTabs(buildSignerTabs(profile), placedFieldsToTabs(placedFields)),
         }],
       },
       ...(config.brandId ? { brandId: config.brandId } : {}),
@@ -163,7 +166,7 @@ export async function send({ candidate, docType, fields = {}, signer, embedded: 
       simulated: false,
       docType, documentName, emailSubject: subject, message,
       embedded: useEmbedded, returnUrl,
-      signer: signerRecord,
+      signer: signerRecord, recipients, placedFields,
       documentHtml: previewHtml,
     });
   }
@@ -175,7 +178,7 @@ export async function send({ candidate, docType, fields = {}, signer, embedded: 
     simulated: true,
     docType, documentName, emailSubject: subject, message,
     embedded: useEmbedded, returnUrl,
-    signer: signerRecord,
+    signer: signerRecord, recipients, placedFields,
     documentHtml: previewHtml,
   });
 }
