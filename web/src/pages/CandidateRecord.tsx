@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useStore } from '@/store';
 import { PageHeader, Pill, Empty, timeAgo } from '@/ui';
 import { DOC_TYPES_MAIN } from '@/data/mock';
-import { STAGES, type ChecklistStep, type Stage } from '@/types';
+import { type ChecklistStep, type Stage } from '@/types';
 import CandidateScreening from '@/components/CandidateScreening';
 
 const TABS = ['Pipeline', 'Application', 'PEV', 'Documents'];
@@ -91,11 +91,13 @@ export default function CandidateRecord() {
   const steps = s.checklistTemplate.map((x) => ({ ...x, status: statusOverrides[x.id] ?? x.status }));
   const done = steps.filter((x) => x.status === 'complete').length;
   const allDone = c ? done === steps.length : false;
-  const nextStage: Stage | null = c ? (STAGES[STAGES.indexOf(c.stage) + 1] ?? null) : null;
+  const stageNames = s.pipeline.map((p) => p.name);
+  const lastStage = stageNames[stageNames.length - 1];
+  const nextStage: Stage | null = c ? (stageNames[stageNames.indexOf(c.stage) + 1] ?? null) : null;
   const recruiter = c?.ownerUserId ? RECRUITERS[c.ownerUserId] ?? c.ownerUserId : 'Unassigned';
 
   useEffect(() => {
-    if (autoAdvance && c && allDone && nextStage && nextStage !== 'Onboarding') {
+    if (autoAdvance && c && allDone && nextStage && nextStage !== lastStage) {
       s.moveCandidate(c.id, nextStage);
       setActivity((prev) => [{ id: 'a' + Date.now(), type: 'Stage', author: 'System', time: new Date().toISOString(), text: `Pipeline auto-advanced to ${nextStage}.` }, ...prev]);
     }
@@ -129,7 +131,7 @@ export default function CandidateRecord() {
         actions={<div className="flex gap-2"><button onClick={() => setShowScreen(true)} className="btn-primary">✓ Run AI Screening</button><button onClick={() => setShowEdit(true)} className="btn-ghost">Edit</button><button onClick={() => { if (confirm(`Archive ${c.name}?`)) nav(`/carriers/${c.carrierId}/hiring`); }} className="btn-ghost text-danger">Archive</button></div>}
       />
 
-      {showScreen && <CandidateScreening candidateName={c.name} carrierId={c.carrierId} onClose={() => setShowScreen(false)} />}
+      {showScreen && <CandidateScreening candidateId={c.id} candidateName={c.name} carrierId={c.carrierId} onClose={() => setShowScreen(false)} />}
 
       <div className="flex-1 overflow-hidden">
         <div className="flex h-full">
@@ -285,9 +287,9 @@ export default function CandidateRecord() {
             <div className="card p-4">
               <div className="text-[11px] font-bold text-muted uppercase mb-3">Pipeline Journey</div>
               <div className="flex flex-col gap-2 mb-4">
-                {STAGES.map((st, i) => (
+                {stageNames.map((st, i) => (
                   <div key={st} className={`flex items-center gap-2 text-[13px] ${st === c.stage ? 'font-bold text-primary' : 'text-muted'}`}>
-                    <span>{i < STAGES.indexOf(c.stage) ? '✅' : st === c.stage ? '🔵' : '⚪'}</span> {st}
+                    <span>{i < stageNames.indexOf(c.stage) ? '✅' : st === c.stage ? '🔵' : '⚪'}</span> {st}
                   </div>
                 ))}
               </div>
@@ -316,7 +318,7 @@ export default function CandidateRecord() {
         </div>
       </div>
 
-      {showTruck && <SelectTruck onClose={() => setShowTruck(false)} onPick={(tid) => { s.assignTruck(c.id, tid); s.moveCandidate(c.id, 'Onboarding'); addActivity('Stage', 'Moved to Onboarding and truck assigned.'); setShowTruck(false); }} />}
+      {showTruck && <SelectTruck onClose={() => setShowTruck(false)} onPick={(tid) => { s.assignTruck(c.id, tid); s.moveCandidate(c.id, lastStage); addActivity('Stage', `Moved to ${lastStage} and truck assigned.`); setShowTruck(false); }} />}
       {action && <ActionModal kind={action} candidate={c} recruiter={recruiter} onClose={() => setAction(null)} onLog={addActivity} />}
       {showEdit && <EditCandidate name={c.name} email={c.email} phone={c.phone ?? ''} onClose={() => setShowEdit(false)} />}
     </>

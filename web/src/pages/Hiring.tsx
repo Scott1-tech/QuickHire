@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '@/store';
 import { PageHeader, Pill, timeSince, isStale } from '@/ui';
-import { STAGES, type Stage } from '@/types';
+import { stagePillClass } from '@/lib/pipeline';
 import CreateModal from '@/components/CreateModal';
 import CustomizePipeline from '@/components/CustomizePipeline';
 
@@ -14,15 +14,20 @@ export default function Hiring() {
   const [recruiter, setRecruiter] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [showCustomize, setShowCustomize] = useState(false);
+  const [newStage, setNewStage] = useState('');
   const fullAccess = s.role === 'Owner' || s.role === 'Super Admin';
   const [dragId, setDragId] = useState<string | null>(null);
-  const [overStage, setOverStage] = useState<Stage | null>(null);
+  const [overStage, setOverStage] = useState<string | null>(null);
 
   const visible = s.candidates.filter((c) =>
     (!q || c.name.toLowerCase().includes(q.toLowerCase()) || c.email.toLowerCase().includes(q.toLowerCase())) &&
     (!recruiter || c.ownerUserId === recruiter));
 
   const owners = Array.from(new Set(s.candidates.map((c) => c.ownerUserId).filter(Boolean))) as string[];
+
+  const addStageInline = () => {
+    if (newStage.trim()) { s.addStage(newStage.trim()); setNewStage(''); }
+  };
 
   return (
     <>
@@ -46,19 +51,20 @@ export default function Hiring() {
 
         {view === 'board' ? (
           <div className="flex-1 overflow-x-auto flex gap-3.5 items-start pb-2">
-            {STAGES.map((stage) => {
-              const inStage = visible.filter((c) => c.stage === stage);
-              const weighted = inStage.reduce((sum, c) => sum + (c.amount ?? 0) * (c.winProb ?? 0) / 100, 0);
+            {s.pipeline.map((stage, i) => {
+              const inStage = visible.filter((c) => c.stage === stage.name);
               return (
-                <div key={stage} className="w-64 flex-shrink-0 bg-bg border border-line rounded-xl flex flex-col max-h-full"
-                  onDragOver={(e) => { e.preventDefault(); setOverStage(stage); }}
+                <div key={stage.id} className="w-64 flex-shrink-0 bg-bg border border-line rounded-xl flex flex-col max-h-full"
+                  onDragOver={(e) => { e.preventDefault(); setOverStage(stage.name); }}
                   onDragLeave={() => setOverStage(null)}
-                  onDrop={() => { if (dragId) s.moveCandidate(dragId, stage); setDragId(null); setOverStage(null); }}>
+                  onDrop={() => { if (dragId) s.moveCandidate(dragId, stage.name); setDragId(null); setOverStage(null); }}>
                   <div className="flex items-center gap-2 p-3 border-b border-line">
-                    <Pill kind={stage}>{stage}</Pill>
+                    <span className={`pill ${stagePillClass(stage.color)}`}>{stage.name}</span>
                     <span className="text-[11px] font-bold bg-surface border border-line rounded-full px-2 text-muted">{inStage.length}</span>
+                    <button onClick={() => setShowAdd(true)} title="Add candidate"
+                      className="ml-auto w-6 h-6 grid place-items-center rounded-md text-muted hover:bg-[var(--surface-hover)] hover:text-primary">＋</button>
                   </div>
-                  <div className={`flex-1 overflow-y-auto p-2.5 flex flex-col gap-2.5 min-h-[60px] ${overStage === stage ? 'bg-primary-light rounded-lg' : ''}`}>
+                  <div className={`flex-1 overflow-y-auto p-2.5 flex flex-col gap-2.5 min-h-[60px] ${overStage === stage.name ? 'bg-primary-light rounded-lg' : ''}`}>
                     {inStage.map((c) => (
                       <div key={c.id} draggable onDragStart={() => setDragId(c.id)} onDragEnd={() => setDragId(null)}
                         onClick={() => nav(`/carriers/${c.carrierId}/hiring/${c.id}`)}
@@ -71,19 +77,34 @@ export default function Hiring() {
                         </div>
                       </div>
                     ))}
-                  </div>
-                  <div className="p-2.5 border-t border-line text-[11px] text-muted">
-                    Weighted <b className="text-ink">${Math.round(weighted).toLocaleString()}</b>
+                    {inStage.length === 0 && (
+                      <div className="text-[11.5px] text-muted text-center py-4 border border-dashed border-line rounded-lg">
+                        {i === 0 ? 'Drop or add candidates here' : 'Drag candidates here'}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
             })}
+
+            {/* Quick add-stage column (full access) — ClickUp-style */}
+            {fullAccess && (
+              <div className="w-56 flex-shrink-0">
+                <div className="flex items-center gap-1 bg-bg border border-dashed border-line rounded-xl p-2">
+                  <input value={newStage} onChange={(e) => setNewStage(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') addStageInline(); }}
+                    placeholder="+ Add stage" className="input flex-1 !py-1.5 text-[13px]" />
+                  <button onClick={addStageInline} disabled={!newStage.trim()}
+                    className="btn-primary !px-3 !py-1.5 text-[13px] disabled:opacity-40">Add</button>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto card">
             <table className="w-full border-collapse">
               <thead><tr className="border-b border-line">
-                {['Name', 'Stage', 'Email', 'Win %', 'Time in stage'].map((h) => <th key={h} className="text-left px-4 py-3 text-[11px] font-bold text-muted uppercase">{h}</th>)}
+                {['Name', 'Stage', 'Email', 'Status', 'Time in stage'].map((h) => <th key={h} className="text-left px-4 py-3 text-[11px] font-bold text-muted uppercase">{h}</th>)}
               </tr></thead>
               <tbody>
                 {visible.map((c) => (
@@ -91,7 +112,7 @@ export default function Hiring() {
                     <td className="px-4 py-3 text-[13px] font-bold text-ink uppercase">{c.name}</td>
                     <td className="px-4 py-3"><Pill kind={c.stage}>{c.stage}</Pill></td>
                     <td className="px-4 py-3 text-[13px] text-muted">{c.email}</td>
-                    <td className="px-4 py-3 text-[13px]">{c.winProb}%</td>
+                    <td className="px-4 py-3"><Pill kind={c.statusTag}>{c.statusTag}</Pill></td>
                     <td className={`px-4 py-3 text-[12px] ${isStale(c.stageEnteredAt) ? 'text-danger font-bold' : 'text-muted'}`}>{timeSince(c.stageEnteredAt)}</td>
                   </tr>
                 ))}
