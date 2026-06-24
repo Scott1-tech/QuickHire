@@ -125,7 +125,7 @@ export default function CandidateRecord() {
         actions={<div className="flex gap-2"><button onClick={() => setShowScreen(true)} className="btn-primary">✓ Run AI Screening</button><button onClick={() => setShowEdit(true)} className="btn-ghost">Edit</button><button onClick={() => { if (confirm(`Archive ${c.name}?`)) nav(`/carriers/${c.carrierId}/hiring`); }} className="btn-ghost text-danger">Archive</button></div>}
       />
 
-      {showScreen && <CandidateScreening candidateName={c.name} carrierId={c.carrierId} onClose={() => setShowScreen(false)} />}
+      {showScreen && <CandidateScreening candidateId={c.id} candidateName={c.name} carrierId={c.carrierId} onClose={() => setShowScreen(false)} />}
 
       <div className="flex-1 overflow-hidden">
         <div className="flex h-full">
