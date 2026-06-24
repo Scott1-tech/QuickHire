@@ -8,6 +8,7 @@ import './index.css';
 import Dashboard from '@/pages/Dashboard';
 import Carriers from '@/pages/Carriers';
 import CarrierOverview from '@/pages/CarrierOverview';
+import CarrierProfile from '@/pages/CarrierProfile';
 import Drivers from '@/pages/Drivers';
 import DriverRecord from '@/pages/DriverRecord';
 import Hiring from '@/pages/Hiring';
@@ -16,6 +17,7 @@ import Trucks from '@/pages/Trucks';
 import TruckRecord from '@/pages/TruckRecord';
 import People from '@/pages/People';
 import Departments from '@/pages/Departments';
+import Tasks from '@/pages/Tasks';
 import Notifications from '@/pages/Notifications';
 import Inbox from '@/pages/Inbox';
 import Administration from '@/pages/Administration';
@@ -34,6 +36,7 @@ const router = createBrowserRouter([
   { path: '/', element: <Navigate to="/dashboard" replace /> },
   { path: '/dashboard', element: <App><Dashboard /></App> },
   { path: '/carriers', element: <App><Carriers /></App> },
+  { path: '/carriers/profile/:id', element: <App><CarrierProfile /></App> },
   { path: '/carriers/:carrierId', element: <App><CarrierOverview /></App> },
   { path: '/carriers/:carrierId/drivers', element: <App><Drivers /></App> },
   { path: '/carriers/:carrierId/drivers/:driverId', element: <App><DriverRecord /></App> },
@@ -47,7 +50,7 @@ const router = createBrowserRouter([
   { path: '/departments', element: <App><Departments /></App> },
   { path: '/notifications', element: <App><Notifications /></App> },
   { path: '/inbox', element: <App><Inbox /></App> },
-  { path: '/tasks', element: <App><Departments /></App> },
+  { path: '/tasks', element: <App><Tasks /></App> },
   { path: '/research', element: <App><Research /></App> },
   { path: '/settings', element: <App><Settings /></App> },
   { path: '*', element: <Navigate to="/dashboard" replace /> },

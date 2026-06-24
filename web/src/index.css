@@ -40,6 +40,7 @@ body {
 
 @keyframes slideIn { from { transform: translateX(24px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes popIn { from { transform: scale(.97) translateY(8px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
@@ -52,12 +53,20 @@ body {
 .pill-purple { background:#EDE9FE; color:#8B5CF6; }
 .pill-slate  { background:#F1F5F9; color:#64748B; }
 .pill-blue   { background:#DBEAFE; color:#2563EB; }
+.pill-teal   { background:#CCFBF1; color:#0D9488; }
+.pill-pink   { background:#FCE7F3; color:#DB2777; }
+.pill-indigo { background:#E0E7FF; color:#4F46E5; }
+.pill-orange { background:#FFEDD5; color:#EA580C; }
 .dark .pill-green{background:#14321f;color:#86efac}
 .dark .pill-amber{background:#3a2c0a;color:#fcd34d}
 .dark .pill-red{background:#3b1416;color:#fca5a5}
 .dark .pill-purple{background:#2a2247;color:#c4b5fd}
 .dark .pill-slate{background:#2a3344;color:#cbd5e1}
 .dark .pill-blue{background:#16243f;color:#93c5fd}
+.dark .pill-teal{background:#0c2f2b;color:#5eead4}
+.dark .pill-pink{background:#3a1226;color:#f9a8d4}
+.dark .pill-indigo{background:#1e1f47;color:#a5b4fc}
+.dark .pill-orange{background:#3a1f08;color:#fdba74}
 
 .scrollbar-thin::-webkit-scrollbar { width:8px; height:8px; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background:var(--border); border-radius:8px; }

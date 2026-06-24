@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import nodemailer from 'nodemailer';
+import * as anna from './anna/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -27,10 +28,14 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const DB_FILE = path.join(DATA_DIR, 'candidates.json');
 const OPTOUT_FILE = path.join(DATA_DIR, 'optouts.json');
+const CARRIER_DB_FILE = path.join(DATA_DIR, 'carriers.json');
+const PORTFOLIO_FILE = path.join(DATA_DIR, 'anna-portfolios.json');
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '[]');
 if (!fs.existsSync(OPTOUT_FILE)) fs.writeFileSync(OPTOUT_FILE, '[]');
+if (!fs.existsSync(CARRIER_DB_FILE)) fs.writeFileSync(CARRIER_DB_FILE, '[]');
+if (!fs.existsSync(PORTFOLIO_FILE)) fs.writeFileSync(PORTFOLIO_FILE, '[]');
 
 // ── SMS opt-out registry (TCPA STOP handling) ────────────────────────────────
 function normPhone(p) {
@@ -92,6 +97,162 @@ export const OTHER_DOCS = [
   { id: 'oaEnrollmentWesco',          label: 'OA Enrollment Wesco' },
 ];
 const ALL_DOC_IDS = [...MAIN_DOCS, ...OTHER_DOCS].map((d) => d.id);
+
+// ── Carrier requirements form ────────────────────────────────────────────────
+// The questionnaire a carrier (or the recruiter on their behalf) fills out. It is
+// the single source of truth for both the public intake page and the recruiter's
+// carrier profile, so the questions are always identical for both sides.
+// field types: 'text' (single line) · 'area' (multi-line) · 'yesno' (Yes/No/N-A select)
+export const CARRIER_FORM = [
+  {
+    id: 'process',
+    title: 'Application Process',
+    intro: 'How a driver gets hired with this carrier.',
+    fields: [
+      { id: 'applicationLink',        label: 'Application link recruiters use',                       type: 'text', placeholder: 'https://intelliapp.driverapponline.com/c/…' },
+      { id: 'docsForDriverManagement',label: 'Documents to enter in Driver Management (Carrier Notes)',type: 'area', placeholder: "Copy of the driver's CDL (front & back); Medical Card" },
+      { id: 'followUpProcess',        label: 'Follow-up process',                                     type: 'area', placeholder: 'Reach out to the driver within 24–48 hrs after the application if approved; let us know if not proceeding.' },
+      { id: 'afterApprovalProcess',   label: 'After the driver is approved — what happens?',           type: 'area', placeholder: 'Reach out within 24–48 hrs to schedule orientation; driver completes packet & drug test onsite during training after MVR clears.' },
+      { id: 'invoicingProcess',       label: 'When can we invoice?',                                   type: 'area', placeholder: 'As soon as dispatch confirms the driver has dispatched solo on a load.' },
+    ],
+  },
+  {
+    id: 'prequal',
+    title: 'Pre-Qualifications',
+    intro: 'The minimum bar a driver must clear to qualify.',
+    fields: [
+      { id: 'minimumAge',              label: 'Minimum Age',                                          type: 'text', placeholder: 'At least 23 years of age' },
+      { id: 'minimumExperience',       label: 'Minimum Experience (Tractor Trailer / OTR)',           type: 'area', placeholder: 'At least 2 yrs verifiable regional/OTR in the last 3 yrs; 6 months flatbed in past 3 yrs.' },
+      { id: 'maxMovingViolations',     label: 'Moving Violations (max in 3-year period)',             type: 'text', placeholder: 'No more than 1 in the past 3 years' },
+      { id: 'licenseSuspensionPolicy', label: 'Policy on License Suspensions',                        type: 'text', placeholder: 'No current suspensions' },
+      { id: 'dotRecordableAccidents',  label: 'DOT Recordable Accidents',                             type: 'text', placeholder: 'No accidents in the past 3 years' },
+      { id: 'maxMajorMovingViolations',label: 'Maximum Major Moving Violations (last 3 years)',       type: 'text', placeholder: 'No more than 1' },
+      { id: 'maxJobsLast3Years',       label: 'Max. Number of Jobs (last 3 years)',                   type: 'text', placeholder: 'No more than 2 jobs in the past 2 years' },
+      { id: 'unemploymentPolicy',      label: 'Policy Against Unemployment (even if accounted for)',  type: 'text', placeholder: 'Will review all' },
+      { id: 'terminatedApplicants',    label: 'Terminated Applicants',                                type: 'area', placeholder: 'Will review; need reasons for termination.' },
+      { id: 'criminalConvictions',     label: 'Criminal Convictions',                                 type: 'text', placeholder: 'None in the past 5 years' },
+      { id: 'duiDwiPolicy',            label: 'DUI / DWI (max number & timeframe)',                   type: 'text', placeholder: 'None in a lifetime' },
+      { id: 'hazmatRequired',          label: 'Is Haz-Mat Required? Grace period to obtain it?',      type: 'text', placeholder: 'No' },
+      { id: 'otherEndorsements',       label: 'Other Endorsements Required',                          type: 'text', placeholder: 'No' },
+      { id: 'dotPhysicalRequirements', label: 'DOT Physical Requirements',                            type: 'area', placeholder: 'Physically able; not obese.' },
+      { id: 'longFormPhysicalUpfront', label: 'Long Form Physical Required Up Front?',                type: 'yesno' },
+      { id: 'drugTesting',             label: 'Drug Testing',                                         type: 'area', placeholder: 'Urine; annual DOT drug screening.' },
+      { id: 'otherAutomaticDQs',       label: "Other Automatic DQ's",                                 type: 'area', placeholder: 'No SAP drivers in a lifetime.' },
+    ],
+  },
+  {
+    id: 'presentation',
+    title: 'Presentation',
+    intro: 'What the carrier offers — pay, equipment, home time and benefits.',
+    fields: [
+      { id: 'signOnBonus',          label: 'Sign-On Bonus',                              type: 'text', placeholder: '$500.00 Sign On Bonus' },
+      { id: 'driverTypes',          label: 'Driver Types',                               type: 'text', placeholder: 'Company Solo' },
+      { id: 'typesOfRuns',          label: 'Types of Runs',                              type: 'text', placeholder: 'OTR' },
+      { id: 'typeOfFreight',        label: 'Type of Freight',                            type: 'text', placeholder: 'Flatbed' },
+      { id: 'typeOfEquipment',      label: 'Type of Equipment',                          type: 'text', placeholder: 'Conestoga' },
+      { id: 'cameras',              label: 'Cameras',                                    type: 'text', placeholder: 'No' },
+      { id: 'transmissionType',     label: 'Transmission Type',                          type: 'text', placeholder: 'Automatic; Manual' },
+      { id: 'avgTractorAge',        label: 'Average Age of Tractor',                     type: 'text', placeholder: '4 years old' },
+      { id: 'truckAssignedToDriver',label: 'Is truck permanently assigned to the driver?',type: 'text', placeholder: 'Usually, yes' },
+      { id: 'truckSpeed',           label: 'Truck Speed',                                type: 'text', placeholder: '75 MPH' },
+      { id: 'truckHomeForTimeOff',  label: 'Can truck be taken home for time off?',      type: 'text', placeholder: 'Yes' },
+      { id: 'invertersApus',        label: "Inverters / APU's?",                         type: 'text', placeholder: 'Yes' },
+      { id: 'pctDropAndHook',       label: '% of Drop and Hook',                         type: 'text', placeholder: '5%' },
+      { id: 'pctNoTouch',           label: '% of No Touch',                              type: 'text', placeholder: '0%' },
+      { id: 'pctHazmatLoads',       label: '% are Haz-Mat Loads',                        type: 'text', placeholder: '0%' },
+      { id: 'payScaleSolo',         label: 'Pay Scale (Solo)',                           type: 'area', placeholder: '$0.70 cpm. Drivers also get extra for additional pickups/drops (typically 4–5 per trip).' },
+      { id: 'typeOfDriverPay',      label: 'Type of Driver Pay',                         type: 'text', placeholder: 'Mileage' },
+      { id: 'whenPaid',             label: 'When are drivers paid?',                     type: 'text', placeholder: 'Bi-weekly after trip ends' },
+      { id: 'howPaid',              label: 'How are drivers paid?',                      type: 'text', placeholder: 'Direct Deposit' },
+      { id: 'payIncrease',          label: 'Pay Increase',                               type: 'text', placeholder: 'Will review' },
+      { id: 'hiringAreas',          label: 'Hiring Areas',                               type: 'text', placeholder: 'Ohio' },
+      { id: 'primaryRunningAreas',  label: 'Primary Running Areas',                      type: 'text', placeholder: 'West Coast, North West, Midwest & South' },
+      { id: 'avgMilesPerWeek',      label: 'Average Miles per Week',                     type: 'text', placeholder: '3000 miles per week on average' },
+      { id: 'avgLengthOfHaul',      label: 'Average Length of Haul',                     type: 'text', placeholder: 'N/A' },
+      { id: 'homeTimeDaysOut',      label: 'Home Time / Days Out',                       type: 'text', placeholder: 'Home a couple of days every week' },
+      { id: 'avgWeeklyPay',         label: 'Average Weekly Pay',                         type: 'text', placeholder: '$2,500 – $3,000 per week on average' },
+      { id: 'vacationInfo',         label: 'Driver Vacation Info',                       type: 'text', placeholder: '1 month ahead notice' },
+      { id: 'ezPass',               label: 'EZ Pass Provided',                           type: 'text', placeholder: 'Yes' },
+      { id: 'prePass',              label: 'Pre-Pass Provided',                          type: 'text', placeholder: 'Yes' },
+      { id: 'tollCards',            label: 'Toll Cards Provided (which?)',               type: 'text', placeholder: 'No' },
+      { id: 'fuelCardType',         label: 'Type of Fuel Card',                          type: 'text', placeholder: 'TCS Fuel Card' },
+      { id: 'breakdownPay',         label: 'Breakdown Pay',                              type: 'text', placeholder: 'No' },
+      { id: 'layoverPay',           label: 'Layover Pay',                                type: 'text', placeholder: '$100.00 per day' },
+      { id: 'dockDetentionPay',     label: 'Dock Detention Pay',                         type: 'text', placeholder: 'After 5 hours' },
+      { id: 'multiStopPay',         label: 'Multi-Stop Pay',                             type: 'text', placeholder: 'Yes – $100 per extra stop' },
+      { id: 'newYorkCity',          label: 'New York City',                              type: 'text', placeholder: 'No' },
+      { id: 'safetyBonus',          label: 'Safety Bonus',                               type: 'text', placeholder: 'No' },
+      { id: 'riderPolicy',          label: 'Rider Policy',                               type: 'text', placeholder: 'Yes' },
+      { id: 'petPolicy',            label: 'Pet Policy',                                 type: 'text', placeholder: 'No' },
+      { id: 'dispatch24h',          label: 'Is there 24-hour dispatch?',                 type: 'text', placeholder: 'Yes' },
+      { id: 'routingFuelFlex',      label: 'Routing / fuel-stop flexibility?',           type: 'text', placeholder: 'Yes' },
+      { id: 'qualcomm',             label: 'Qualcomm Provided',                          type: 'text', placeholder: 'No' },
+      { id: 'perDiemOptional',      label: 'Is per diem optional?',                      type: 'text', placeholder: 'Yes' },
+      { id: 'paidOrientation',      label: 'Paid Orientation',                           type: 'text', placeholder: '$0.70 CPM' },
+      { id: 'orientationLength',    label: 'How long is Orientation?',                   type: 'text', placeholder: 'e.g. 3 days' },
+      { id: 'orientationLocation',  label: 'Orientation held where?',                    type: 'text', placeholder: 'Dayton, OH' },
+      { id: 'orientationDays',      label: 'Orientation start / end day?',               type: 'text', placeholder: 'Any day Monday – Friday' },
+      { id: 'lodgingProvided',      label: 'Lodging Provided (where staying?)',          type: 'text', placeholder: 'In the truck' },
+      { id: 'mealsProvided',        label: 'Meals Provided (Breakfast / Lunch / Dinner)',type: 'text', placeholder: 'No' },
+      { id: 'travelProvided',       label: 'Travel Provided (Bus / Plane / Car Rental)', type: 'text', placeholder: 'No' },
+      { id: 'insuranceStartsWhen',  label: 'Insurance Starts When?',                     type: 'text', placeholder: 'N/A' },
+      { id: 'lifeInsurance',        label: 'Life Insurance',                             type: 'text', placeholder: 'N/A' },
+      { id: 'retirement401k',       label: '401(k) Retirement Plan',                     type: 'text', placeholder: 'N/A' },
+    ],
+  },
+  {
+    id: 'recruiters',
+    title: 'For Recruiters Use Only',
+    intro: 'Internal notes for the recruiting team.',
+    fields: [
+      { id: 'applicationTurnaround', label: 'Application Turnaround Time', type: 'text', placeholder: '24–48 hours' },
+      { id: 'rehirePolicy',          label: 'Rehire Policy',              type: 'text', placeholder: 'Will review' },
+      { id: 'applicationOwnership',  label: 'Application Ownership',      type: 'text', placeholder: '30 days' },
+      { id: 'companyWebsite',        label: 'Company Website',            type: 'text', placeholder: 'https://…' },
+    ],
+  },
+];
+const CARRIER_FIELD_IDS = CARRIER_FORM.flatMap((s) => s.fields.map((f) => f.id));
+
+// ── Carrier data layer ───────────────────────────────────────────────────────
+function readCarriers() {
+  try { return JSON.parse(fs.readFileSync(CARRIER_DB_FILE, 'utf8')); } catch { return []; }
+}
+function writeCarriers(rows) {
+  fs.writeFileSync(CARRIER_DB_FILE, JSON.stringify(rows, null, 2));
+}
+function findCarrierById(id) { return readCarriers().find((c) => c.id === id); }
+function findCarrierByToken(token) { return readCarriers().find((c) => c.token === token); }
+function upsertCarrier(carrier) {
+  const all = readCarriers();
+  const i = all.findIndex((c) => c.id === carrier.id);
+  if (i === -1) all.push(carrier); else all[i] = carrier;
+  writeCarriers(all);
+  return carrier;
+}
+// Keep only known requirement fields, coerce to trimmed strings.
+function cleanRequirements(input = {}) {
+  const out = {};
+  for (const id of CARRIER_FIELD_IDS) {
+    if (input[id] != null && String(input[id]).trim() !== '') out[id] = String(input[id]).trim();
+  }
+  return out;
+}
+function carrierProgress(c) {
+  const filled = CARRIER_FIELD_IDS.filter((id) => c.requirements?.[id]).length;
+  return { filled, total: CARRIER_FIELD_IDS.length };
+}
+// Shape returned to list views — never leaks the secret token.
+function carrierSummary(c) {
+  return {
+    id: c.id, name: c.name, ownerName: c.ownerName || '', email: c.email || '', phone: c.phone || '',
+    status: c.status, filledBy: c.filledBy || null, mode: c.mode,
+    createdAt: c.createdAt, updatedAt: c.updatedAt, submittedAt: c.submittedAt || null,
+    linkSentCount: c.linkSentCount || 0, linkLastSentAt: c.linkLastSentAt || null,
+    linkLastStatus: c.linkLastStatus || null, linkExpiresAt: c.linkExpiresAt || null,
+    progress: carrierProgress(c),
+  };
+}
 
 // ── Data layer ───────────────────────────────────────────────────────────────
 function migrate(r) {
@@ -346,6 +507,119 @@ function markOptoutActivity(phone, optedOut) {
   upsert(c);
 }
 
+// ── Carrier requirements invite (email / SMS) ────────────────────────────────
+// Generic senders so a carrier owner can be invited to fill in their hiring
+// requirements. They reuse the same providers as the driver invite but carry
+// carrier-specific copy. Returns { sent, reason } like the driver senders.
+async function deliverEmail(to, subject, html, text) {
+  if (RESEND_API_KEY) {
+    try {
+      const r = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: EMAIL_FROM, to: [to], subject, html, text, ...(REPLY_TO_EMAIL ? { reply_to: REPLY_TO_EMAIL } : {}) }),
+      });
+      if (r.ok) return { sent: true, provider: 'resend' };
+      const body = await r.text().catch(() => '');
+      return { sent: false, provider: 'resend', reason: `Resend ${r.status}: ${body.slice(0, 120)}` };
+    } catch (e) { return { sent: false, provider: 'resend', reason: 'Resend error: ' + e.message }; }
+  }
+  if (transporter) {
+    try {
+      await transporter.sendMail({ from: EMAIL_FROM, to, subject, html, text, ...(REPLY_TO_EMAIL ? { replyTo: REPLY_TO_EMAIL } : {}) });
+      return { sent: true, provider: 'smtp' };
+    } catch (e) { return { sent: false, provider: 'smtp', reason: 'SMTP error: ' + e.message }; }
+  }
+  return { sent: false, reason: 'Email not configured' };
+}
+async function deliverSms(to, body) {
+  if (!smsEnabled()) return { sent: false, reason: 'Twilio not configured' };
+  if (isOptedOut(to)) return { sent: false, reason: 'Recipient has opted out of SMS (STOP)' };
+  try {
+    const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
+      method: 'POST',
+      headers: { Authorization: 'Basic ' + Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64'), 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ To: to, From: TWILIO_FROM, Body: body }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) return { sent: true, provider: 'twilio', sid: data.sid };
+    return { sent: false, provider: 'twilio', reason: `Twilio ${r.status}: ${(data.message || '').slice(0, 120)}` };
+  } catch (e) { return { sent: false, provider: 'twilio', reason: 'Twilio error: ' + e.message }; }
+}
+
+function carrierInviteHtml(c, link) {
+  const who = c.ownerName ? firstNameOf(c.ownerName) : 'there';
+  return `<div style="font-family:'Inter',Arial,sans-serif;color:#1f2937;max-width:600px;margin:0 auto;padding:8px">
+    <div style="border-bottom:3px solid #b01d30;padding-bottom:12px;margin-bottom:20px">
+      <h2 style="color:#b01d30;margin:0">${COMPANY_NAME}</h2>
+    </div>
+    <p>Hi ${who},</p>
+    <p>We work with drivers looking for a great carrier like <strong>${c.name || 'your company'}</strong>. To match the right
+       drivers to you, please complete your carrier requirements profile — it covers your pre-qualifications, pay and
+       equipment. It only takes a few minutes and you can save it any time.</p>
+    <p style="margin:28px 0;text-align:center">
+      <a href="${link}" style="background:#b01d30;color:#fff;padding:14px 32px;border-radius:10px;
+         text-decoration:none;font-weight:600;display:inline-block;font-size:16px">Complete Our Requirements</a>
+    </p>
+    <p style="font-size:13px;color:#6b7280">If the button doesn't work, copy and paste this link into your browser:<br>
+      <a href="${link}" style="color:#b01d30;word-break:break-all">${link}</a></p>
+    <p style="font-size:13px;color:#6b7280">For your security, this link expires in ${LINK_TTL_DAYS} days.</p>
+    <p style="font-size:13px;color:#6b7280">Questions? Reply to this email or contact us at ${SUPPORT_CONTACT}.</p>
+    <p style="margin-top:24px">Thank you,<br><strong>${COMPANY_NAME} — Driver Recruiting</strong></p>
+  </div>`;
+}
+function carrierInviteText(c, link) {
+  const who = c.ownerName ? firstNameOf(c.ownerName) : 'there';
+  return `Hi ${who},
+
+Please complete your carrier requirements profile for ${c.name || 'your company'} so we can match the right drivers to you. It covers your pre-qualifications, pay and equipment.
+
+Complete it here:
+${link}
+
+This link expires in ${LINK_TTL_DAYS} days. Questions? Contact us at ${SUPPORT_CONTACT}.
+
+Thank you,
+${COMPANY_NAME} — Driver Recruiting`;
+}
+function carrierInviteSms(c, link) {
+  return `${COMPANY_NAME}: Please complete your carrier requirements for ${c.name || 'your company'} here: ${link} (expires in ${LINK_TTL_DAYS} days). Reply STOP to opt out.`;
+}
+
+// (Re)generate the carrier's token, send the intake link to every available
+// channel, and log each attempt. Mirrors dispatchLink for drivers.
+async function dispatchCarrierLink(c, base, { regenerate = false } = {}) {
+  if (regenerate || !c.token) c.token = crypto.randomBytes(24).toString('hex');
+  c.linkExpiresAt = new Date(Date.now() + LINK_TTL_DAYS * 86400000).toISOString();
+  const link = `${base}/carrier-intake.html?token=${c.token}`;
+
+  let email = null, sms = null;
+  if (c.email) {
+    email = await deliverEmail(c.email, `Carrier requirements — ${c.name || COMPANY_NAME}`, carrierInviteHtml(c, link), carrierInviteText(c, link)).catch((e) => ({ sent: false, reason: e.message }));
+    addActivity(c, 'link_sent', 'Recruiter',
+      `Requirements link ${email.sent ? 'sent' : 'FAILED'} via email to ${c.email}${email.sent ? '' : ` — ${email.reason}`}.`,
+      { channel: 'email', status: email.sent ? 'sent' : 'failed', reason: email.reason || null });
+  }
+  if (c.phone) {
+    sms = await deliverSms(c.phone, carrierInviteSms(c, link)).catch((e) => ({ sent: false, reason: e.message }));
+    addActivity(c, 'link_sent', 'Recruiter',
+      `Requirements link ${sms.sent ? 'sent' : 'FAILED'} via SMS to ${c.phone}${sms.sent ? '' : ` — ${sms.reason}`}.`,
+      { channel: 'sms', status: sms.sent ? 'sent' : 'failed', reason: sms.reason || null });
+  }
+
+  const channelsTried = [c.email ? 'email' : null, c.phone ? 'sms' : null].filter(Boolean);
+  const channelsDelivered = [email?.sent ? 'email' : null, sms?.sent ? 'sms' : null].filter(Boolean);
+  const anySuccess = channelsDelivered.length > 0;
+
+  c.linkSentCount = (c.linkSentCount || 0) + 1;
+  c.linkLastSentAt = new Date().toISOString();
+  c.linkLastChannels = channelsDelivered.length ? channelsDelivered : channelsTried;
+  c.linkLastStatus = anySuccess ? 'delivered' : 'failed';
+  c.updatedAt = c.linkLastSentAt;
+
+  return { link, email, sms, anySuccess, channelsDelivered };
+}
+
 // ── Molly AI ─────────────────────────────────────────────────────────────────
 async function callMolly(stepDef, stepState, candidateName) {
   if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not configured');
@@ -530,6 +804,9 @@ app.get('/api/config', (_req, res) => {
     mainDocs: MAIN_DOCS,
     otherDocs: OTHER_DOCS,
     hasMolly: Boolean(ANTHROPIC_API_KEY),
+    hasAnna: true,
+    annaAi: Boolean(ANTHROPIC_API_KEY),
+    annaIntegrations: anna.integrationStatus(),
     hasTelegram: Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID),
     hasEmail: emailEnabled(),
     hasSms: smsEnabled(),
@@ -909,6 +1186,328 @@ app.post('/api/twilio/inbound', express.urlencoded({ extended: false }), (req, r
   res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
 });
 
+// ── Carriers (requirement profiles) ──────────────────────────────────────────
+// Public: the questionnaire definition (so the recruiter UI and the carrier's
+// own intake page always render the exact same questions).
+app.get('/api/carrier-form', (_req, res) => res.json({ sections: CARRIER_FORM }));
+
+// Recruiter: list every carrier profile (newest first).
+app.get('/api/carriers', requireAdmin, (req, res) => {
+  const search = (req.query.search || '').toLowerCase();
+  let list = readCarriers().map(carrierSummary);
+  if (search) list = list.filter((c) => c.name.toLowerCase().includes(search) || (c.email || '').toLowerCase().includes(search));
+  res.json(list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
+});
+
+// Recruiter: add a carrier. mode 'self' = recruiter fills the requirements now;
+// mode 'invite' = email/SMS the carrier owner a link to fill it themselves.
+app.post('/api/carriers', requireAdmin, async (req, res) => {
+  const { name, ownerName, email, phone, mode, requirements } = req.body || {};
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'Company name is required.' });
+  const m = mode === 'self' ? 'self' : 'invite';
+  if (m === 'invite' && !email && !phone) return res.status(400).json({ error: 'Add an email or phone so we can send the carrier their link.' });
+
+  const now = new Date().toISOString();
+  const carrier = {
+    id: crypto.randomUUID(),
+    token: null,
+    name: String(name).trim(),
+    ownerName: ownerName ? String(ownerName).trim() : '',
+    email: email ? String(email).trim() : '',
+    phone: phone ? String(phone).trim() : '',
+    mode: m,
+    status: m === 'self' ? 'completed' : 'awaiting_carrier',
+    filledBy: m === 'self' ? 'recruiter' : null,
+    requirements: m === 'self' ? cleanRequirements(requirements) : {},
+    createdAt: now, updatedAt: now, submittedAt: m === 'self' ? now : null,
+    linkSentCount: 0, linkLastSentAt: null, linkLastChannels: [], linkLastStatus: null, linkExpiresAt: null,
+    activity: [{ id: crypto.randomUUID(), type: 'carrier_created', by: 'Recruiter', at: now, note: `Carrier profile created (${m === 'self' ? 'filled by recruiter' : 'invite sent to carrier'}).` }],
+  };
+
+  let dispatch = null;
+  if (m === 'invite') {
+    dispatch = await dispatchCarrierLink(carrier, baseUrl(req), { regenerate: true });
+  }
+  upsertCarrier(carrier);
+
+  res.json({
+    id: carrier.id,
+    status: carrier.status,
+    link: dispatch?.link || null,
+    email: dispatch?.email || null,
+    sms: dispatch?.sms || null,
+    anySuccess: dispatch?.anySuccess ?? null,
+  });
+});
+
+// Recruiter: full carrier record + the form schema for rendering.
+app.get('/api/carriers/:id', requireAdmin, (req, res) => {
+  const c = findCarrierById(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  const { token, ...safe } = c;
+  res.json({ ...safe, sections: CARRIER_FORM, progress: carrierProgress(c), hasLink: Boolean(token) });
+});
+
+// Recruiter: edit identity/contact and/or requirements.
+app.patch('/api/carriers/:id', requireAdmin, (req, res) => {
+  const c = findCarrierById(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  const { name, ownerName, email, phone, requirements } = req.body || {};
+  const now = new Date().toISOString();
+
+  if (name !== undefined) c.name = String(name).trim();
+  if (ownerName !== undefined) c.ownerName = String(ownerName).trim();
+  if (email !== undefined) c.email = String(email).trim();
+  if (phone !== undefined) c.phone = String(phone).trim();
+  if (requirements !== undefined) {
+    c.requirements = cleanRequirements(requirements);
+    c.status = 'completed';
+    if (!c.submittedAt) c.submittedAt = now;
+    if (!c.filledBy) c.filledBy = 'recruiter';
+    addActivity(c, 'requirements_updated', 'Recruiter', 'Requirements updated by recruiter.');
+  }
+  c.updatedAt = now;
+  upsertCarrier(c);
+  res.json({ ok: true, status: c.status, progress: carrierProgress(c) });
+});
+
+// Recruiter: (re)send the intake link to the carrier owner.
+app.post('/api/carriers/:id/resend', requireAdmin, async (req, res) => {
+  const c = findCarrierById(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  const { email, phone } = req.body || {};
+  if (email !== undefined) c.email = String(email).trim();
+  if (phone !== undefined) c.phone = String(phone).trim();
+  if (!c.email && !c.phone) return res.status(400).json({ error: 'Add an email or phone first.' });
+  const dispatch = await dispatchCarrierLink(c, baseUrl(req), { regenerate: true });
+  if (c.status === 'completed') { /* keep completed */ } else c.status = 'awaiting_carrier';
+  upsertCarrier(c);
+  res.json({ link: dispatch.link, email: dispatch.email, sms: dispatch.sms, anySuccess: dispatch.anySuccess });
+});
+
+app.delete('/api/carriers/:id', requireAdmin, (req, res) => {
+  const all = readCarriers();
+  const next = all.filter((c) => c.id !== req.params.id);
+  if (next.length === all.length) return res.status(404).json({ error: 'Not found' });
+  writeCarriers(next);
+  res.json({ ok: true });
+});
+
+// Public (token): the carrier owner loads their intake form.
+app.get('/api/carrier-intake/:token', (req, res) => {
+  const c = findCarrierByToken(req.params.token);
+  if (!c) return res.status(404).json({ error: 'This link is not valid. Please contact us for a new one.' });
+  if (linkExpired(c)) return res.status(410).json({ error: EXPIRED_MSG, expired: true });
+  res.json({
+    name: c.name, ownerName: c.ownerName || '', companyName: COMPANY_NAME,
+    status: c.status, sections: CARRIER_FORM, requirements: c.requirements || {},
+    expiresAt: c.linkExpiresAt,
+  });
+});
+
+// Public (token): the carrier owner submits/updates their requirements.
+app.post('/api/carrier-intake/:token', (req, res) => {
+  const c = findCarrierByToken(req.params.token);
+  if (!c) return res.status(404).json({ error: 'This link is not valid. Please contact us for a new one.' });
+  if (linkExpired(c)) return res.status(410).json({ error: EXPIRED_MSG, expired: true });
+  const { requirements } = req.body || {};
+  if (!requirements || typeof requirements !== 'object') return res.status(400).json({ error: 'Missing requirements.' });
+
+  const firstTime = c.status !== 'completed';
+  c.requirements = cleanRequirements(requirements);
+  c.status = 'completed';
+  c.filledBy = 'carrier';
+  c.submittedAt = new Date().toISOString();
+  c.updatedAt = c.submittedAt;
+  addActivity(c, 'requirements_submitted', 'Carrier', `Carrier ${firstTime ? 'submitted' : 'updated'} their requirements.`);
+  upsertCarrier(c);
+
+  if (process.env.NOTIFY_EMAIL) {
+    deliverEmail(process.env.NOTIFY_EMAIL, `Carrier requirements received — ${c.name}`,
+      `<p><strong>${c.name}</strong> ${firstTime ? 'completed' : 'updated'} their carrier requirements profile.</p><p>View it in the QuickHire carriers dashboard.</p>`, '').catch(() => {});
+  }
+  res.json({ ok: true });
+});
+
+// ── Anna: Driver Qualification AI Agent ──────────────────────────────────────
+// Standalone module in anna/ wired in here. Anna normalizes a lead, matches it
+// against every carrier, builds a portfolio, and produces a compliance verdict.
+const SPEC_PARSE_VERSION = 1;
+const annaOpts = () => ({ apiKey: ANTHROPIC_API_KEY });
+
+function readPortfolios() { try { return JSON.parse(fs.readFileSync(PORTFOLIO_FILE, 'utf8')); } catch { return []; } }
+function writePortfolios(rows) { fs.writeFileSync(PORTFOLIO_FILE, JSON.stringify(rows, null, 2)); }
+function upsertPortfolio(p) {
+  const all = readPortfolios();
+  const i = all.findIndex((x) => x.id === p.id);
+  if (i === -1) all.push(p); else all[i] = p;
+  writePortfolios(all);
+  return p;
+}
+function findPortfolio(id) { return readPortfolios().find((p) => p.id === id); }
+function portfolioSummary(p) {
+  return {
+    id: p.id, createdAt: p.createdAt,
+    driverName: p.driver?.name || '—',
+    carrierName: p.carrier?.carrierName || null,
+    fitScore: p.carrier?.fitScore ?? null,
+    reviewStatus: p.review?.status || 'pending',
+    recruiter: p.review?.assignedRecruiter || null,
+    complianceFlag: p.compliance?.flag || null,
+  };
+}
+
+// Parse each carrier's free-text requirements into Anna's structured shape once,
+// cache it on the carrier record, and return carriers shaped for the matcher.
+async function annaCarriers() {
+  const out = [];
+  for (const c of readCarriers()) {
+    if (!c.requirements || !Object.keys(c.requirements).length) continue; // nothing to match on yet
+    if (!c.structuredRequirements || c.structuredSpecVersion !== SPEC_PARSE_VERSION) {
+      const { requirements } = await anna.extractCarrierSpec(c.requirements, annaOpts());
+      c.structuredRequirements = requirements;
+      c.structuredSpecVersion = SPEC_PARSE_VERSION;
+      upsertCarrier(c);
+    }
+    out.push({ id: c.id, name: c.name, requirements: c.structuredRequirements, specVersion: SPEC_PARSE_VERSION });
+  }
+  return out;
+}
+
+// Scan a document (image/PDF) and return extracted fields for auto-fill.
+app.post('/api/anna/scan', requireAdmin, async (req, res) => {
+  const { dataUrl, docType } = req.body || {};
+  if (!dataUrl) return res.status(400).json({ error: 'dataUrl is required.' });
+  if (!ANTHROPIC_API_KEY) return res.status(503).json({ error: 'Document scanning requires ANTHROPIC_API_KEY.' });
+  try {
+    res.json(await anna.extractFromDocument({ dataUrl, docType, apiKey: ANTHROPIC_API_KEY }));
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Match a driver against all carriers (normalize first), without persisting.
+app.post('/api/anna/match', requireAdmin, async (req, res) => {
+  const { driver, lead } = req.body || {};
+  if (!driver && !lead) return res.status(400).json({ error: 'driver or lead is required.' });
+  try {
+    const { profile } = await anna.normalizeDriver(driver || lead, annaOpts());
+    const match = anna.matchDriver(profile, await annaCarriers(), { minScore: Number(req.body?.minScore) || 0 });
+    res.json({ profile, match });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Full Stage 1→3: normalize a lead, match all carriers, persist a portfolio.
+app.post('/api/anna/leads', requireAdmin, async (req, res) => {
+  const { lead, recruiterPool } = req.body || {};
+  if (!lead) return res.status(400).json({ error: 'lead is required.' });
+  try {
+    const result = await anna.processLead({
+      lead,
+      carriers: await annaCarriers(),
+      opts: { ...annaOpts(), recruiterPool: recruiterPool || [], minScore: Number(req.body?.minScore) || 0 },
+    });
+    if (result.portfolio) {
+      // Carry any consent captured at intake (direct flags or application-style
+      // consentMvr/consentPsp/consentEmployment fields on the lead) onto the
+      // portfolio so the compliance gate reads it automatically.
+      const consentInput = req.body?.consent || lead;
+      const consent = anna.normalizeConsent(consentInput);
+      if (consent.mvr || consent.psp || consent.clearinghouse) result.portfolio.consent = consent;
+      upsertPortfolio(result.portfolio);
+    }
+    res.json({ profile: result.profile, match: result.match, source: result.source, portfolio: result.portfolio || null });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Suggest other carriers for a (rejected) driver.
+app.post('/api/anna/rematch', requireAdmin, async (req, res) => {
+  const { driver, excludeCarrierIds } = req.body || {};
+  if (!driver) return res.status(400).json({ error: 'driver is required.' });
+  try {
+    const { profile } = await anna.normalizeDriver(driver, annaOpts());
+    res.json(anna.suggestRematch(profile, await annaCarriers(), { excludeCarrierIds: excludeCarrierIds || [] }));
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+app.get('/api/anna/portfolios', requireAdmin, (_req, res) => {
+  res.json(readPortfolios().map(portfolioSummary));
+});
+app.get('/api/anna/portfolios/:id', requireAdmin, (req, res) => {
+  const p = findPortfolio(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  res.json(p);
+});
+
+// Record the driver's signed consent to pull MVR/PSP/Clearinghouse records.
+// Represents the consent captured in the application flow; feeds the gate.
+app.post('/api/anna/portfolios/:id/consent', requireAdmin, (req, res) => {
+  const p = findPortfolio(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  const consent = anna.normalizeConsent(req.body || {});
+  consent.capturedAt = new Date().toISOString();
+  consent.ip = req.ip;
+  p.consent = consent;
+  upsertPortfolio(p);
+  res.json({ ok: true, consent });
+});
+
+// Stage 4: pull/record compliance data and write the approve/reject verdict.
+app.post('/api/anna/portfolios/:id/compliance', requireAdmin, async (req, res) => {
+  const p = findPortfolio(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  if (!p.carrier?.carrierId) return res.status(400).json({ error: 'Portfolio has no matched carrier.' });
+  const carrier = findCarrierById(p.carrier.carrierId);
+  if (!carrier) return res.status(404).json({ error: 'Matched carrier no longer exists.' });
+  try {
+    let records = req.body?.records || {};
+    // If asked to pull from the integrations, enforce consent and fetch records
+    // (real providers when configured, otherwise flagged simulated pulls).
+    if (req.body?.pull) {
+      const consent = req.body?.consent || p.consent || {};
+      // Default to the checks the driver actually consented to.
+      const types = req.body?.types || ['mvr', 'psp', 'clearinghouse'].filter((t) => consent[t]);
+      if (!types.length) return res.status(403).json({ error: 'No driver consent on file — capture consent before pulling records.', missingConsent: ['mvr', 'psp', 'clearinghouse'] });
+      const pulled = await anna.pullCompliance({ driver: p.driver, consent, types, queue: undefined, opts: annaOpts() });
+      records = { ...pulled.records, ...records }; // manual overrides win
+      p.consent = pulled.consent;
+      p.complianceSources = pulled.sources;
+    }
+    const compliance = await anna.writeCompliance({
+      carrier: { id: carrier.id, name: carrier.name, requirements: carrier.structuredRequirements || {} },
+      driver: p.driver,
+      records,
+      opts: { ...annaOpts(), narrate: Boolean(ANTHROPIC_API_KEY) },
+    });
+    p.compliance = compliance;
+    // Official pulled records supersede self-reported data so any later re-match
+    // reflects reality (e.g. a DUI found on the MVR follows the driver).
+    p.driver = anna.mergeRecords(p.driver, records);
+    upsertPortfolio(p);
+    res.json({ ...compliance, sources: p.complianceSources || null });
+  } catch (e) {
+    if (e.code === 'CONSENT_REQUIRED') return res.status(403).json({ error: e.message, missingConsent: e.missing });
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// Stage 5: human checkpoint — recruiter approves or rejects.
+app.post('/api/anna/portfolios/:id/decision', requireAdmin, async (req, res) => {
+  const p = findPortfolio(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  const { decision, reason, by } = req.body || {};
+  if (!['approved', 'rejected'].includes(decision)) return res.status(400).json({ error: 'decision must be "approved" or "rejected".' });
+  p.review = { ...p.review, status: decision, decidedBy: by || 'Recruiter', decidedAt: new Date().toISOString(), decisionReason: reason || '' };
+  upsertPortfolio(p);
+  // On rejection, offer re-match suggestions to other carriers.
+  let rematch = null;
+  if (decision === 'rejected') {
+    try { rematch = anna.suggestRematch(p.driver, await annaCarriers(), { excludeCarrierIds: [p.carrier?.carrierId].filter(Boolean) }); } catch { /* best effort */ }
+  }
+  res.json({ ok: true, review: p.review, rematch });
+});
+
+// Recruiter-facing Anna portfolio queue (standalone static page).
+app.get('/anna', (_req, res) => res.redirect('/anna.html'));
+
 // ── Static ─────────────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -922,6 +1521,7 @@ app.listen(PORT, () => {
   if (!ADMIN_PASSWORD) console.log('WARNING: ADMIN_PASSWORD not set — dashboard is open.');
   console.log(`Email: ${RESEND_API_KEY ? 'Resend' : transporter ? 'SMTP fallback' : 'NOT configured (links shown in dashboard)'}`);
   console.log(`SMS:   ${smsEnabled() ? 'Twilio' : 'NOT configured'}`);
-  if (!ANTHROPIC_API_KEY) console.log('NOTE: ANTHROPIC_API_KEY not set — Molly AI disabled.');
+  if (!ANTHROPIC_API_KEY) console.log('NOTE: ANTHROPIC_API_KEY not set — Molly AI disabled; Anna runs in deterministic mode.');
+  console.log('Anna: driver-qualification agent mounted at /api/anna/*');
   console.log(`Link TTL: ${LINK_TTL_DAYS} days`);
 });

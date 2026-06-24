@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "build": "echo \"SPA is prebuilt in public/app — no build step needed\""
+    "build": "echo \"SPA is prebuilt in public/app — no build step needed\"",
+    "test:anna": "node anna/test/run.js"
   },
   "engines": {
     "node": ">=18"
