@@ -2,45 +2,66 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Anna as a conversational in-app assistant.
 //
-// Users can ask questions (trucking hiring/compliance domain + how the app
-// works) and assign tasks in natural language from anywhere in the app. Anna
-// answers with Claude when configured, and can emit structured ACTIONS that the
-// frontend applies to the app (today: create_task). Without an API key she falls
-// back to a lightweight intent parser so "assign a task to Jenna…" still works.
+// Anna can: answer questions about the app and the trucking hiring/compliance
+// domain; summarize a driver / carrier / candidate / truck from the context the
+// UI sends; navigate the user to any profile or page; and create/assign tasks.
 //
-// Actions are returned to the caller rather than executed here — the task list
-// lives in the SPA's store, so the frontend performs the mutation and Anna stays
-// decoupled from the app's state.
+// Actions (navigate, open_profile, create_task) are returned to the caller and
+// executed by the frontend (it owns routing and the store). Without an API key
+// Anna falls back to lightweight intent parsing + templated summaries so the
+// core actions still work offline.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { callClaude, MODELS, annaConfigured } from './claude.js';
 
-// Tools Anna can call. Keep inputs simple and frontend-applicable.
+const PAGES = ['dashboard', 'carriers', 'drivers', 'trucks', 'hiring', 'tasks', 'inbox', 'notifications', 'settings', 'anna'];
+const ENTITY_TYPES = ['driver', 'carrier', 'candidate', 'truck'];
+
 const TOOLS = [
   {
     name: 'create_task',
-    description: 'Create and assign a task in the QuickHire workdeck. Use whenever the user asks to create, add, assign, schedule, or remind about a task or follow-up.',
+    description: 'Create and assign a task in the workdeck. Use when the user asks to create, add, assign, schedule, or remind about a task or follow-up.',
     input_schema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Short task title.' },
-        assignee: { type: 'string', description: 'Person to assign to (a recruiter/employee name), if stated.' },
+        title: { type: 'string' },
+        assignee: { type: 'string', description: 'Recruiter/employee name, if stated.' },
         priority: { type: 'string', enum: ['Urgent', 'High', 'Normal', 'Low'] },
-        due: { type: 'string', description: 'Due date in YYYY-MM-DD if stated.' },
-        description: { type: 'string', description: 'Optional details.' },
+        due: { type: 'string', description: 'YYYY-MM-DD if stated.' },
+        description: { type: 'string' },
       },
       required: ['title'],
     },
+  },
+  {
+    name: 'open_profile',
+    description: 'Open a specific record\'s profile page by name when the user wants to go to / view / pull up a driver, carrier, candidate, or truck.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        entityType: { type: 'string', enum: ENTITY_TYPES },
+        name: { type: 'string', description: 'Name (or truck unit #) to look up.' },
+      },
+      required: ['entityType', 'name'],
+    },
+  },
+  {
+    name: 'navigate',
+    description: 'Open a top-level page/section of the app when the user asks to go there.',
+    input_schema: { type: 'object', properties: { page: { type: 'string', enum: PAGES } }, required: ['page'] },
   },
 ];
 
 function systemPrompt(context = {}) {
   return [
-    'You are Anna, the AI assistant built into QuickHire/Fleetmule — a driver-staffing platform for the trucking industry.',
-    'You help recruiters and owners: answer questions about driver qualification, FMCSA compliance (MVR, PSP, Clearinghouse), carrier requirements, and how to use the app; and you create/assign tasks on request.',
-    'Be concise and practical. When the user asks to create or assign a task or follow-up, call the create_task tool (infer a clear title; include assignee/priority/due only if stated).',
-    'Do not invent driver, carrier, or record data you were not given. If asked to do something you cannot, say so briefly.',
-    context && Object.keys(context).length ? `Current app context: ${JSON.stringify(context)}.` : '',
+    'You are Anna, the AI assistant inside QuickHire/Fleetmule — a driver-staffing platform for the trucking industry (the app is also branded "FleetView").',
+    'The app has these sections: Dashboard, Hiring (candidate pipeline), Drivers, Trucks, Carriers, Tasks, Inbox, Notifications, Settings, and the Anna workspace (driver qualification & carrier matching).',
+    'You can: (1) answer questions about how the app works and about driver qualification / FMCSA compliance (MVR, PSP, Clearinghouse) / carrier requirements; (2) SUMMARIZE a driver, carrier, candidate, or truck using the context provided to you; (3) NAVIGATE the user to a profile (open_profile) or a page (navigate); (4) create/assign tasks (create_task).',
+    'When the user asks to go to / open / pull up a specific record, call open_profile. When they ask to go to a section, call navigate. When they ask to summarize or "tell me about" a record, write a concise summary from the provided context (do not invent fields you were not given). Keep answers short and practical.',
+    'Use ONLY the data in the context below; if a record is not present, say you could not find it.',
+    context.focus ? `The user is currently viewing: ${JSON.stringify(context.focus)}.` : '',
+    context.directory ? `Known records (for lookup/summary): ${JSON.stringify(context.directory).slice(0, 6000)}.` : '',
+    context.counts ? `Counts: ${JSON.stringify(context.counts)}.` : '',
   ].filter(Boolean).join(' ');
 }
 
@@ -48,7 +69,7 @@ function systemPrompt(context = {}) {
  * Run one assistant turn.
  * @param {Object} p
  * @param {Array}  p.messages  [{ role:'user'|'assistant', content:string }]
- * @param {Object} [p.context] Lightweight UI context (current page, carrier, counts).
+ * @param {Object} [p.context] { page, focus, directory, counts }
  * @param {Object} [p.opts]    { apiKey, model }
  * @returns {Promise<{ reply, actions, engine }>}
  */
@@ -58,7 +79,7 @@ export async function chat({ messages = [], context = {}, opts = {} } = {}) {
   const { raw } = await callClaude({
     apiKey: opts.apiKey,
     model: opts.model || MODELS.fast,
-    maxTokens: 800,
+    maxTokens: 900,
     system: systemPrompt(context),
     tools: TOOLS,
     messages: messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') })),
@@ -68,9 +89,13 @@ export async function chat({ messages = [], context = {}, opts = {} } = {}) {
   const actions = [];
   for (const block of raw.content || []) {
     if (block.type === 'text') reply += block.text;
-    else if (block.type === 'tool_use' && block.name === 'create_task') actions.push({ type: 'create_task', task: sanitizeTask(block.input) });
+    else if (block.type === 'tool_use') {
+      if (block.name === 'create_task') actions.push({ type: 'create_task', task: sanitizeTask(block.input) });
+      else if (block.name === 'open_profile') actions.push({ type: 'open_profile', entityType: block.input.entityType, name: String(block.input.name || '') });
+      else if (block.name === 'navigate') actions.push({ type: 'navigate', page: block.input.page });
+    }
   }
-  if (!reply.trim() && actions.length) reply = confirmTask(actions[0].task);
+  if (!reply.trim() && actions.length) reply = confirmAction(actions[0]);
   return { reply: reply.trim() || "I'm not sure how to help with that yet.", actions, engine: 'ai' };
 }
 
@@ -85,25 +110,66 @@ function sanitizeTask(input = {}) {
   };
 }
 
-const confirmTask = (t) => `Created the task "${t.title}"${t.assignee ? ` and assigned it to ${t.assignee}` : ''}${t.due ? ` (due ${t.due})` : ''}.`;
+function confirmAction(a) {
+  if (a.type === 'create_task') return `Created the task "${a.task.title}"${a.task.assignee ? ` and assigned it to ${a.task.assignee}` : ''}.`;
+  if (a.type === 'open_profile') return `Opening ${a.name}'s profile…`;
+  if (a.type === 'navigate') return `Opening the ${a.page} page…`;
+  return 'Done.';
+}
 
 // ── Deterministic fallback (no API key) ──────────────────────────────────────
-// Parses simple task-assignment intents; otherwise returns a helpful message.
-export function heuristicChat(messages, context) {
+export function heuristicChat(messages, context = {}) {
   const last = [...messages].reverse().find((m) => m.role === 'user');
   const text = String(last?.content || '').trim();
+
+  // 1) Task intent
   const task = parseTaskIntent(text);
-  if (task) return { reply: confirmTask(task), actions: [{ type: 'create_task', task }], engine: 'heuristic' };
+  if (task) return { reply: confirmAction({ type: 'create_task', task }), actions: [{ type: 'create_task', task }], engine: 'heuristic' };
+
+  // 2) Summary intent — template from the viewed record (focus) when available
+  if (/\b(summar|tell me about|overview of|brief on)/i.test(text)) {
+    if (context.focus) return { reply: summarize(context.focus), actions: [], engine: 'heuristic' };
+    return { reply: 'Open the record (or tell me to open it) and I\'ll summarize it. Connect an Anthropic API key for richer, free-form answers.', actions: [], engine: 'heuristic' };
+  }
+
+  // 3) Navigation intent
+  const navIntent = parseNavIntent(text);
+  if (navIntent) return { reply: confirmAction(navIntent), actions: [navIntent], engine: 'heuristic' };
+
   return {
-    reply: "I can create and assign tasks for you, and answer questions about driver qualification and the app. Try: “Assign a task to Jenna: call driver John about his MVR.” (Connect an Anthropic API key to enable full Q&A.)",
+    reply: "I can open records (“open driver John Doe”), summarize what you're viewing, assign tasks (“assign a task to Jenna…”), and navigate the app. Connect an Anthropic API key to enable full free-form Q&A.",
     actions: [],
     engine: 'heuristic',
   };
 }
 
+function summarize(focus = {}) {
+  const f = focus;
+  const skip = new Set(['id', 'carrierId', 'name', 'entityType']);
+  const bits = Object.entries(f)
+    .filter(([k, v]) => !skip.has(k) && v != null && v !== '')
+    .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`);
+  const title = f.name || (f.unit ? `Unit ${f.unit}` : (f.entityType || 'Record'));
+  const kind = f.entityType ? `${f.entityType} ` : '';
+  return `${kind}${title} — ${bits.slice(0, 10).join(' · ') || 'no details available'}.`;
+}
+
+function parseNavIntent(text) {
+  if (!/\b(open|go to|show|view|pull up|take me to|navigate)\b/i.test(text)) return null;
+  const lower = text.toLowerCase();
+  // Page navigation
+  for (const page of PAGES) if (new RegExp(`\\b${page}\\b`).test(lower)) return { type: 'navigate', page };
+  if (/\bdashboard|home\b/.test(lower)) return { type: 'navigate', page: 'dashboard' };
+  // Profile open: "open driver <name>" / "open carrier <name>"
+  const m = text.match(/\b(driver|carrier|candidate|truck)\s+(.+)$/i);
+  if (m) return { type: 'open_profile', entityType: m[1].toLowerCase(), name: m[2].replace(/['"?.]/g, '').trim() };
+  return null;
+}
+
 function parseTaskIntent(text) {
   if (!text) return null;
   if (!/\b(task|assign|remind|to-?do|follow[\s-]?up|schedule)\b/i.test(text)) return null;
+  if (/\b(open|go to|navigate|summar)\b/i.test(text)) return null; // not a task command
   let assignee;
   const m = text.match(/\b(?:assign(?:ed)?\s+to|to|for)\s+([A-Z][a-zA-Z]+)\b/);
   if (m) assignee = m[1];
