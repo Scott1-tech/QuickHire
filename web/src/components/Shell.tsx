@@ -87,6 +87,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <NavItem to="/inbox" icon="✉" label="Inbox" />
           <NavItem to="/tasks" icon="✓" label="Tasks" badge="5" />
           {can(s.role, 'research') && <NavItem to="/research" icon="🔍" label="Research" />}
+          {/* Anna lives outside the SPA (standalone page), so use a real anchor. */}
+          <a href="/anna" className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition text-slate-300 hover:bg-white/5">
+            <span className="w-5 text-center">🤖</span>
+            {!collapsed && <span className="flex-1">Anna — AI Agent</span>}
+          </a>
 
           {/* Carrier badge */}
           <div className="relative mt-3">
