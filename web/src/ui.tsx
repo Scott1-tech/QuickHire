@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { stageColorForName, stagePillClass } from '@/lib/pipeline';
+import Icon from '@/components/Icon';
 
 const PILL_MAP: Record<string, string> = {
   // stages
@@ -23,6 +24,22 @@ export function Pill({ children, kind }: { children: ReactNode; kind?: string })
   const stageColor = stageColorForName(key);
   const cls = stageColor ? stagePillClass(stageColor) : (PILL_MAP[key] ?? 'pill-slate');
   return <span className={`pill ${cls}`}>{children}</span>;
+}
+
+/** At-a-glance availability glyph for trucks/vehicles: a green wheel when the
+ * unit is free, a purple link when it's already paired with a driver. Used in
+ * the truck list and every assign-a-vehicle picker so the state is scannable. */
+export function AssignmentIcon({ assigned, size = 16, label }: { assigned: boolean; size?: number; label?: boolean }) {
+  const box = size + 12;
+  return (
+    <span className="inline-flex items-center gap-1.5" title={assigned ? 'Assigned' : 'Available'}>
+      <span className="inline-grid place-items-center rounded-full flex-shrink-0"
+        style={{ width: box, height: box, background: assigned ? '#EDE9FE' : '#F0FDF4', color: assigned ? '#7C3AED' : '#16A34A' }}>
+        <Icon name={assigned ? 'link' : 'wheel'} size={size} />
+      </span>
+      {label && <span className="text-[12.5px] font-semibold" style={{ color: assigned ? '#7C3AED' : '#16A34A' }}>{assigned ? 'Assigned' : 'Available'}</span>}
+    </span>
+  );
 }
 
 export function StatCard({ icon, value, label, tint }: { icon: string; value: ReactNode; label: string; tint: string }) {
