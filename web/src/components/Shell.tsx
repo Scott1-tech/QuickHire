@@ -3,11 +3,15 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useStore } from '@/store';
 import Icon from '@/components/Icon';
 import TaskModal from '@/components/TaskModal';
+
+import { NOTIFICATIONS } from '@/data/mock';
+
 import AnnaAssistant from '@/components/AnnaAssistant';
+
 import type { Role } from '@/types';
 
 const ROLES: Role[] = ['Recruiter', 'Owner', 'Super Admin'];
-const ROLE_ICON: Record<Role, string> = { Recruiter: '📞', Owner: '👑', 'Super Admin': '🛡' };
+const ROLE_ICON: Record<Role, string> = { Recruiter: 'phone', Owner: 'crown', 'Super Admin': 'shield' };
 
 function can(role: Role, cap: 'research' | 'people' | 'admin' | 'multicarrier' | 'trucksEdit') {
   switch (cap) {
@@ -48,12 +52,24 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const cid = s.currentCarrierId;
   const link = (p: string) => `/carriers/${cid}/${p}`;
 
-  const NavItem = ({ to, icon, label, badge }: { to: string; icon: string; label: string; badge?: string }) => (
-    <NavLink to={to} className={({ isActive }) =>
-      `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition ${isActive ? 'bg-primary-light text-primary font-semibold' : 'text-slate-300 hover:bg-white/5'}`}>
-      <span className="w-5 text-center">{icon}</span>
-      {!collapsed && <span className="flex-1">{label}</span>}
-      {!collapsed && badge && <span className="text-[10px] font-bold bg-danger text-white rounded-full px-1.5 py-0.5">{badge}</span>}
+  // Live badge counts (no more hardcoded numbers)
+  const notifCount = NOTIFICATIONS.filter((n) => !n.cleared).length;
+  const taskCount = s.allTasks.filter((t) => t.assignee === s.currentUser && t.status !== 'COMPLETE').length;
+
+  const itemCls = (active: boolean) =>
+    `relative flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${collapsed ? 'justify-center' : ''} ${
+      active ? 'bg-primary text-white font-semibold shadow-[0_1px_2px_rgba(0,0,0,0.25)]' : 'text-slate-400 hover:text-white hover:bg-white/[0.06]'
+    }`;
+
+  const NavItem = ({ to, icon, label, badge, activeWhen }: {
+    to: string; icon: string; label: string; badge?: number; activeWhen?: boolean;
+  }) => (
+    <NavLink to={to} title={collapsed ? label : undefined} end={to === '/settings'}
+      className={({ isActive }) => itemCls(activeWhen ?? isActive)}>
+      <Icon name={icon} size={18} className="flex-shrink-0" />
+      {!collapsed && <span className="flex-1 truncate">{label}</span>}
+      {!collapsed && badge ? <span className="text-[10px] font-bold bg-danger text-white rounded-full min-w-[18px] text-center px-1.5 py-0.5">{badge}</span> : null}
+      {collapsed && badge ? <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-danger ring-2 ring-[#0f172a]" /> : null}
     </NavLink>
   );
 
@@ -63,34 +79,76 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
-      <aside className={`${collapsed ? 'w-16' : 'w-60'} flex-shrink-0 bg-[#0f172a] text-slate-200 flex flex-col transition-all duration-200`}>
+      <aside className={`${collapsed ? 'w-16' : 'w-60'} flex-shrink-0 bg-[#0f172a] border-r border-white/5 text-slate-200 flex flex-col transition-all duration-200`}>
         <div className="flex-1 overflow-y-auto scrollbar-thin p-3">
+          {/* Click-away backdrop for the dropdowns */}
+          {(roleOpen || carrierOpen) && (
+            <div className="fixed inset-0 z-10" onClick={() => { setRoleOpen(false); setCarrierOpen(false); }} />
+          )}
+
           {/* User switcher */}
+
+          <div className="relative z-20">
+            <button onClick={() => { setRoleOpen((o) => !o); setCarrierOpen(false); }}
+
           <div className="relative">
             <button onClick={() => setRoleOpen((o) => !o)}
+
               className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-purple grid place-items-center text-sm font-bold text-white">{s.role[0]}</div>
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-purple grid place-items-center text-sm font-bold text-white flex-shrink-0">{s.role[0]}</div>
               {!collapsed && <div className="text-left flex-1 min-w-0">
-                <div className="text-sm font-semibold truncate">Fleet Admin</div>
-                <div className="text-[11px] text-slate-400">{ROLE_ICON[s.role]} {s.role}</div>
+                <div className="text-sm font-semibold truncate text-white">Fleet Admin</div>
+                <div className="text-[11px] text-slate-400 flex items-center gap-1"><Icon name={ROLE_ICON[s.role]} size={11} /> {s.role}</div>
               </div>}
-              {!collapsed && <span className="text-slate-500">▾</span>}
+              {!collapsed && <Icon name="chevronDown" size={14} className="text-slate-500" />}
             </button>
             {roleOpen && (
-              <div className="absolute left-0 right-0 mt-1 bg-[#1e293b] border border-white/10 rounded-lg p-1 z-20 shadow-pop">
+              <div className={`absolute mt-1 bg-[#1e293b] border border-white/10 rounded-lg p-1 z-30 shadow-pop ${collapsed ? 'left-full ml-2 top-0 w-48' : 'left-0 right-0'}`}>
                 {ROLES.map((r) => (
                   <button key={r} onClick={() => { s.setRole(r); setRoleOpen(false); }}
-                    className={`w-full text-left px-3 py-1.5 rounded text-sm flex items-center gap-2 ${s.role === r ? 'text-primary' : 'text-slate-300 hover:bg-white/5'}`}>
-                    <span>{ROLE_ICON[r]}</span> {r}
+                    className={`w-full text-left px-3 py-1.5 rounded text-sm flex items-center gap-2 ${s.role === r ? 'bg-primary/15 text-white font-semibold' : 'text-slate-300 hover:bg-white/5'}`}>
+                    <Icon name={ROLE_ICON[r]} size={14} /> {r}
                   </button>
                 ))}
               </div>
             )}
           </div>
 
-          <NavItem to="/dashboard" icon="⊞" label="Dashboard" />
+          <div className="mt-2" />
+          <NavItem to="/dashboard" icon="layout" label="Dashboard" />
 
           <SectionLabel>Features</SectionLabel>
+
+          <NavItem to="/notifications" icon="bell" label="Notifications" badge={notifCount} />
+          <NavItem to="/inbox" icon="mail" label="Inbox" />
+          <NavItem to="/tasks" icon="listChecklist" label="Tasks" badge={taskCount} />
+          {can(s.role, 'research') && <NavItem to="/research" icon="search" label="Research" />}
+
+          {/* Carrier badge */}
+          <div className="relative z-20 mt-3">
+            <button onClick={() => { setCarrierOpen((o) => !o); setRoleOpen(false); }}
+              title={collapsed ? s.currentCarrier.name : undefined}
+              className={`w-full flex items-center gap-2 p-2 rounded-lg bg-white/5 hover:bg-white/10 ${collapsed ? 'justify-center' : ''}`}>
+              <span className="w-2 h-2 rounded-full bg-success flex-shrink-0" />
+              {!collapsed && <div className="text-left flex-1 min-w-0">
+                <div className="text-[12px] font-semibold truncate text-white">{s.currentCarrier.name}</div>
+                <div className="text-[10px] text-slate-400">DOT {s.currentCarrier.dot}</div>
+              </div>}
+              {!collapsed && <Icon name="chevronDown" size={14} className="text-slate-500" />}
+            </button>
+            {carrierOpen && (
+              <div className={`absolute mt-1 bg-[#1e293b] border border-white/10 rounded-lg p-1 z-30 shadow-pop ${collapsed ? 'left-full ml-2 top-0 w-56' : 'left-0 right-0'}`}>
+                {s.carriers.map((c) => (
+                  <button key={c.id} onClick={() => { s.setCurrentCarrierId(c.id); setCarrierOpen(false); }}
+                    className={`w-full text-left px-3 py-1.5 rounded text-[12px] flex items-center gap-2 ${c.id === cid ? 'bg-primary/15 text-white font-semibold' : 'text-slate-300 hover:bg-white/5'}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${c.id === cid ? 'bg-success' : 'bg-slate-500'}`} /> {c.name}
+                  </button>
+                ))}
+                <Link to="/carriers" onClick={() => setCarrierOpen(false)} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-[12px] text-slate-400 hover:text-white border-t border-white/10 mt-1"><Icon name="plus" size={12} /> Manage carriers</Link>
+              </div>
+            )}
+          </div>
+
           <NavItem to="/notifications" icon="🔔" label="Notifications" badge="3" />
           <NavItem to="/inbox" icon="✉" label="Inbox" />
           <NavItem to="/tasks" icon="✓" label="Tasks" badge="5" />
@@ -115,25 +173,33 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             {!collapsed && <span className="text-slate-500 text-[10px]">↗</span>}
           </Link>
 
+
           <SectionLabel>Manage</SectionLabel>
-          <NavItem to={link('hiring')} icon="🧭" label="Hiring" />
-          <NavItem to={link('drivers')} icon="🚚" label="Drivers" />
-          <NavItem to={link('trucks')} icon="🚛" label="Trucks" />
-          <NavItem to="/carriers" icon="🏢" label="Carriers" />
+          <NavItem to={link('hiring')} icon="compass" label="Hiring" />
+          <NavItem to={link('drivers')} icon="idCard" label="Drivers" />
+          <NavItem to={link('trucks')} icon="truck" label="Trucks" />
+          <NavItem to="/carriers" icon="building" label="Carriers" />
           {can(s.role, 'people') && (
-            <NavItem to="/employees" icon="👥" label="Employees" />
+            <NavItem to="/employees" icon="users" label="Employees" />
           )}
+
+          <NavItem to="/departments" icon="folder" label="Departments" />
+          {can(s.role, 'admin') && <NavItem to={link('administration')} icon="cog" label="Administration" />}
+          <NavItem to="/settings" icon="wrench" label="Settings" activeWhen={loc.pathname === '/settings' && loc.hash !== '#screening'} />
+          <NavItem to="/settings#screening" icon="shield" label="Driver Screening" activeWhen={loc.pathname === '/settings' && loc.hash === '#screening'} />
+
           <NavItem to="/departments" icon="🗂" label="Departments" />
           {can(s.role, 'admin') && <NavItem to={link('administration')} icon="⚙" label="Administration" />}
           <NavItem to="/settings" icon="🛠" label="Settings" />
           <NavItem to="/settings#screening" icon="✅" label="Driver Screening" />
+
         </div>
 
         {/* Footer */}
-        <div className="flex items-center gap-1 p-2 border-t border-white/10">
-          <button onClick={() => setPaletteOpen(true)} className="flex-1 grid place-items-center py-2 rounded hover:bg-white/5" title="Search (Ctrl+K)">⌕</button>
-          <button onClick={s.toggleTheme} className="flex-1 grid place-items-center py-2 rounded hover:bg-white/5" title="Toggle theme">{s.theme === 'dark' ? '☀' : '🌙'}</button>
-          <button onClick={() => setCollapsed((c) => !c)} className="flex-1 grid place-items-center py-2 rounded hover:bg-white/5" title="Collapse">{collapsed ? '›' : '‹'}</button>
+        <div className={`flex items-center gap-1 p-2 border-t border-white/10 ${collapsed ? 'flex-col' : ''}`}>
+          <button onClick={() => setPaletteOpen(true)} className="flex-1 w-full grid place-items-center py-2 rounded text-slate-400 hover:text-white hover:bg-white/5" title="Search (Ctrl+K)"><Icon name="search" size={17} /></button>
+          <button onClick={s.toggleTheme} className="flex-1 w-full grid place-items-center py-2 rounded text-slate-400 hover:text-white hover:bg-white/5" title={s.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}><Icon name={s.theme === 'dark' ? 'sun' : 'moon'} size={17} /></button>
+          <button onClick={() => setCollapsed((c) => !c)} className="flex-1 w-full grid place-items-center py-2 rounded text-slate-400 hover:text-white hover:bg-white/5" title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}><Icon name={collapsed ? 'chevronRight' : 'chevronLeft'} size={17} /></button>
         </div>
       </aside>
 
@@ -179,7 +245,7 @@ function CommandPalette({ onClose, onGo, onCreateTask }: { onClose: () => void; 
     <div className="fixed inset-0 bg-black/40 z-50 flex items-start justify-center pt-24" onClick={onClose}>
       <div className="bg-surface border border-line rounded-xl w-[560px] max-w-[90vw] shadow-pop overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 px-4 py-3 border-b border-line">
-          <span className="text-muted">⌕</span>
+          <Icon name="search" size={16} className="text-muted" />
           <input ref={ref} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find or ask — drivers, trucks, candidates, carriers…"
             className="flex-1 bg-transparent outline-none text-sm text-ink" />
           <kbd className="text-[11px] text-muted border border-line rounded px-1.5 py-0.5">ESC</kbd>
