@@ -2,18 +2,24 @@ import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useStore } from '@/store';
 import { PageHeader, Pill, Empty, AssignmentIcon } from '@/ui';
+import TaskModal from '@/components/TaskModal';
+import type { TaskStatus } from '@/types';
 
 const TABS = ['Overview', 'Application', 'PEV', 'Activity', 'Documents', 'Inspections', 'Safety Events'];
+const taskPill = (st: TaskStatus) => (st === 'COMPLETE' ? 'active' : st === 'IN PROGRESS' ? 'pending' : st === 'REVIEW NEEDED' ? 'ready' : 'slate');
 
 export default function DriverRecord() {
   const s = useStore();
   const { driverId } = useParams();
   const [tab, setTab] = useState('Overview');
   const [showAssign, setShowAssign] = useState(false);
+  const [taskOpenId, setTaskOpenId] = useState<string | null>(null);
+  const [creatingTask, setCreatingTask] = useState(false);
   const d = s.allDrivers.find((x) => x.id === driverId);
   if (!d) return <><PageHeader crumbs={[{ label: 'Drivers' }]} /><Empty icon="🚫" title="Driver not found" /></>;
   const truck = s.allTrucks.find((t) => t.id === d.assignedTruckId);
   const carrier = s.carriers.find((c) => c.id === d.carrierId);
+  const driverTasks = s.allTasks.filter((t) => t.driverId === d.id);
 
   return (
     <>
@@ -60,6 +66,31 @@ export default function DriverRecord() {
                     </div>
                   ) : <div className="text-[13px] text-muted">No truck assigned. Pick an available truck from {carrier?.name ?? 'this carrier'}.</div>}
                 </div>
+
+                {/* Tasks linked to this driver — create one here and it's pre-linked to the driver + carrier. */}
+                <div className="card p-5">
+                  <div className="flex items-center mb-3">
+                    <span className="text-base font-bold text-ink">Tasks for this driver</span>
+                    <span className="ml-2 text-[11px] font-bold bg-bg border border-line rounded-full px-2 text-muted">{driverTasks.length}</span>
+                    <button onClick={() => setCreatingTask(true)} className="ml-auto btn-primary py-1.5 text-[12px]">＋ New Task</button>
+                  </div>
+                  {driverTasks.length === 0 ? (
+                    <div className="text-[13px] text-muted">No tasks yet. New tasks are linked to {d.name} and {carrier?.name ?? 'their carrier'} automatically.</div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {driverTasks.map((t) => (
+                        <button key={t.id} onClick={() => setTaskOpenId(t.id)}
+                          className="w-full text-left p-2.5 rounded-lg border border-line hover:border-primary transition flex items-center gap-2.5">
+                          <Pill kind={taskPill(t.status)}>{t.status}</Pill>
+                          <span className="flex-1 text-[13px] font-medium text-ink truncate">{t.title}</span>
+                          {t.assignee && <span className="text-[11px] text-muted">{t.assignee}</span>}
+                          {t.due && <span className="text-[11px] text-muted">{new Date(t.due).toLocaleDateString()}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <Card title="Dispatch & Team" rows={[['Dispatcher', d.dispatcher ?? '—'], ['Team Driver', d.team ? 'Yes' : 'No']]} />
               </div>
             ) : <Empty icon="📄" title={`${tab} tab`} sub="// TODO: connect to API" />}
@@ -96,6 +127,8 @@ export default function DriverRecord() {
       </div>
 
       {showAssign && <AssignTruck onClose={() => setShowAssign(false)} driverId={d.id} carrierId={d.carrierId} />}
+      {creatingTask && <TaskModal createSeed={{ driverId: d.id, carrierId: d.carrierId, assignee: s.currentUser, title: `Follow up — ${d.name}` }} onClose={() => setCreatingTask(false)} />}
+      {taskOpenId && <TaskModal taskId={taskOpenId} onClose={() => setTaskOpenId(null)} />}
     </>
   );
 }

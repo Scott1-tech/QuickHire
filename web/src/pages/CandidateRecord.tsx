@@ -5,6 +5,7 @@ import { PageHeader, Pill, Empty, timeAgo, AssignmentIcon } from '@/ui';
 import { DOC_TYPES_MAIN } from '@/data/mock';
 import { type ChecklistStep, type Stage } from '@/types';
 import CandidateScreening from '@/components/CandidateScreening';
+import TaskModal from '@/components/TaskModal';
 
 const TABS = ['Pipeline', 'Application', 'PEV', 'Documents'];
 const GROUPS: ChecklistStep['group'][] = ['Compliance & Eligibility', 'Risk Screening', 'Health & Safety', 'Employment Setup'];
@@ -57,6 +58,7 @@ export default function CandidateRecord() {
   const [showEdit, setShowEdit] = useState(false);
   const [showScreen, setShowScreen] = useState(false);
   const [action, setAction] = useState<ActionKind | null>(null);
+  const [creatingTask, setCreatingTask] = useState(false);
   const [activity, setActivity] = useState<Activity[]>(INITIAL_ACTIVITY);
   const [autoAdvance, setAutoAdvance] = useState(true);
   const [activityFilter, setActivityFilter] = useState<'all' | ActionKind>('all');
@@ -153,7 +155,7 @@ export default function CandidateRecord() {
             <div className="flex gap-1 justify-between">
               {ACTIONS.map((a) => (
                 <div key={a.key} className="relative group flex flex-col items-center gap-1">
-                  <button onClick={() => setAction(a.key)}
+                  <button onClick={() => (a.key === 'Task' ? setCreatingTask(true) : setAction(a.key))}
                     className="w-10 h-10 rounded-full border border-line bg-surface grid place-items-center text-[16px] hover:bg-primary-light hover:border-primary hover:-translate-y-0.5 active:scale-95 transition-all">
                     <span>{a.icon}</span>
                   </button>
@@ -321,6 +323,7 @@ export default function CandidateRecord() {
 
       {showTruck && <SelectTruck carrierId={c.carrierId} onClose={() => setShowTruck(false)} onPick={(tid) => { s.assignTruck(c.id, tid); s.moveCandidate(c.id, lastStage); addActivity('Stage', `Moved to ${lastStage} and truck assigned.`); setShowTruck(false); }} />}
       {action && <ActionModal kind={action} candidate={c} recruiter={recruiter} onClose={() => setAction(null)} onLog={addActivity} />}
+      {creatingTask && <TaskModal createSeed={{ carrierId: c.carrierId, assignee: recruiter, title: `Hiring — ${c.name}` }} onClose={() => setCreatingTask(false)} />}
       {showEdit && <EditCandidate name={c.name} email={c.email} phone={c.phone ?? ''} onClose={() => setShowEdit(false)} />}
     </>
   );
