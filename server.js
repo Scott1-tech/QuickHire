@@ -1354,6 +1354,50 @@ function upsertPortfolio(p) {
   return p;
 }
 function findPortfolio(id) { return readPortfolios().find((p) => p.id === id); }
+// Append an immutable audit entry to a portfolio (the compliance trail).
+function auditLog(p, event, detail, actor = 'Anna') {
+  (p.audit ||= []).push({ at: new Date().toISOString(), actor, event, detail: detail || '' });
+}
+
+// Printable compliance packet (self-contained HTML, no external assets).
+function renderPacketHtml(k, id) {
+  const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const row = (label, val) => `<tr><th>${esc(label)}</th><td>${esc(val)}</td></tr>`;
+  const d = k.driver || {};
+  const cmp = k.compliance;
+  const cats = cmp?.categories?.map((c) => `<li><b>${esc(c.key)}:</b> ${c.pass ? '✓' : '✗'} ${esc(c.reason)}</li>`).join('') || '<li>No compliance check on file.</li>';
+  const audit = (k.auditTrail || []).map((a) => `<tr><td>${esc(new Date(a.at).toLocaleString())}</td><td>${esc(a.actor)}</td><td>${esc(a.event)}</td><td>${esc(a.detail)}</td></tr>`).join('') || '<tr><td colspan="4">No events.</td></tr>';
+  const src = (k.complianceSources || []).map((s) => `${esc(s.type)} (${s.simulated ? 'simulated' : 'live'})`).join(', ') || '—';
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Compliance Packet — ${esc(d.name || id)}</title>
+<style>body{font-family:Inter,Arial,sans-serif;color:#111;max-width:820px;margin:24px auto;padding:0 20px;line-height:1.5}
+h1{font-size:20px;margin:0} h2{font-size:14px;text-transform:uppercase;color:#666;border-bottom:1px solid #eee;padding-bottom:4px;margin-top:28px}
+table{border-collapse:collapse;width:100%;font-size:13px} th{text-align:left;width:200px;color:#555;vertical-align:top;padding:4px 8px}
+td{padding:4px 8px} .meta{color:#888;font-size:12px} .verdict{display:inline-block;padding:2px 10px;border-radius:999px;font-weight:700;font-size:12px}
+.approve{background:#dcfce7;color:#16a34a}.reject{background:#fee2e2;color:#dc2626}.review{background:#fef3c7;color:#b45309}
+.audit td,.audit th{border-bottom:1px solid #f0f0f0;font-size:12px} ul{margin:6px 0;padding-left:18px} @media print{body{margin:0}}</style></head>
+<body>
+<h1>Driver Compliance Packet</h1>
+<div class="meta">${esc(k.company)} · Generated ${esc(new Date(k.generatedAt).toLocaleString())} · Portfolio ${esc(id)}</div>
+
+<h2>Driver</h2>
+<table>${row('Name', d.name)}${row('Age', d.age)}${row('CDL', d.cdl ? `Class ${d.cdl.class || '—'}, ${d.cdl.experienceYears ?? '—'} yrs, endorsements ${(d.cdl.endorsements || []).join(', ') || 'none'}` : '—')}${row('MVR', d.mvr ? `${d.mvr.movingViolations ?? '—'} viol, ${d.mvr.accidents ?? '—'} acc, ${d.mvr.dui ?? '—'} DUI` : '—')}${row('PSP', d.psp ? `${d.psp.crashes ?? '—'} crashes, ${d.psp.oosInspections ?? '—'} OOS` : '—')}</table>
+
+<h2>Selected Carrier</h2>
+<table>${row('Carrier', k.selectedCarrier?.carrierName || 'Not selected')}${row('Fit score', k.selectedCarrier ? k.selectedCarrier.fitScore + '%' : '—')}${row('Selected by', k.decision?.carrierSelectedBy || '—')}</table>
+
+<h2>Consent</h2>
+<table>${row('Authorized', k.consent ? ['mvr', 'psp', 'clearinghouse'].filter((t) => k.consent[t]).join(', ').toUpperCase() || 'none' : 'none on file')}${row('Signed by', k.consent?.by || '—')}${row('Signed at', k.consent?.signedAt || k.consent?.capturedAt || '—')}</table>
+
+<h2>Compliance Verdict</h2>
+${cmp ? `<p><span class="verdict ${esc(cmp.flag)}">${esc(cmp.flag.toUpperCase())}</span> &nbsp;<span class="meta">sources: ${src} · checked ${esc(new Date(cmp.checkedAt).toLocaleString())}</span></p><p>${esc(cmp.summary)}</p><ul>${cats}</ul>` : '<p class="meta">No compliance check on file.</p>'}
+
+<h2>Recruiter Decision</h2>
+<table>${row('Status', (k.decision?.status || 'pending').toUpperCase())}${row('Decided by', k.decision?.decidedBy || '—')}${row('Decided at', k.decision?.decidedAt || '—')}${row('Reason', k.decision?.reason || '—')}</table>
+
+<h2>Audit Trail</h2>
+<table class="audit"><tr><th>When</th><th>Actor</th><th>Event</th><th>Detail</th></tr>${audit}</table>
+</body></html>`;
+}
 function portfolioSummary(p) {
   // When no carrier is selected yet, surface how many Anna recommends.
   const eligibleCount = (p.recommendations || []).filter((r) => r.status === 'ELIGIBLE').length;
@@ -1474,6 +1518,9 @@ app.post('/api/anna/leads', requireAdmin, async (req, res) => {
       const consentInput = req.body?.consent || lead;
       const consent = anna.normalizeConsent(consentInput);
       if (consent.mvr || consent.psp || consent.clearinghouse) result.portfolio.consent = consent;
+      const elig = result.match.summary?.eligible ?? 0;
+      auditLog(result.portfolio, 'lead_received', `Lead intake (source: ${result.source}). Anna ranked ${result.portfolio.recommendations?.length || 0} carriers; ${elig} eligible.`);
+      if (consent.mvr || consent.psp || consent.clearinghouse) auditLog(result.portfolio, 'consent_intake', `Consent captured at intake for ${['mvr', 'psp', 'clearinghouse'].filter((t) => consent[t]).join(', ')}.`, 'Driver');
       upsertPortfolio(result.portfolio);
     }
     res.json({ profile: result.profile, match: result.match, source: result.source, portfolio: result.portfolio || null });
@@ -1499,6 +1546,33 @@ app.get('/api/anna/portfolios/:id', requireAdmin, (req, res) => {
   res.json(p);
 });
 
+// Compliance packet — a complete, auditable record for a driver. JSON by
+// default; ?format=html returns a printable document for the file/audit.
+app.get('/api/anna/portfolios/:id/packet', requireAdmin, (req, res) => {
+  const p = findPortfolio(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  const packet = {
+    generatedAt: new Date().toISOString(),
+    company: COMPANY_NAME,
+    driver: p.driver,
+    selectedCarrier: p.carrier,
+    recommendations: p.recommendations,
+    consent: p.consent || null,
+    complianceSources: p.complianceSources || null,
+    compliance: p.compliance || null,
+    decision: {
+      status: p.review?.status, decidedBy: p.review?.decidedBy, decidedAt: p.review?.decidedAt,
+      reason: p.review?.decisionReason, carrierSelectedBy: p.review?.carrierSelectedBy,
+    },
+    auditTrail: p.audit || [],
+  };
+  if ((req.query.format || '') === 'html') {
+    res.type('html').send(renderPacketHtml(packet, p.id));
+  } else {
+    res.json(packet);
+  }
+});
+
 // Recruiter picks the best-fit carrier from Anna's ranked recommendations.
 // Anna only recommends; a human chooses and advances.
 app.post('/api/anna/portfolios/:id/select-carrier', requireAdmin, (req, res) => {
@@ -1507,7 +1581,9 @@ app.post('/api/anna/portfolios/:id/select-carrier', requireAdmin, (req, res) => 
   const { carrierId, by } = req.body || {};
   if (!carrierId) return res.status(400).json({ error: 'carrierId is required.' });
   try {
-    anna.selectCarrier(p, carrierId, by || p.review?.assignedRecruiter || 'Recruiter');
+    const who = by || p.review?.assignedRecruiter || 'Recruiter';
+    anna.selectCarrier(p, carrierId, who);
+    auditLog(p, 'carrier_selected', `Carrier "${p.carrier.carrierName}" selected (${p.carrier.fitScore}% fit) from Anna's ranked list.`, who);
     upsertPortfolio(p);
     res.json({ ok: true, carrier: p.carrier, review: p.review });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -1522,6 +1598,8 @@ app.post('/api/anna/portfolios/:id/consent', requireAdmin, (req, res) => {
   consent.capturedAt = new Date().toISOString();
   consent.ip = req.ip;
   p.consent = consent;
+  const types = ['mvr', 'psp', 'clearinghouse'].filter((t) => consent[t]);
+  auditLog(p, 'consent_recorded', `Driver consent recorded for ${types.join(', ') || 'none'}${consent.by ? ` (signed by ${consent.by})` : ''}.`, req.body?.by || 'Recruiter');
   upsertPortfolio(p);
   res.json({ ok: true, consent });
 });
@@ -1554,6 +1632,8 @@ app.post('/api/anna/portfolios/:id/compliance', requireAdmin, async (req, res) =
       opts: { ...annaOpts(), narrate: Boolean(ANTHROPIC_API_KEY) },
     });
     p.compliance = compliance;
+    const srcLabel = (p.complianceSources || []).map((sx) => `${sx.type}:${sx.simulated ? 'sim' : 'live'}`).join(', ');
+    auditLog(p, 'compliance_check', `Compliance ${req.body?.pull ? `pulled (${srcLabel || 'no sources'})` : 'evaluated from entered records'} for ${compliance.carrierName} → verdict: ${compliance.flag.toUpperCase()}.`, req.body?.pull ? 'Anna' : 'Recruiter');
     // Official pulled records supersede self-reported data so any later re-match
     // reflects reality (e.g. a DUI found on the MVR follows the driver).
     p.driver = anna.mergeRecords(p.driver, records);
@@ -1571,7 +1651,9 @@ app.post('/api/anna/portfolios/:id/decision', requireAdmin, async (req, res) => 
   if (!p) return res.status(404).json({ error: 'Not found' });
   const { decision, reason, by } = req.body || {};
   if (!['approved', 'rejected'].includes(decision)) return res.status(400).json({ error: 'decision must be "approved" or "rejected".' });
-  p.review = { ...p.review, status: decision, decidedBy: by || 'Recruiter', decidedAt: new Date().toISOString(), decisionReason: reason || '' };
+  const who = by || p.review?.assignedRecruiter || 'Recruiter';
+  p.review = { ...p.review, status: decision, decidedBy: who, decidedAt: new Date().toISOString(), decisionReason: reason || '' };
+  auditLog(p, decision === 'approved' ? 'approved' : 'rejected', `${decision === 'approved' ? 'Approved & advanced' : 'Rejected'}${reason ? ` — ${reason}` : ''}.`, who);
   upsertPortfolio(p);
   // On rejection, offer re-match suggestions to other carriers.
   let rematch = null;
