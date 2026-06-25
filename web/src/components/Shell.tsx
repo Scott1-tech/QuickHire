@@ -25,7 +25,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const nav = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [roleOpen, setRoleOpen] = useState(false);
-  const [carrierOpen, setCarrierOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [quickTask, setQuickTask] = useState(false);
 
@@ -37,6 +36,14 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, []);
+
+  // The carrier you're working in follows the URL — there is no manual carrier
+  // switch. Opening /carriers/:id/* scopes drivers, trucks, hiring, etc. to that
+  // carrier; you change carriers by navigating into one from the Carriers list.
+  const routeCarrierId = loc.pathname.match(/^\/carriers\/(?!profile(?:\/|$))([^/]+)/)?.[1];
+  useEffect(() => {
+    if (routeCarrierId && routeCarrierId !== s.currentCarrierId) s.setCurrentCarrierId(routeCarrierId);
+  }, [routeCarrierId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cid = s.currentCarrierId;
   const link = (p: string) => `/carriers/${cid}/${p}`;
@@ -60,7 +67,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <div className="flex-1 overflow-y-auto scrollbar-thin p-3">
           {/* User switcher */}
           <div className="relative">
-            <button onClick={() => { setRoleOpen((o) => !o); setCarrierOpen(false); }}
+            <button onClick={() => setRoleOpen((o) => !o)}
               className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5">
               <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-purple grid place-items-center text-sm font-bold text-white">{s.role[0]}</div>
               {!collapsed && <div className="text-left flex-1 min-w-0">
@@ -94,29 +101,18 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             {!collapsed && <span className="flex-1">Anna — AI Agent</span>}
           </a>
 
-          {/* Carrier badge */}
-          <div className="relative mt-3">
-            <button onClick={() => { setCarrierOpen((o) => !o); setRoleOpen(false); }}
-              className="w-full flex items-center gap-2 p-2 rounded-lg bg-white/5 hover:bg-white/10">
-              <span className="w-2 h-2 rounded-full bg-success" />
-              {!collapsed && <div className="text-left flex-1 min-w-0">
-                <div className="text-[12px] font-semibold truncate">{s.currentCarrier.name}</div>
-                <div className="text-[10px] text-slate-400">DOT {s.currentCarrier.dot}</div>
-              </div>}
-              {!collapsed && <span className="text-slate-500">▾</span>}
-            </button>
-            {carrierOpen && (
-              <div className="absolute left-0 right-0 mt-1 bg-[#1e293b] border border-white/10 rounded-lg p-1 z-20 shadow-pop">
-                {s.carriers.map((c) => (
-                  <button key={c.id} onClick={() => { s.setCurrentCarrierId(c.id); setCarrierOpen(false); }}
-                    className={`w-full text-left px-3 py-1.5 rounded text-[12px] ${c.id === cid ? 'text-primary' : 'text-slate-300 hover:bg-white/5'}`}>
-                    {c.name}
-                  </button>
-                ))}
-                <Link to="/carriers" onClick={() => setCarrierOpen(false)} className="block px-3 py-1.5 rounded text-[12px] text-slate-400 border-t border-white/10 mt-1">＋ Manage carriers</Link>
-              </div>
-            )}
-          </div>
+          {/* Carrier-in-context chip — read-only. Shows which carrier the
+              Manage section is scoped to; click to open that carrier, or use the
+              Carriers list to work in a different one. No live switching. */}
+          <Link to={cid ? `/carriers/${cid}` : '/carriers'} title="Carrier in context — open Carriers to switch"
+            className="mt-3 w-full flex items-center gap-2 p-2 rounded-lg bg-white/5 hover:bg-white/10">
+            <span className="w-2 h-2 rounded-full bg-success flex-shrink-0" />
+            {!collapsed && <div className="text-left flex-1 min-w-0">
+              <div className="text-[12px] font-semibold truncate">{s.currentCarrier.name}</div>
+              <div className="text-[10px] text-slate-400">DOT {s.currentCarrier.dot}</div>
+            </div>}
+            {!collapsed && <span className="text-slate-500 text-[10px]">↗</span>}
+          </Link>
 
           <SectionLabel>Manage</SectionLabel>
           <NavItem to={link('hiring')} icon="🧭" label="Hiring" />
@@ -130,16 +126,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           {can(s.role, 'admin') && <NavItem to={link('administration')} icon="⚙" label="Administration" />}
           <NavItem to="/settings" icon="🛠" label="Settings" />
           <NavItem to="/settings#screening" icon="✅" label="Driver Screening" />
-
-          {can(s.role, 'multicarrier') && <>
-            <SectionLabel>My Carriers</SectionLabel>
-            {s.carriers.map((c) => (
-              <button key={c.id} onClick={() => s.setCurrentCarrierId(c.id)}
-                className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-[12px] ${c.id === cid ? 'text-primary' : 'text-slate-400 hover:bg-white/5'}`}>
-                <span>●</span> {!collapsed && <span className="truncate">{c.name}</span>}
-              </button>
-            ))}
-          </>}
         </div>
 
         {/* Footer */}
@@ -177,11 +163,14 @@ function CommandPalette({ onClose, onGo, onCreateTask }: { onClose: () => void; 
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => { ref.current?.focus(); }, []);
 
+  const carrierName = (id: string) => s.carriers.find((c) => c.id === id)?.name ?? '';
   const ql = q.toLowerCase().trim();
+  // Search spans every carrier (there is no single active carrier to scope to);
+  // each hit shows its carrier so you know where you're navigating.
   const hits = ql ? [
-    ...s.drivers.filter((d) => d.name.toLowerCase().includes(ql)).map((d) => ({ type: 'Driver', name: d.name, sub: d.license, to: `/carriers/${d.carrierId}/drivers/${d.id}` })),
-    ...s.candidates.filter((c) => c.name.toLowerCase().includes(ql)).map((c) => ({ type: 'Candidate', name: c.name, sub: c.email, to: `/carriers/${c.carrierId}/hiring/${c.id}` })),
-    ...s.trucks.filter((t) => t.unit.includes(ql) || t.vin.toLowerCase().includes(ql)).map((t) => ({ type: 'Truck', name: `Unit #${t.unit}`, sub: t.vin, to: `/carriers/${t.carrierId}/trucks/${t.id}` })),
+    ...s.allDrivers.filter((d) => d.name.toLowerCase().includes(ql)).map((d) => ({ type: 'Driver', name: d.name, sub: carrierName(d.carrierId), to: `/carriers/${d.carrierId}/drivers/${d.id}` })),
+    ...s.allCandidates.filter((c) => c.name.toLowerCase().includes(ql)).map((c) => ({ type: 'Candidate', name: c.name, sub: carrierName(c.carrierId), to: `/carriers/${c.carrierId}/hiring/${c.id}` })),
+    ...s.allTrucks.filter((t) => t.unit.includes(ql) || t.vin.toLowerCase().includes(ql)).map((t) => ({ type: 'Truck', name: `Unit #${t.unit}`, sub: carrierName(t.carrierId), to: `/carriers/${t.carrierId}/trucks/${t.id}` })),
     ...s.carriers.filter((c) => c.name.toLowerCase().includes(ql)).map((c) => ({ type: 'Carrier', name: c.name, sub: `DOT ${c.dot}`, to: `/carriers/${c.id}` })),
   ].slice(0, 8) : [];
 

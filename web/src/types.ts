@@ -129,6 +129,9 @@ export interface TaskActivityEvent { id: string; text: string; at: string; autho
 export interface Task {
   id: string;
   carrierId: string;
+  /** Optional driver this task is "for" — lets the task bar show who the
+   *  driver is working with (carrier + vehicle) and assign in one step. */
+  driverId?: string;
   title: string;
   status: TaskStatus;
   assignee?: string;

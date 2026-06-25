@@ -51,12 +51,12 @@ function Sel({ value, onChange, children }: { value: string; onChange: (v: strin
 function Inp({ value, onChange, placeholder, type = 'text' }: { value: string; onChange: (v: string) => void; placeholder?: string; type?: string }) {
   return <input className="input" value={value} type={type} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />;
 }
-// Carrier picker — only shown to Super Admin (who manages multiple carriers).
+// Carrier picker — always shown. Every record is filed under a carrier you pick
+// here (we work with many carriers and there is no single active one to assume).
 function CarrierPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const s = useStore();
-  if (s.role !== 'Super Admin') return null;
   return (
-    <PropRow icon="building" label="Carrier">
+    <PropRow icon="building" label="Carrier *">
       <Sel value={value} onChange={onChange}>
         {s.carriers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
       </Sel>
