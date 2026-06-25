@@ -76,6 +76,7 @@ function normalize(partial) {
     signer: partial.signer,
     recipients: partial.recipients || null,
     placedFields: partial.placedFields || [],
+    uploadedPdf: Boolean(partial.uploadedPdf),
     documentHtml: partial.documentHtml || null,
     createdAt: partial.createdAt || nowIso(),
     sentAt: partial.sentAt || nowIso(),
@@ -111,7 +112,7 @@ function pushStatus(record, status, extra = {}) {
  * @param {string} [p.message]
  * @returns {Promise<object>} normalized envelope record.
  */
-export async function send({ candidate, docType, fields = {}, signer, embedded: useEmbedded = false, returnUrl, emailSubject, message, recipients, placedFields = [] }) {
+export async function send({ candidate, docType, fields = {}, signer, embedded: useEmbedded = false, returnUrl, emailSubject, message, recipients, placedFields = [], uploadedPdf = null }) {
   if (!DOC_TEMPLATES[docType]) throw new Error(`Unknown document type "${docType}".`);
   const who = {
     name: signer?.name || candidate?.name,
@@ -126,7 +127,17 @@ export async function send({ candidate, docType, fields = {}, signer, embedded: 
   // prefilled tabs supply the values) and values-inline for storage/preview.
   const liveHtml = buildDocumentHtml(docType, candidate || who, fields, { simulated: false });
   const previewHtml = buildDocumentHtml(docType, candidate || who, fields, { simulated: true });
-  const documentName = `${label}.pdf`;
+  // An uploaded PDF (sent through the envelope builder) replaces the generated
+  // contract: it has no auto-fill anchors, so only the sender's placed fields
+  // become tabs.
+  const usePdf = Boolean(uploadedPdf?.base64);
+  const documentName = usePdf ? (uploadedPdf.name || 'Document.pdf') : `${label}.pdf`;
+  const document = usePdf
+    ? { documentBase64: uploadedPdf.base64, name: documentName, fileExtension: 'pdf', documentId: '1' }
+    : htmlDocument({ name: documentName, html: liveHtml, documentId: '1' });
+  const tabs = usePdf
+    ? placedFieldsToTabs(placedFields)
+    : mergeTabs(buildSignerTabs(profile), placedFieldsToTabs(placedFields));
   // Captive signers are keyed by a stable clientUserId so we can later open their view.
   const clientUserId = useEmbedded ? (candidate?.id || crypto.createHash('sha1').update(who.email).digest('hex').slice(0, 16)) : undefined;
 
@@ -145,7 +156,7 @@ export async function send({ candidate, docType, fields = {}, signer, embedded: 
       emailSubject: subject,
       emailBlurb: message || undefined,
       status: 'sent',
-      documents: [htmlDocument({ name: documentName, html: liveHtml, documentId: '1' })],
+      documents: [document],
       recipients: {
         signers: [{
           email: who.email,
@@ -153,8 +164,7 @@ export async function send({ candidate, docType, fields = {}, signer, embedded: 
           recipientId: '1',
           routingOrder: '1',
           ...(clientUserId ? { clientUserId } : {}),
-          // Anchored auto-fill tabs + any fields the sender placed in the builder.
-          tabs: mergeTabs(buildSignerTabs(profile), placedFieldsToTabs(placedFields)),
+          tabs,
         }],
       },
       ...(config.brandId ? { brandId: config.brandId } : {}),
@@ -166,8 +176,8 @@ export async function send({ candidate, docType, fields = {}, signer, embedded: 
       simulated: false,
       docType, documentName, emailSubject: subject, message,
       embedded: useEmbedded, returnUrl,
-      signer: signerRecord, recipients, placedFields,
-      documentHtml: previewHtml,
+      signer: signerRecord, recipients, placedFields, uploadedPdf: usePdf,
+      documentHtml: usePdf ? null : previewHtml,
     });
   }
 
@@ -178,8 +188,8 @@ export async function send({ candidate, docType, fields = {}, signer, embedded: 
     simulated: true,
     docType, documentName, emailSubject: subject, message,
     embedded: useEmbedded, returnUrl,
-    signer: signerRecord, recipients, placedFields,
-    documentHtml: previewHtml,
+    signer: signerRecord, recipients, placedFields, uploadedPdf: usePdf,
+    documentHtml: usePdf ? null : previewHtml,
   });
 }
 

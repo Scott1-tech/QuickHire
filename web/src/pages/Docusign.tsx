@@ -23,6 +23,8 @@ export default function Docusign() {
   const [candidates, setCandidates] = useState<CandidateLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [send, setSend] = useState<{ candidateId?: string; docType?: string } | null>(null);
+  const [agrFolder, setAgrFolder] = useState<Folder>('inbox');
+  const goAgreements = (f: Folder) => { setAgrFolder(f); setView('agreements'); };
 
   const docTypes = status?.documents ?? [];
   const userName = (s.currentUser || 'QuickHire Admin').toUpperCase();
@@ -72,8 +74,8 @@ export default function Docusign() {
           <>
             {view === 'home' && <Home userName={userName} stats={stats} docTypes={docTypes} envelopes={envelopes}
               onStart={() => setSend({})} onUse={(t) => setSend({ docType: t })} onTemplates={() => setView('templates')}
-              onCopy={(e) => setSend({ candidateId: e.candidateId, docType: e.docType })} />}
-            {view === 'agreements' && <Agreements envelopes={envelopes} onReload={reload}
+              onCopy={(e) => setSend({ candidateId: e.candidateId, docType: e.docType })} onStat={goAgreements} />}
+            {view === 'agreements' && <Agreements envelopes={envelopes} onReload={reload} initialFolder={agrFolder}
               onCopy={(e) => setSend({ candidateId: e.candidateId, docType: e.docType })} />}
             {view === 'templates' && <Templates docTypes={docTypes} onUse={(t) => setSend({ docType: t })} />}
             {view === 'reports' && <Reports envelopes={envelopes} />}
@@ -91,15 +93,18 @@ export default function Docusign() {
 }
 
 // ── Home ─────────────────────────────────────────────────────────────────────
-function Home({ userName, stats, docTypes, envelopes, onStart, onUse, onTemplates, onCopy }: {
+function Home({ userName, stats, docTypes, envelopes, onStart, onUse, onTemplates, onCopy, onStat }: {
   userName: string; stats: { action: number; waiting: number; expiring: number; completed: number };
   docTypes: DocType[]; envelopes: Envelope[];
   onStart: () => void; onUse: (t: string) => void; onTemplates: () => void; onCopy: (e: Envelope) => void;
+  onStat: (folder: Folder) => void;
 }) {
   const favorites = FAVORITE_TYPES.map((t) => docTypes.find((d) => d.type === t)).filter(Boolean).slice(0, 3) as DocType[];
   const recent = [...envelopes].slice(0, 6);
-  const stat = (n: number, l: string) => (
-    <div><div className="text-4xl font-light leading-none">{n}</div><div className="text-[13px] mt-2 opacity-90">{l}</div></div>
+  const stat = (n: number, l: string, folder: Folder) => (
+    <button onClick={() => onStat(folder)} className="text-left hover:opacity-80 transition cursor-pointer">
+      <div className="text-4xl font-light leading-none">{n}</div><div className="text-[13px] mt-2 opacity-90 underline-offset-2 hover:underline">{l}</div>
+    </button>
   );
   return (
     <div>
@@ -116,10 +121,10 @@ function Home({ userName, stats, docTypes, envelopes, onStart, onUse, onTemplate
           <div className="flex-1" />
           <div className="text-[12px] opacity-90 self-start">Last 6 Months</div>
           <div className="flex items-end gap-12">
-            {stat(stats.action, 'Action Required')}
-            {stat(stats.waiting, 'Waiting for Others')}
-            {stat(stats.expiring, 'Expiring Soon')}
-            {stat(stats.completed, 'Completed')}
+            {stat(stats.action, 'Action Required', 'action')}
+            {stat(stats.waiting, 'Waiting for Others', 'sent')}
+            {stat(stats.expiring, 'Expiring Soon', 'inbox')}
+            {stat(stats.completed, 'Completed', 'completed')}
           </div>
         </div>
       </div>
@@ -183,8 +188,8 @@ function Home({ userName, stats, docTypes, envelopes, onStart, onUse, onTemplate
 }
 
 // ── Agreements (Inbox) ───────────────────────────────────────────────────────
-function Agreements({ envelopes, onReload, onCopy }: { envelopes: Envelope[]; onReload: () => void; onCopy: (e: Envelope) => void }) {
-  const [folder, setFolder] = useState<Folder>('inbox');
+function Agreements({ envelopes, onReload, onCopy, initialFolder }: { envelopes: Envelope[]; onReload: () => void; onCopy: (e: Envelope) => void; initialFolder?: Folder }) {
+  const [folder, setFolder] = useState<Folder>(initialFolder ?? 'inbox');
   const [busy, setBusy] = useState<string | null>(null);
 
   const counts = {
