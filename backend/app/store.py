@@ -12,7 +12,7 @@ from sqlalchemy import delete, select
 
 from .db import async_session
 from .definitions import empty_checklist, now_iso
-from .models import Candidate, Carrier, OptOut, Portfolio
+from .models import KV, Candidate, Carrier, OptOut, Portfolio
 
 
 def new_uuid() -> str:
@@ -194,3 +194,28 @@ async def upsert_portfolio(p: dict) -> dict:
             s.add(Portfolio(id=p["id"], data=p))
         await s.commit()
     return p
+
+
+# ── Key/value store (small server-side settings, e.g. Anna's API key) ────────
+async def kv_get(key: str) -> str | None:
+    async with async_session() as s:
+        row = await s.get(KV, key)
+    return row.value if row else None
+
+
+async def kv_set(key: str, value: str) -> None:
+    async with async_session() as s:
+        row = await s.get(KV, key)
+        if row:
+            row.value = value
+        else:
+            s.add(KV(key=key, value=value))
+        await s.commit()
+
+
+async def kv_delete(key: str) -> None:
+    async with async_session() as s:
+        row = await s.get(KV, key)
+        if row:
+            await s.delete(row)
+            await s.commit()

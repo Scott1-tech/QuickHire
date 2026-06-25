@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Request
 
 from .. import anna, config
+from ..anna_settings import effective_key
 from ..definitions import CHECKLIST_STEPS, MAIN_DOCS, OTHER_DOCS
 from ..docusign import service as docusign
 
@@ -18,7 +19,7 @@ async def get_config():
         "otherDocs": OTHER_DOCS,
         "hasMolly": bool(config.ANTHROPIC_API_KEY),
         "hasAnna": True,
-        "annaAi": bool(config.ANTHROPIC_API_KEY),
+        "annaAi": bool(await effective_key()),
         "annaIntegrations": anna.integration_status(),
         "hasTelegram": bool(config.TELEGRAM_BOT_TOKEN and config.TELEGRAM_CHAT_ID),
         "hasEmail": config.email_enabled(),
