@@ -30,12 +30,14 @@ const DB_FILE = path.join(DATA_DIR, 'candidates.json');
 const OPTOUT_FILE = path.join(DATA_DIR, 'optouts.json');
 const CARRIER_DB_FILE = path.join(DATA_DIR, 'carriers.json');
 const PORTFOLIO_FILE = path.join(DATA_DIR, 'anna-portfolios.json');
+const ANNA_SETTINGS_FILE = path.join(DATA_DIR, 'anna-settings.json');
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '[]');
 if (!fs.existsSync(OPTOUT_FILE)) fs.writeFileSync(OPTOUT_FILE, '[]');
 if (!fs.existsSync(CARRIER_DB_FILE)) fs.writeFileSync(CARRIER_DB_FILE, '[]');
 if (!fs.existsSync(PORTFOLIO_FILE)) fs.writeFileSync(PORTFOLIO_FILE, '[]');
+if (!fs.existsSync(ANNA_SETTINGS_FILE)) fs.writeFileSync(ANNA_SETTINGS_FILE, '{}');
 
 // ── SMS opt-out registry (TCPA STOP handling) ────────────────────────────────
 function normPhone(p) {
@@ -805,7 +807,7 @@ app.get('/api/config', (_req, res) => {
     otherDocs: OTHER_DOCS,
     hasMolly: Boolean(ANTHROPIC_API_KEY),
     hasAnna: true,
-    annaAi: Boolean(ANTHROPIC_API_KEY),
+    annaAi: Boolean(annaApiKey()),
     annaIntegrations: anna.integrationStatus(),
     hasTelegram: Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID),
     hasEmail: emailEnabled(),
@@ -1333,7 +1335,14 @@ app.post('/api/carrier-intake/:token', (req, res) => {
 // Standalone module in anna/ wired in here. Anna normalizes a lead, matches it
 // against every carrier, builds a portfolio, and produces a compliance verdict.
 const SPEC_PARSE_VERSION = 1;
-const annaOpts = () => ({ apiKey: ANTHROPIC_API_KEY });
+// Anna's Anthropic key can come from the in-app Settings (stored server-side) or
+// the ANTHROPIC_API_KEY env var. The UI-provided key takes precedence.
+function readAnnaSettings() { try { return JSON.parse(fs.readFileSync(ANNA_SETTINGS_FILE, 'utf8')); } catch { return {}; } }
+function writeAnnaSettings(o) { fs.writeFileSync(ANNA_SETTINGS_FILE, JSON.stringify(o, null, 2)); }
+function annaApiKey() { return readAnnaSettings().anthropicApiKey || ANTHROPIC_API_KEY || ''; }
+function annaKeySource() { return readAnnaSettings().anthropicApiKey ? 'ui' : (ANTHROPIC_API_KEY ? 'env' : null); }
+const maskKey = (k) => (k && k.length > 12 ? `${k.slice(0, 6)}…${k.slice(-4)}` : (k ? '••••' : null));
+const annaOpts = () => ({ apiKey: annaApiKey() });
 
 function readPortfolios() { try { return JSON.parse(fs.readFileSync(PORTFOLIO_FILE, 'utf8')); } catch { return []; } }
 function writePortfolios(rows) { fs.writeFileSync(PORTFOLIO_FILE, JSON.stringify(rows, null, 2)); }
@@ -1376,6 +1385,45 @@ async function annaCarriers() {
   }
   return out;
 }
+
+// ── Anna settings (Anthropic API key) ────────────────────────────────────────
+// The key is stored server-side and never returned to the client (only a masked
+// hint). Lets the team enable real Claude-powered Anna from the app UI.
+app.get('/api/anna/settings', requireAdmin, (_req, res) => {
+  res.json({
+    configured: Boolean(annaApiKey()),
+    source: annaKeySource(),                 // 'ui' | 'env' | null
+    keyHint: maskKey(annaApiKey()),
+    model: anna.MODELS.fast,
+    integrations: anna.integrationStatus(),
+  });
+});
+
+app.post('/api/anna/settings', requireAdmin, (req, res) => {
+  const apiKey = String(req.body?.apiKey || '').trim();
+  if (!apiKey) return res.status(400).json({ error: 'apiKey is required.' });
+  if (!/^sk-/.test(apiKey)) return res.status(400).json({ error: 'That does not look like an Anthropic API key (it should start with "sk-").' });
+  const cur = readAnnaSettings();
+  writeAnnaSettings({ ...cur, anthropicApiKey: apiKey });
+  res.json({ ok: true, configured: true, source: 'ui', keyHint: maskKey(apiKey) });
+});
+
+app.delete('/api/anna/settings', requireAdmin, (_req, res) => {
+  const cur = readAnnaSettings();
+  delete cur.anthropicApiKey;
+  writeAnnaSettings(cur);
+  res.json({ ok: true, configured: Boolean(ANTHROPIC_API_KEY), source: annaKeySource(), keyHint: maskKey(annaApiKey()) });
+});
+
+// Verify the effective key works with a tiny live call.
+app.post('/api/anna/settings/test', requireAdmin, async (req, res) => {
+  const apiKey = String(req.body?.apiKey || '').trim() || annaApiKey();
+  if (!apiKey) return res.status(400).json({ ok: false, error: 'No API key configured.' });
+  try {
+    await anna.callClaude({ apiKey, model: anna.MODELS.fast, maxTokens: 8, messages: [{ role: 'user', content: 'Reply with the word OK.' }] });
+    res.json({ ok: true, message: 'Connection successful — Anna is live.' });
+  } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
+});
 
 // Conversational assistant: answer questions + emit actions (e.g. create_task).
 // Available app-wide via the floating "Ask Anna" panel.
