@@ -3,8 +3,9 @@ import { useLocation } from 'react-router-dom';
 import { useStore } from '@/store';
 import { PageHeader, Pill } from '@/ui';
 import DriverScreening from '@/components/DriverScreening';
+import AnnaSettings from '@/components/AnnaSettings';
 
-const TABS = ['Profile', 'Driver Screening', 'Security', 'Integrations', 'Notifications', 'Appearance'];
+const TABS = ['Profile', 'Anna AI', 'Driver Screening', 'Security', 'Integrations', 'Notifications', 'Appearance'];
 
 export default function Settings() {
   const s = useStore();
@@ -28,6 +29,7 @@ export default function Settings() {
         {tab === 'Driver Screening' && <DriverScreening />}
 
         <div className="max-w-xl">
+          {tab === 'Anna AI' && <AnnaSettings />}
           {tab === 'Profile' && (
             <div className="card p-5">
               <div className="flex items-center gap-4 mb-5">

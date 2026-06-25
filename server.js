@@ -31,12 +31,14 @@ const DB_FILE = path.join(DATA_DIR, 'candidates.json');
 const OPTOUT_FILE = path.join(DATA_DIR, 'optouts.json');
 const CARRIER_DB_FILE = path.join(DATA_DIR, 'carriers.json');
 const PORTFOLIO_FILE = path.join(DATA_DIR, 'anna-portfolios.json');
+const ANNA_SETTINGS_FILE = path.join(DATA_DIR, 'anna-settings.json');
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '[]');
 if (!fs.existsSync(OPTOUT_FILE)) fs.writeFileSync(OPTOUT_FILE, '[]');
 if (!fs.existsSync(CARRIER_DB_FILE)) fs.writeFileSync(CARRIER_DB_FILE, '[]');
 if (!fs.existsSync(PORTFOLIO_FILE)) fs.writeFileSync(PORTFOLIO_FILE, '[]');
+if (!fs.existsSync(ANNA_SETTINGS_FILE)) fs.writeFileSync(ANNA_SETTINGS_FILE, '{}');
 
 // ── SMS opt-out registry (TCPA STOP handling) ────────────────────────────────
 function normPhone(p) {
@@ -807,7 +809,7 @@ app.get('/api/config', (_req, res) => {
     otherDocs: OTHER_DOCS,
     hasMolly: Boolean(ANTHROPIC_API_KEY),
     hasAnna: true,
-    annaAi: Boolean(ANTHROPIC_API_KEY),
+    annaAi: Boolean(annaApiKey()),
     annaIntegrations: anna.integrationStatus(),
     hasTelegram: Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID),
     hasEmail: emailEnabled(),
@@ -1337,7 +1339,14 @@ app.post('/api/carrier-intake/:token', (req, res) => {
 // Standalone module in anna/ wired in here. Anna normalizes a lead, matches it
 // against every carrier, builds a portfolio, and produces a compliance verdict.
 const SPEC_PARSE_VERSION = 1;
-const annaOpts = () => ({ apiKey: ANTHROPIC_API_KEY });
+// Anna's Anthropic key can come from the in-app Settings (stored server-side) or
+// the ANTHROPIC_API_KEY env var. The UI-provided key takes precedence.
+function readAnnaSettings() { try { return JSON.parse(fs.readFileSync(ANNA_SETTINGS_FILE, 'utf8')); } catch { return {}; } }
+function writeAnnaSettings(o) { fs.writeFileSync(ANNA_SETTINGS_FILE, JSON.stringify(o, null, 2)); }
+function annaApiKey() { return readAnnaSettings().anthropicApiKey || ANTHROPIC_API_KEY || ''; }
+function annaKeySource() { return readAnnaSettings().anthropicApiKey ? 'ui' : (ANTHROPIC_API_KEY ? 'env' : null); }
+const maskKey = (k) => (k && k.length > 12 ? `${k.slice(0, 6)}…${k.slice(-4)}` : (k ? '••••' : null));
+const annaOpts = () => ({ apiKey: annaApiKey() });
 
 function readPortfolios() { try { return JSON.parse(fs.readFileSync(PORTFOLIO_FILE, 'utf8')); } catch { return []; } }
 function writePortfolios(rows) { fs.writeFileSync(PORTFOLIO_FILE, JSON.stringify(rows, null, 2)); }
@@ -1349,6 +1358,50 @@ function upsertPortfolio(p) {
   return p;
 }
 function findPortfolio(id) { return readPortfolios().find((p) => p.id === id); }
+// Append an immutable audit entry to a portfolio (the compliance trail).
+function auditLog(p, event, detail, actor = 'Anna') {
+  (p.audit ||= []).push({ at: new Date().toISOString(), actor, event, detail: detail || '' });
+}
+
+// Printable compliance packet (self-contained HTML, no external assets).
+function renderPacketHtml(k, id) {
+  const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const row = (label, val) => `<tr><th>${esc(label)}</th><td>${esc(val)}</td></tr>`;
+  const d = k.driver || {};
+  const cmp = k.compliance;
+  const cats = cmp?.categories?.map((c) => `<li><b>${esc(c.key)}:</b> ${c.pass ? '✓' : '✗'} ${esc(c.reason)}</li>`).join('') || '<li>No compliance check on file.</li>';
+  const audit = (k.auditTrail || []).map((a) => `<tr><td>${esc(new Date(a.at).toLocaleString())}</td><td>${esc(a.actor)}</td><td>${esc(a.event)}</td><td>${esc(a.detail)}</td></tr>`).join('') || '<tr><td colspan="4">No events.</td></tr>';
+  const src = (k.complianceSources || []).map((s) => `${esc(s.type)} (${s.simulated ? 'simulated' : 'live'})`).join(', ') || '—';
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Compliance Packet — ${esc(d.name || id)}</title>
+<style>body{font-family:Inter,Arial,sans-serif;color:#111;max-width:820px;margin:24px auto;padding:0 20px;line-height:1.5}
+h1{font-size:20px;margin:0} h2{font-size:14px;text-transform:uppercase;color:#666;border-bottom:1px solid #eee;padding-bottom:4px;margin-top:28px}
+table{border-collapse:collapse;width:100%;font-size:13px} th{text-align:left;width:200px;color:#555;vertical-align:top;padding:4px 8px}
+td{padding:4px 8px} .meta{color:#888;font-size:12px} .verdict{display:inline-block;padding:2px 10px;border-radius:999px;font-weight:700;font-size:12px}
+.approve{background:#dcfce7;color:#16a34a}.reject{background:#fee2e2;color:#dc2626}.review{background:#fef3c7;color:#b45309}
+.audit td,.audit th{border-bottom:1px solid #f0f0f0;font-size:12px} ul{margin:6px 0;padding-left:18px} @media print{body{margin:0}}</style></head>
+<body>
+<h1>Driver Compliance Packet</h1>
+<div class="meta">${esc(k.company)} · Generated ${esc(new Date(k.generatedAt).toLocaleString())} · Portfolio ${esc(id)}</div>
+
+<h2>Driver</h2>
+<table>${row('Name', d.name)}${row('Age', d.age)}${row('CDL', d.cdl ? `Class ${d.cdl.class || '—'}, ${d.cdl.experienceYears ?? '—'} yrs, endorsements ${(d.cdl.endorsements || []).join(', ') || 'none'}` : '—')}${row('MVR', d.mvr ? `${d.mvr.movingViolations ?? '—'} viol, ${d.mvr.accidents ?? '—'} acc, ${d.mvr.dui ?? '—'} DUI` : '—')}${row('PSP', d.psp ? `${d.psp.crashes ?? '—'} crashes, ${d.psp.oosInspections ?? '—'} OOS` : '—')}</table>
+
+<h2>Selected Carrier</h2>
+<table>${row('Carrier', k.selectedCarrier?.carrierName || 'Not selected')}${row('Fit score', k.selectedCarrier ? k.selectedCarrier.fitScore + '%' : '—')}${row('Selected by', k.decision?.carrierSelectedBy || '—')}</table>
+
+<h2>Consent</h2>
+<table>${row('Authorized', k.consent ? ['mvr', 'psp', 'clearinghouse'].filter((t) => k.consent[t]).join(', ').toUpperCase() || 'none' : 'none on file')}${row('Signed by', k.consent?.by || '—')}${row('Signed at', k.consent?.signedAt || k.consent?.capturedAt || '—')}</table>
+
+<h2>Compliance Verdict</h2>
+${cmp ? `<p><span class="verdict ${esc(cmp.flag)}">${esc(cmp.flag.toUpperCase())}</span> &nbsp;<span class="meta">sources: ${src} · checked ${esc(new Date(cmp.checkedAt).toLocaleString())}</span></p><p>${esc(cmp.summary)}</p><ul>${cats}</ul>` : '<p class="meta">No compliance check on file.</p>'}
+
+<h2>Recruiter Decision</h2>
+<table>${row('Status', (k.decision?.status || 'pending').toUpperCase())}${row('Decided by', k.decision?.decidedBy || '—')}${row('Decided at', k.decision?.decidedAt || '—')}${row('Reason', k.decision?.reason || '—')}</table>
+
+<h2>Audit Trail</h2>
+<table class="audit"><tr><th>When</th><th>Actor</th><th>Event</th><th>Detail</th></tr>${audit}</table>
+</body></html>`;
+}
 function portfolioSummary(p) {
   // When no carrier is selected yet, surface how many Anna recommends.
   const eligibleCount = (p.recommendations || []).filter((r) => r.status === 'ELIGIBLE').length;
@@ -1380,6 +1433,45 @@ async function annaCarriers() {
   }
   return out;
 }
+
+// ── Anna settings (Anthropic API key) ────────────────────────────────────────
+// The key is stored server-side and never returned to the client (only a masked
+// hint). Lets the team enable real Claude-powered Anna from the app UI.
+app.get('/api/anna/settings', requireAdmin, (_req, res) => {
+  res.json({
+    configured: Boolean(annaApiKey()),
+    source: annaKeySource(),                 // 'ui' | 'env' | null
+    keyHint: maskKey(annaApiKey()),
+    model: anna.MODELS.fast,
+    integrations: anna.integrationStatus(),
+  });
+});
+
+app.post('/api/anna/settings', requireAdmin, (req, res) => {
+  const apiKey = String(req.body?.apiKey || '').trim();
+  if (!apiKey) return res.status(400).json({ error: 'apiKey is required.' });
+  if (!/^sk-/.test(apiKey)) return res.status(400).json({ error: 'That does not look like an Anthropic API key (it should start with "sk-").' });
+  const cur = readAnnaSettings();
+  writeAnnaSettings({ ...cur, anthropicApiKey: apiKey });
+  res.json({ ok: true, configured: true, source: 'ui', keyHint: maskKey(apiKey) });
+});
+
+app.delete('/api/anna/settings', requireAdmin, (_req, res) => {
+  const cur = readAnnaSettings();
+  delete cur.anthropicApiKey;
+  writeAnnaSettings(cur);
+  res.json({ ok: true, configured: Boolean(ANTHROPIC_API_KEY), source: annaKeySource(), keyHint: maskKey(annaApiKey()) });
+});
+
+// Verify the effective key works with a tiny live call.
+app.post('/api/anna/settings/test', requireAdmin, async (req, res) => {
+  const apiKey = String(req.body?.apiKey || '').trim() || annaApiKey();
+  if (!apiKey) return res.status(400).json({ ok: false, error: 'No API key configured.' });
+  try {
+    await anna.callClaude({ apiKey, model: anna.MODELS.fast, maxTokens: 8, messages: [{ role: 'user', content: 'Reply with the word OK.' }] });
+    res.json({ ok: true, message: 'Connection successful — Anna is live.' });
+  } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
+});
 
 // Conversational assistant: answer questions + emit actions (e.g. create_task).
 // Available app-wide via the floating "Ask Anna" panel.
@@ -1430,6 +1522,9 @@ app.post('/api/anna/leads', requireAdmin, async (req, res) => {
       const consentInput = req.body?.consent || lead;
       const consent = anna.normalizeConsent(consentInput);
       if (consent.mvr || consent.psp || consent.clearinghouse) result.portfolio.consent = consent;
+      const elig = result.match.summary?.eligible ?? 0;
+      auditLog(result.portfolio, 'lead_received', `Lead intake (source: ${result.source}). Anna ranked ${result.portfolio.recommendations?.length || 0} carriers; ${elig} eligible.`);
+      if (consent.mvr || consent.psp || consent.clearinghouse) auditLog(result.portfolio, 'consent_intake', `Consent captured at intake for ${['mvr', 'psp', 'clearinghouse'].filter((t) => consent[t]).join(', ')}.`, 'Driver');
       upsertPortfolio(result.portfolio);
     }
     res.json({ profile: result.profile, match: result.match, source: result.source, portfolio: result.portfolio || null });
@@ -1455,6 +1550,33 @@ app.get('/api/anna/portfolios/:id', requireAdmin, (req, res) => {
   res.json(p);
 });
 
+// Compliance packet — a complete, auditable record for a driver. JSON by
+// default; ?format=html returns a printable document for the file/audit.
+app.get('/api/anna/portfolios/:id/packet', requireAdmin, (req, res) => {
+  const p = findPortfolio(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  const packet = {
+    generatedAt: new Date().toISOString(),
+    company: COMPANY_NAME,
+    driver: p.driver,
+    selectedCarrier: p.carrier,
+    recommendations: p.recommendations,
+    consent: p.consent || null,
+    complianceSources: p.complianceSources || null,
+    compliance: p.compliance || null,
+    decision: {
+      status: p.review?.status, decidedBy: p.review?.decidedBy, decidedAt: p.review?.decidedAt,
+      reason: p.review?.decisionReason, carrierSelectedBy: p.review?.carrierSelectedBy,
+    },
+    auditTrail: p.audit || [],
+  };
+  if ((req.query.format || '') === 'html') {
+    res.type('html').send(renderPacketHtml(packet, p.id));
+  } else {
+    res.json(packet);
+  }
+});
+
 // Recruiter picks the best-fit carrier from Anna's ranked recommendations.
 // Anna only recommends; a human chooses and advances.
 app.post('/api/anna/portfolios/:id/select-carrier', requireAdmin, (req, res) => {
@@ -1463,7 +1585,9 @@ app.post('/api/anna/portfolios/:id/select-carrier', requireAdmin, (req, res) => 
   const { carrierId, by } = req.body || {};
   if (!carrierId) return res.status(400).json({ error: 'carrierId is required.' });
   try {
-    anna.selectCarrier(p, carrierId, by || p.review?.assignedRecruiter || 'Recruiter');
+    const who = by || p.review?.assignedRecruiter || 'Recruiter';
+    anna.selectCarrier(p, carrierId, who);
+    auditLog(p, 'carrier_selected', `Carrier "${p.carrier.carrierName}" selected (${p.carrier.fitScore}% fit) from Anna's ranked list.`, who);
     upsertPortfolio(p);
     res.json({ ok: true, carrier: p.carrier, review: p.review });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -1478,6 +1602,8 @@ app.post('/api/anna/portfolios/:id/consent', requireAdmin, (req, res) => {
   consent.capturedAt = new Date().toISOString();
   consent.ip = req.ip;
   p.consent = consent;
+  const types = ['mvr', 'psp', 'clearinghouse'].filter((t) => consent[t]);
+  auditLog(p, 'consent_recorded', `Driver consent recorded for ${types.join(', ') || 'none'}${consent.by ? ` (signed by ${consent.by})` : ''}.`, req.body?.by || 'Recruiter');
   upsertPortfolio(p);
   res.json({ ok: true, consent });
 });
@@ -1510,6 +1636,8 @@ app.post('/api/anna/portfolios/:id/compliance', requireAdmin, async (req, res) =
       opts: { ...annaOpts(), narrate: Boolean(ANTHROPIC_API_KEY) },
     });
     p.compliance = compliance;
+    const srcLabel = (p.complianceSources || []).map((sx) => `${sx.type}:${sx.simulated ? 'sim' : 'live'}`).join(', ');
+    auditLog(p, 'compliance_check', `Compliance ${req.body?.pull ? `pulled (${srcLabel || 'no sources'})` : 'evaluated from entered records'} for ${compliance.carrierName} → verdict: ${compliance.flag.toUpperCase()}.`, req.body?.pull ? 'Anna' : 'Recruiter');
     // Official pulled records supersede self-reported data so any later re-match
     // reflects reality (e.g. a DUI found on the MVR follows the driver).
     p.driver = anna.mergeRecords(p.driver, records);
@@ -1527,7 +1655,9 @@ app.post('/api/anna/portfolios/:id/decision', requireAdmin, async (req, res) => 
   if (!p) return res.status(404).json({ error: 'Not found' });
   const { decision, reason, by } = req.body || {};
   if (!['approved', 'rejected'].includes(decision)) return res.status(400).json({ error: 'decision must be "approved" or "rejected".' });
-  p.review = { ...p.review, status: decision, decidedBy: by || 'Recruiter', decidedAt: new Date().toISOString(), decisionReason: reason || '' };
+  const who = by || p.review?.assignedRecruiter || 'Recruiter';
+  p.review = { ...p.review, status: decision, decidedBy: who, decidedAt: new Date().toISOString(), decisionReason: reason || '' };
+  auditLog(p, decision === 'approved' ? 'approved' : 'rejected', `${decision === 'approved' ? 'Approved & advanced' : 'Rejected'}${reason ? ` — ${reason}` : ''}.`, who);
   upsertPortfolio(p);
   // On rejection, offer re-match suggestions to other carriers.
   let rematch = null;
