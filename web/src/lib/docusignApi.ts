@@ -70,6 +70,7 @@ export interface Recipient { id: string; name: string; email: string; colorIdx: 
 export const sendDoc = (candidateId: string, payload: {
   docType: string; fields?: Record<string, string>; embedded?: boolean;
   emailSubject?: string; message?: string; recipients?: Recipient[]; placedFields?: PlacedField[];
+  uploadedPdf?: { name: string; base64: string };
 }) =>
   fetch(`/api/docusign/candidates/${candidateId}/send`, { method: 'POST', headers: headers(), body: JSON.stringify(payload) })
     .then((r) => json<Envelope>(r));

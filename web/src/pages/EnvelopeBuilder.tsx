@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import * as pdfjsLib from 'pdfjs-dist';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { previewDoc, sendDoc, type DocType, type CandidateLite, type PreviewResult, type PlacedField } from '@/lib/docusignApi';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+
+// ArrayBuffer → base64 (for sending an uploaded PDF to the backend).
+function abToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf); let binary = ''; const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  return btoa(binary);
+}
 
 // Full-screen DocuSign-style envelope builder: Set Up Envelope → Add Fields → Send.
 
@@ -60,13 +72,22 @@ export default function EnvelopeBuilder({ preset, candidates, docTypes, mode, on
   const [selId, setSelId] = useState<string | null>(null);
   const [tool, setTool] = useState<FType | null>(null);
   const [curRecip, setCurRecip] = useState(recipients[0]?.id || '');
-  const [zoom, setZoom] = useState(1.35);
+  const [zoom, setZoom] = useState(1);
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState('');
 
-  const pageRef = useRef<HTMLDivElement>(null);
+  // Uploaded PDF (rendered with pdf.js for accurate, page-by-page tagging).
+  const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
+  const [pdfPages, setPdfPages] = useState<{ w: number; h: number }[]>([]);
+  const [uploadName, setUploadName] = useState('');
+  const pdfBytes = useRef<Uint8Array | null>(null);
+  const uploadB64 = useRef('');
+
   const dragRef = useRef<{ id: string; moved: boolean } | null>(null);
   const [docHeight, setDocHeight] = useState(1056);
+  const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const fieldsRef = useRef(fields);
+  useEffect(() => { fieldsRef.current = fields; }, [fields]);
   const hist = useRef<{ stack: PlacedField[][]; idx: number }>({ stack: [[]], idx: 0 });
 
   // Auto-fill values keyed by field type, from the driver's record.
@@ -81,60 +102,77 @@ export default function EnvelopeBuilder({ preset, candidates, docTypes, mode, on
   }, [preview, cand]);
 
   useEffect(() => {
-    if (!cand) return;
+    if (!cand || uploadName) return; // an uploaded PDF replaces the generated contract
     previewDoc(cand.id, docType).then(setPreview).catch(() => setPreview(null));
     setSubject(`Complete with Docusign: ${docLabel}.pdf`);
-  }, [docType, cand?.id]);
+  }, [docType, cand?.id, uploadName]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── field history ──
-  const commit = (next: PlacedField[]) => {
-    setFields(next);
-    const h = hist.current; h.stack = h.stack.slice(0, h.idx + 1); h.stack.push(next); h.idx = h.stack.length - 1;
-  };
+  // Load an uploaded PDF and measure each page (in points).
+  async function handleUpload(file: File) {
+    if (!file) return;
+    if (file.type !== 'application/pdf') { setErr('Please choose a PDF file.'); return; }
+    setErr('');
+    const buf = await file.arrayBuffer();
+    uploadB64.current = abToBase64(buf);
+    pdfBytes.current = new Uint8Array(buf);
+    setUploadName(file.name);
+    setSubject(`Complete with Docusign: ${file.name}`);
+    setFields([]); hist.current = { stack: [[]], idx: 0 };
+    try {
+      const doc = await pdfjsLib.getDocument({ data: pdfBytes.current.slice(0) }).promise;
+      const sizes: { w: number; h: number }[] = [];
+      for (let i = 1; i <= doc.numPages; i++) { const pg = await doc.getPage(i); const v = pg.getViewport({ scale: 1 }); sizes.push({ w: v.width, h: v.height }); }
+      setPdfDoc(doc); setPdfPages(sizes);
+    } catch { setErr('Could not read that PDF.'); }
+  }
+  const clearUpload = () => { setPdfDoc(null); setPdfPages([]); setUploadName(''); uploadB64.current = ''; pdfBytes.current = null; setFields([]); hist.current = { stack: [[]], idx: 0 }; };
+
+  // ── field history (drag commits the latest via fieldsRef, not a stale closure) ──
+  const pushHistory = (next: PlacedField[]) => { const h = hist.current; h.stack = h.stack.slice(0, h.idx + 1); h.stack.push(next); h.idx = h.stack.length - 1; };
+  const commit = (next: PlacedField[]) => { setFields(next); pushHistory(next); };
   const undo = () => { const h = hist.current; if (h.idx > 0) { h.idx--; setFields(h.stack[h.idx]); } };
   const redo = () => { const h = hist.current; if (h.idx < h.stack.length - 1) { h.idx++; setFields(h.stack[h.idx]); } };
 
   const recipColor = (id: string) => color(recipients.find((r) => r.id === id)?.colorIdx ?? 0);
   const selected = fields.find((f) => f.id === selId) || null;
 
-  const addField = (type: FType, xPct: number, yPct: number) => {
+  const addField = (type: FType, page: number, xPct: number, yPct: number) => {
     const f: PlacedField = {
-      id: uid(), type, xPct: clamp(xPct), yPct: clamp(yPct), page: 1, recipientId: curRecip,
+      id: uid(), type, xPct: clamp(xPct), yPct: clamp(yPct), page, recipientId: curRecip,
       label: DEFAULTS[type].label, required: type !== 'checkbox', value: prefill[type] || '',
     };
-    commit([...fields, f]); setSelId(f.id); setTool(null);
+    commit([...fieldsRef.current, f]); setSelId(f.id); setTool(null);
   };
-  const updateField = (id: string, patch: Partial<PlacedField>) => commit(fields.map((f) => (f.id === id ? { ...f, ...patch } : f)));
-  const removeField = (id: string) => { commit(fields.filter((f) => f.id !== id)); if (selId === id) setSelId(null); };
-  const dupField = (id: string) => { const f = fields.find((x) => x.id === id); if (!f) return; const n = { ...f, id: uid(), xPct: clamp(f.xPct + 0.02), yPct: clamp(f.yPct + 0.03) }; commit([...fields, n]); setSelId(n.id); };
+  const updateField = (id: string, patch: Partial<PlacedField>) => commit(fieldsRef.current.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+  const removeField = (id: string) => { commit(fieldsRef.current.filter((f) => f.id !== id)); if (selId === id) setSelId(null); };
+  const dupField = (id: string) => { const f = fieldsRef.current.find((x) => x.id === id); if (!f) return; const n = { ...f, id: uid(), xPct: clamp(f.xPct + 0.02), yPct: clamp(f.yPct + 0.04) }; commit([...fieldsRef.current, n]); setSelId(n.id); };
 
-  // page interactions
-  const pageXY = (clientX: number, clientY: number) => {
-    const r = pageRef.current!.getBoundingClientRect();
+  // Coordinates relative to a specific page (works at any zoom via the live rect).
+  const xyIn = (page: number, clientX: number, clientY: number) => {
+    const r = pageRefs.current[page]?.getBoundingClientRect();
+    if (!r) return { xPct: 0, yPct: 0 };
     return { xPct: (clientX - r.left) / r.width, yPct: (clientY - r.top) / r.height };
-  };
-  const onCanvasClick = (e: React.MouseEvent) => {
-    if (!tool) { setSelId(null); return; }
-    const { xPct, yPct } = pageXY(e.clientX, e.clientY); addField(tool, xPct, yPct);
-  };
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    const type = e.dataTransfer.getData('ftype') as FType; if (!type) return;
-    const { xPct, yPct } = pageXY(e.clientX, e.clientY); addField(type, xPct, yPct);
   };
 
   const doSend = async () => {
     setErr(''); if (!cand) { setErr('No driver selected.'); return; }
     setSending(true);
     try {
-      const env = await sendDoc(cand.id, {
+      await sendDoc(cand.id, {
         docType, emailSubject: subject, message,
         recipients: recipients.map((r) => ({ id: r.id, name: r.name, email: r.email, colorIdx: r.colorIdx })),
         placedFields: fields,
+        ...(uploadName && uploadB64.current ? { uploadedPdf: { name: uploadName, base64: uploadB64.current } } : {}),
       });
-      void env; onSent();
+      onSent();
     } catch (e) { setErr((e as Error).message); setSending(false); }
   };
+
+  // Pages to render: an uploaded PDF (per page) or the single generated contract.
+  const pages = pdfDoc
+    ? pdfPages.map((sz, i) => ({ kind: 'pdf' as const, num: i + 1, w: sz.w * 1.3333, h: sz.h * 1.3333 }))
+    : [{ kind: 'html' as const, num: 1, w: 816, h: docHeight }];
+  const docName = uploadName || `${docLabel} (2).pdf`;
 
   // ── render ──
   return (
@@ -149,6 +187,7 @@ export default function EnvelopeBuilder({ preset, candidates, docTypes, mode, on
           subject={subject} setSubject={setSubject} message={message} setMessage={setMessage}
           category={category} setCategory={setCategory} reminders={reminders} setReminders={setReminders}
           driverName={cand?.name || ''} docLabel={docLabel} err={err}
+          uploadName={uploadName} onUpload={handleUpload} onClearUpload={clearUpload} pageCount={pdfPages.length}
         />
       ) : (
         <div className="flex-1 flex min-h-0">
@@ -162,39 +201,52 @@ export default function EnvelopeBuilder({ preset, candidates, docTypes, mode, on
           {/* CENTER: canvas */}
           <div className="flex-1 flex flex-col min-w-0" style={{ background: '#f3f4f6' }}>
             <CanvasToolbar zoom={zoom} setZoom={setZoom} onUndo={undo} onRedo={redo} onClear={() => commit([])} fieldCount={fields.length} />
-            <div className="flex-1 overflow-auto p-8 flex justify-center">
-              <div style={{ width: 816 * zoom, height: docHeight * zoom, flex: '0 0 auto' }}>
-                <div ref={pageRef} className="relative bg-white shadow-lg" style={{ width: 816, height: docHeight, transform: `scale(${zoom})`, transformOrigin: 'top left' }}>
-                  <iframe title="doc" srcDoc={preview?.html || ''} onLoad={(e) => { try { const h = e.currentTarget.contentWindow?.document.body.scrollHeight; if (h) setDocHeight(h + 120); } catch { /* noop */ } }}
-                    style={{ width: 816, height: docHeight, border: 0, pointerEvents: 'none' }} />
-                  {/* overlay */}
-                  <div className="absolute inset-0" style={{ cursor: tool ? 'copy' : 'default' }} onClick={onCanvasClick} onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
-                    {fields.map((f) => (
+            <div className="flex-1 overflow-auto p-8 flex flex-col items-center gap-6">
+              {pages.map((pg) => (
+                <div key={pg.num} ref={(el) => { pageRefs.current[pg.num] = el; }} className="relative bg-white shadow-lg flex-shrink-0"
+                  style={{ width: pg.w * zoom, height: pg.h * zoom }}>
+                  {pg.kind === 'html'
+                    ? <div style={{ width: pg.w, height: pg.h, transform: `scale(${zoom})`, transformOrigin: 'top left' }}>
+                        <iframe title="doc" srcDoc={preview?.html || ''} onLoad={(e) => { try { const h = e.currentTarget.contentWindow?.document.body.scrollHeight; if (h) setDocHeight(h + 120); } catch { /* noop */ } }}
+                          style={{ width: pg.w, height: pg.h, border: 0, pointerEvents: 'none' }} />
+                      </div>
+                    : <PdfPage doc={pdfDoc!} pageNum={pg.num} cssW={pg.w * zoom} cssH={pg.h * zoom} />}
+                  {/* per-page overlay */}
+                  <div className="absolute inset-0" style={{ cursor: tool ? 'copy' : 'default' }}
+                    onClick={(e) => { if (!tool) { setSelId(null); return; } const { xPct, yPct } = xyIn(pg.num, e.clientX, e.clientY); addField(tool, pg.num, xPct, yPct); }}
+                    onDrop={(e) => { e.preventDefault(); const t = e.dataTransfer.getData('ftype') as FType; if (!t) return; const { xPct, yPct } = xyIn(pg.num, e.clientX, e.clientY); addField(t, pg.num, xPct, yPct); }}
+                    onDragOver={(e) => e.preventDefault()}>
+                    {fields.filter((f) => f.page === pg.num).map((f) => (
                       <FieldTag key={f.id} f={f} c={recipColor(f.recipientId)} selected={selId === f.id} zoom={zoom}
                         onPointerDown={(e) => { e.stopPropagation(); (e.target as HTMLElement).setPointerCapture(e.pointerId); setSelId(f.id); dragRef.current = { id: f.id, moved: false }; }}
-                        onPointerMove={(e) => { if (dragRef.current?.id !== f.id) return; const { xPct, yPct } = pageXY(e.clientX, e.clientY); dragRef.current.moved = true; setFields((p) => p.map((x) => (x.id === f.id ? { ...x, xPct: clamp(xPct), yPct: clamp(yPct) } : x))); }}
-                        onPointerUp={() => { if (dragRef.current?.moved) commit(fields); dragRef.current = null; }}
+                        onPointerMove={(e) => { if (dragRef.current?.id !== f.id) return; const { xPct, yPct } = xyIn(f.page, e.clientX, e.clientY); dragRef.current.moved = true; setFields((p) => p.map((x) => (x.id === f.id ? { ...x, xPct: clamp(xPct), yPct: clamp(yPct) } : x))); }}
+                        onPointerUp={() => { if (dragRef.current?.moved) pushHistory(fieldsRef.current); dragRef.current = null; }}
                         onDup={() => dupField(f.id)} onDel={() => removeField(f.id)}
                         recipients={recipients} onRecip={(rid) => updateField(f.id, { recipientId: rid })} onReq={(v) => updateField(f.id, { required: v })} />
                     ))}
                   </div>
                 </div>
-              </div>
+              ))}
             </div>
           </div>
 
           {/* RIGHT: documents */}
           <div className="w-[230px] border-l p-4 overflow-y-auto" style={{ borderColor: '#eceef2' }}>
             <div className="flex items-center justify-between mb-3"><span className="font-semibold text-sm">Documents</span><span className="text-gray-400">⚙</span></div>
-            <div className="text-[13px] font-medium leading-tight">{docLabel} (2).pdf</div>
-            <div className="text-[11px] text-gray-400 mb-3">1 page</div>
-            <div className="border rounded-lg overflow-hidden relative" style={{ borderColor: '#d6d9e0' }}>
-              <iframe title="thumb" srcDoc={preview?.html || ''} style={{ width: 816, height: 1056, border: 0, transform: 'scale(0.232)', transformOrigin: 'top left', pointerEvents: 'none' }} />
-              <div style={{ height: 1056 * 0.232 }} />
-              <div className="absolute top-1 left-1 right-1 flex justify-between items-center">
-                {fields.length > 0 && <span className="text-[9px] bg-emerald-500 text-white px-1 rounded">{fields.length} field{fields.length > 1 ? 's' : ''}</span>}
-                <span className="text-[10px] text-gray-500 ml-auto bg-white/80 px-1 rounded">1</span>
-              </div>
+            <div className="text-[13px] font-medium leading-tight break-words">{docName}</div>
+            <div className="text-[11px] text-gray-400 mb-3">{pages.length} page{pages.length > 1 ? 's' : ''}</div>
+            <div className="space-y-3">
+              {pages.map((pg) => (
+                <div key={pg.num} className="border rounded-lg overflow-hidden relative" style={{ borderColor: '#d6d9e0', height: 120 }}>
+                  {pg.kind === 'html'
+                    ? <iframe title="thumb" srcDoc={preview?.html || ''} style={{ width: 816, height: 1056, border: 0, transform: 'scale(0.232)', transformOrigin: 'top left', pointerEvents: 'none' }} />
+                    : <PdfPage doc={pdfDoc!} pageNum={pg.num} cssW={198} cssH={198 * (pg.h / pg.w)} />}
+                  <div className="absolute top-1 left-1 right-1 flex justify-between items-center">
+                    {fields.filter((f) => f.page === pg.num).length > 0 && <span className="text-[9px] bg-emerald-500 text-white px-1 rounded">{fields.filter((f) => f.page === pg.num).length} field</span>}
+                    <span className="text-[10px] text-gray-500 ml-auto bg-white/80 px-1 rounded">{pg.num}</span>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -202,6 +254,27 @@ export default function EnvelopeBuilder({ preset, candidates, docTypes, mode, on
       {err && step === 'fields' && <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white text-sm px-4 py-2 rounded-lg shadow-lg">{err}</div>}
     </div>
   );
+}
+
+// Renders one PDF page to a canvas at retina resolution, displayed at cssW×cssH.
+function PdfPage({ doc, pageNum, cssW, cssH }: { doc: PDFDocumentProxy; pageNum: number; cssW: number; cssH: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    let cancelled = false; let task: { promise: Promise<void>; cancel(): void } | null = null;
+    (async () => {
+      const page = await doc.getPage(pageNum);
+      const base = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: (cssW / base.width) * 2 });
+      const canvas = ref.current; if (!canvas) return;
+      canvas.width = vp.width; canvas.height = vp.height;
+      const ctx = canvas.getContext('2d'); if (!ctx) return;
+      task = page.render({ canvasContext: ctx, viewport: vp });
+      try { await task.promise; } catch { /* cancelled */ }
+      if (cancelled) return;
+    })();
+    return () => { cancelled = true; try { task?.cancel(); } catch { /* noop */ } };
+  }, [doc, pageNum, cssW]);
+  return <canvas ref={ref} style={{ width: cssW, height: cssH, display: 'block', pointerEvents: 'none' }} />;
 }
 
 // ── Headers ──────────────────────────────────────────────────────────────────
@@ -237,7 +310,10 @@ function Setup(p: {
   subject: string; setSubject: (s: string) => void; message: string; setMessage: (s: string) => void;
   category: string; setCategory: (s: string) => void; reminders: string; setReminders: (s: string) => void;
   driverName: string; docLabel: string; err: string;
+  uploadName: string; onUpload: (f: File) => void; onClearUpload: () => void; pageCount: number;
 }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [dragOver, setDragOver] = useState(false);
   const addRecipient = () => p.setRecipients([...p.recipients, { id: uid(), name: '', email: '', colorIdx: p.recipients.length % RECIPIENT_COLORS.length }]);
   const upd = (id: string, patch: Partial<Recip>) => p.setRecipients(p.recipients.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const del = (id: string) => p.setRecipients(p.recipients.filter((r) => r.id !== id));
@@ -248,9 +324,30 @@ function Setup(p: {
       <div className="max-w-[1000px] mx-auto px-6 py-6">
         <div className="mb-5">
           <label className="block text-sm font-medium mb-1 text-gray-600">Document</label>
-          <select value={p.docType} onChange={(e) => p.setDocType(e.target.value)} className="w-full max-w-md border rounded-md px-3 py-2 text-sm" style={{ borderColor: '#d6d9e0' }}>
-            {p.docTypes.map((d) => <option key={d.type} value={d.type}>{d.label}</option>)}
-          </select>
+          {p.uploadName ? (
+            <div className="flex items-center gap-3 border rounded-lg px-4 py-3 max-w-md" style={{ borderColor: '#d6d9e0' }}>
+              <span className="text-2xl">📄</span>
+              <div className="flex-1 min-w-0"><div className="text-sm font-medium truncate">{p.uploadName}</div><div className="text-[11px] text-gray-400">{p.pageCount || '…'} page{p.pageCount === 1 ? '' : 's'} · uploaded PDF</div></div>
+              <button onClick={p.onClearUpload} className="text-xs text-red-500 hover:underline">Remove</button>
+            </div>
+          ) : (
+            <>
+              <select value={p.docType} onChange={(e) => p.setDocType(e.target.value)} className="w-full max-w-md border rounded-md px-3 py-2 text-sm" style={{ borderColor: '#d6d9e0' }}>
+                {p.docTypes.map((d) => <option key={d.type} value={d.type}>{d.label}</option>)}
+              </select>
+              <div className="text-xs text-gray-400 my-2">— or upload your own document —</div>
+              <div onClick={() => fileRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) p.onUpload(f); }}
+                className="max-w-md border-2 border-dashed rounded-lg px-4 py-7 text-center cursor-pointer transition"
+                style={{ borderColor: dragOver ? '#7c3aed' : '#d6d9e0', background: dragOver ? '#faf5ff' : '#fafbfc' }}>
+                <div className="text-2xl mb-1">⬆️</div>
+                <div className="text-sm font-medium">Upload a PDF</div>
+                <div className="text-[12px] text-gray-400">Drag & drop a PDF here, or click to browse</div>
+              </div>
+              <input ref={fileRef} type="file" accept="application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) p.onUpload(f); e.target.value = ''; }} />
+            </>
+          )}
         </div>
 
         {p.recipients.map((r, i) => (
@@ -397,6 +494,7 @@ function Properties({ field, recipients, onChange, onDelete, onBack, onRecip }: 
   field: PlacedField; recipients: Recip[]; onChange: (p: Partial<PlacedField>) => void; onDelete: () => void; onBack: () => void; onRecip: (id: string) => void;
 }) {
   const [rOpen, setROpen] = useState(false);
+  const [saved, setSaved] = useState(false);
   const isInput = ['text', 'number', 'email', 'company', 'title'].includes(field.type);
   const isCheckbox = field.type === 'checkbox';
   const title = isCheckbox ? 'Checkbox Group' : field.type === 'name' ? 'Name' : field.type.charAt(0).toUpperCase() + field.type.slice(1);
@@ -499,7 +597,14 @@ function Properties({ field, recipients, onChange, onDelete, onBack, onRecip }: 
         </>
       )}
 
-      <button className="w-full mt-4 py-2.5 border rounded-md text-sm font-medium" style={{ borderColor: '#d6d9e0' }}>Save As Custom Field</button>
+      <button onClick={() => {
+        try {
+          const list = JSON.parse(localStorage.getItem('qh_ds_custom_fields') || '[]');
+          list.push({ type: field.type, label: field.label, font: field.font, fontSize: field.fontSize, required: field.required });
+          localStorage.setItem('qh_ds_custom_fields', JSON.stringify(list.slice(-50)));
+        } catch { /* ignore */ }
+        setSaved(true); setTimeout(() => setSaved(false), 1500);
+      }} className="w-full mt-4 py-2.5 border rounded-md text-sm font-medium" style={{ borderColor: saved ? '#10B981' : '#d6d9e0', color: saved ? '#059669' : undefined }}>{saved ? 'Saved ✓' : 'Save As Custom Field'}</button>
       <button onClick={onDelete} className="w-full mt-2 py-2.5 rounded-md text-sm font-semibold text-white" style={{ background: '#c8102e' }}>Delete</button>
     </div>
   );
@@ -542,7 +647,7 @@ function FieldTag({ f, c, selected, onPointerDown, onPointerMove, onPointerUp, o
   const w = DEFAULTS[f.type as FType]?.w ?? 110;
   const [menu, setMenu] = useState(false);
   return (
-    <div className="absolute" style={{ left: `${f.xPct * 100}%`, top: `${f.yPct * 100}%` }}>
+    <div className="absolute" style={{ left: `${f.xPct * 100}%`, top: `${f.yPct * 100}%` }} onClick={(e) => e.stopPropagation()}>
       {selected && (
         <div className="absolute -top-9 left-0 flex items-center gap-1 bg-white border rounded-lg shadow px-1.5 py-1 z-20" style={{ borderColor: '#e6e8ee' }} onClick={(e) => e.stopPropagation()}>
           <div className="relative">
