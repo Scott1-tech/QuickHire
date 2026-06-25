@@ -1,18 +1,22 @@
-# Deterministic build for Railway (avoids Nixpacks auto-detection issues with the
-# web/ subproject). The React SPA is prebuilt and committed to public/app, so the
-# image only needs the Express server's runtime dependencies.
-FROM node:20-slim
+# Deterministic build for Railway: the Python/FastAPI backend (backend/) serving
+# the prebuilt React SPA + static frontend in public/. Requires a Postgres
+# service (set DATABASE_URL). The web/ SPA is prebuilt and committed to public/app,
+# so the image only needs Python runtime deps.
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install only the server's production dependencies.
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+# Install backend dependencies first for better layer caching.
+COPY backend/requirements.txt backend/requirements.txt
+RUN pip install --no-cache-dir -r backend/requirements.txt
 
-# Copy the rest of the app (server.js, public/ including the prebuilt SPA).
+# Copy the rest of the app (backend/ and public/ including the prebuilt SPA).
 COPY . .
+
+# The app serves ../public relative to backend/, so run from there.
+WORKDIR /app/backend
 
 ENV PORT=3000
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-3000}"]
