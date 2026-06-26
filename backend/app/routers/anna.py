@@ -474,7 +474,7 @@ async def anna_compliance(pid: str, request: Request):
         p["compliance"] = compliance
         src_label = ", ".join(f"{sx['type']}:{'sim' if sx.get('simulated') else 'live'}" for sx in (p.get("complianceSources") or []))
         _audit_log(p, "compliance_check",
-                   f"Compliance {('pulled (' + (src_label or 'no sources') + ')') if body.get('pull') else 'evaluated from entered records'} for {compliance['carrierName']} → verdict: {compliance['flag'].upper()}.",
+                   f"Compliance {('pulled (' + (src_label or 'no sources') + ')') if body.get('pull') else 'evaluated from entered records'} for {compliance['carrierName']} → verdict: {compliance['flag']}.",
                    "Anna" if body.get("pull") else "Recruiter")
         p["driver"] = anna.merge_records(p["driver"], records)
         await upsert_portfolio(p)
@@ -571,8 +571,8 @@ def _render_packet_html(k: dict, pid: str) -> str:
     cdl = d.get("cdl")
     mvr = d.get("mvr")
     psp = d.get("psp")
-    cdl_txt = f"Class {cdl.get('class') or '—'}, {cdl.get('experienceYears') if cdl.get('experienceYears') is not None else '—'} yrs, endorsements {', '.join(cdl.get('endorsements') or []) or 'none'}" if cdl else "—"
-    mvr_txt = f"{mvr.get('movingViolations') if mvr.get('movingViolations') is not None else '—'} viol, {mvr.get('accidents') if mvr.get('accidents') is not None else '—'} acc, {mvr.get('dui') if mvr.get('dui') is not None else '—'} DUI" if mvr else "—"
+    cdl_txt = f"Class {cdl.get('class') or '—'}, {cdl.get('experienceYears') if cdl.get('experienceYears') is not None else '—'} yrs, endorsements {', '.join(cdl.get('endorsements') or []) or '—'}" if cdl else "—"
+    mvr_txt = f"{mvr.get('movingViolations') if mvr.get('movingViolations') is not None else '—'} viol, {mvr.get('accidents') if mvr.get('accidents') is not None else '—'} acc, {mvr.get('dui', 0)} DUIs" if mvr else "—"
     psp_txt = f"{psp.get('crashes') if psp.get('crashes') is not None else '—'} crashes, {psp.get('oosInspections') if psp.get('oosInspections') is not None else '—'} OOS" if psp else "—"
 
     sel = k.get("selectedCarrier")
@@ -604,7 +604,7 @@ td{{padding:4px 8px}} .meta{{color:#888;font-size:12px}} .verdict{{display:inlin
 <table>{row('Name', d.get('name'))}{row('Age', d.get('age'))}{row('CDL', cdl_txt)}{row('MVR', mvr_txt)}{row('PSP', psp_txt)}</table>
 
 <h2>Selected Carrier</h2>
-<table>{row('Carrier', (sel or {}).get('carrierName') or 'Not selected')}{row('Fit score', (str((sel or {}).get('fitScore')) + '%') if sel else '—')}{row('Selected by', decision.get('carrierSelectedBy') or '—')}</table>
+<table>{row('Carrier', (sel or {}).get('carrierName') or 'Not selected')}{row('Fit score', (str((sel or {}).get('fitScore')) + '%') if sel else '—')}{row('Selected by', decision.get('carrierSelectedBy') or '—')}{row('Selected at', decision.get('carrierSelectedAt') or '—')}</table>
 
 <h2>Consent</h2>
 <table>{row('Authorized', consent_auth)}{row('Signed by', (consent or {}).get('by') or '—')}{row('Signed at', (consent or {}).get('signedAt') or (consent or {}).get('capturedAt') or '—')}</table>
