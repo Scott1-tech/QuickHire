@@ -13,7 +13,8 @@
 
 import { compileSpec } from './spec.js';
 import { evaluateGates, STATUS } from './matcher.js';
-import { callClaude, MODELS, annaConfigured } from './claude.js';
+import { annaConfigured } from './claude.js';
+import { llmComplete, providerModel } from './llm.js';
 
 let _seq = 0;
 const id = (p) => `${p}_${Date.now().toString(36)}${(_seq++).toString(36)}`;
@@ -116,9 +117,10 @@ export async function writeCompliance({ carrier, driver, records = {}, opts = {}
   // Optionally let Claude phrase a richer narrative; never let it change the verdict.
   if (opts.narrate && annaConfigured(opts.apiKey)) {
     try {
-      const { text } = await callClaude({
+      const { text } = await llmComplete({
+        provider: opts.provider,
         apiKey: opts.apiKey,
-        model: opts.model || MODELS.smart,
+        model: opts.model || providerModel(opts.provider, 'smart'),
         maxTokens: 400,
         system: 'You are Anna, an FMCSA driver-qualification compliance assistant. Write a concise, factual 2-3 sentence summary for a recruiter. Do not change the provided verdict. Cite specifics.',
         messages: [{ role: 'user', content: `Verdict: ${flag.toUpperCase()} for ${spec.carrierName}.\nGate results:\n${JSON.stringify(gateResults, null, 2)}\n\nWrite the summary.` }],

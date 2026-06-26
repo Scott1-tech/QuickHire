@@ -12,7 +12,8 @@
 // core actions still work offline.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { callClaude, MODELS, annaConfigured } from './claude.js';
+import { annaConfigured } from './claude.js';
+import { llmComplete } from './llm.js';
 
 const PAGES = ['dashboard', 'carriers', 'drivers', 'trucks', 'hiring', 'tasks', 'inbox', 'notifications', 'settings', 'anna'];
 const ENTITY_TYPES = ['driver', 'carrier', 'candidate', 'truck'];
@@ -76,24 +77,22 @@ function systemPrompt(context = {}) {
 export async function chat({ messages = [], context = {}, opts = {} } = {}) {
   if (!annaConfigured(opts.apiKey)) return heuristicChat(messages, context);
 
-  const { raw } = await callClaude({
+  const { text, toolCalls } = await llmComplete({
+    provider: opts.provider,
     apiKey: opts.apiKey,
-    model: opts.model || MODELS.fast,
+    model: opts.model,
     maxTokens: 900,
     system: systemPrompt(context),
     tools: TOOLS,
     messages: messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') })),
   });
 
-  let reply = '';
+  let reply = text || '';
   const actions = [];
-  for (const block of raw.content || []) {
-    if (block.type === 'text') reply += block.text;
-    else if (block.type === 'tool_use') {
-      if (block.name === 'create_task') actions.push({ type: 'create_task', task: sanitizeTask(block.input) });
-      else if (block.name === 'open_profile') actions.push({ type: 'open_profile', entityType: block.input.entityType, name: String(block.input.name || '') });
-      else if (block.name === 'navigate') actions.push({ type: 'navigate', page: block.input.page });
-    }
+  for (const call of toolCalls || []) {
+    if (call.name === 'create_task') actions.push({ type: 'create_task', task: sanitizeTask(call.input) });
+    else if (call.name === 'open_profile') actions.push({ type: 'open_profile', entityType: call.input.entityType, name: String(call.input.name || '') });
+    else if (call.name === 'navigate') actions.push({ type: 'navigate', page: call.input.page });
   }
   if (!reply.trim() && actions.length) reply = confirmAction(actions[0]);
   return { reply: reply.trim() || "I'm not sure how to help with that yet.", actions, engine: 'ai' };

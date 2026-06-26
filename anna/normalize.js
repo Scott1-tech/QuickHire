@@ -15,7 +15,8 @@
 // fields are surfaced for human/driver confirmation rather than trusted blindly.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { callClaudeJSON, documentBlock, MODELS, annaConfigured } from './claude.js';
+import { callClaudeJSON, documentBlock, annaConfigured } from './claude.js';
+import { llmJSON } from './llm.js';
 
 // The canonical shape the matcher consumes. Documented here as the contract.
 export const DRIVER_SHAPE = {
@@ -37,9 +38,10 @@ const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : undefined);
 export async function normalizeDriver(lead = {}, opts = {}) {
   if (annaConfigured(opts.apiKey)) {
     try {
-      const out = await callClaudeJSON({
+      const out = await llmJSON({
+        provider: opts.provider,
         apiKey: opts.apiKey,
-        model: opts.model || MODELS.fast,
+        model: opts.model,
         maxTokens: 1024,
         system:
           'You normalize raw truck-driver lead data into a strict JSON DriverProfile for an FMCSA driver-qualification system. ' +

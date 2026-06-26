@@ -1343,10 +1343,18 @@ const SPEC_PARSE_VERSION = 1;
 // the ANTHROPIC_API_KEY env var. The UI-provided key takes precedence.
 function readAnnaSettings() { try { return JSON.parse(fs.readFileSync(ANNA_SETTINGS_FILE, 'utf8')); } catch { return {}; } }
 function writeAnnaSettings(o) { fs.writeFileSync(ANNA_SETTINGS_FILE, JSON.stringify(o, null, 2)); }
-function annaApiKey() { return readAnnaSettings().anthropicApiKey || ANTHROPIC_API_KEY || ''; }
-function annaKeySource() { return readAnnaSettings().anthropicApiKey ? 'ui' : (ANTHROPIC_API_KEY ? 'env' : null); }
+function annaProvider() { return readAnnaSettings().provider || 'anthropic'; }
+// Key comes from in-app Settings (any provider) or the ANTHROPIC_API_KEY env var
+// (which only applies when the provider is Anthropic).
+function annaApiKey() {
+  const s = readAnnaSettings();
+  if (s.apiKey) return s.apiKey;
+  return annaProvider() === 'anthropic' ? (ANTHROPIC_API_KEY || '') : '';
+}
+function annaKeySource() { return readAnnaSettings().apiKey ? 'ui' : (annaProvider() === 'anthropic' && ANTHROPIC_API_KEY ? 'env' : null); }
 const maskKey = (k) => (k && k.length > 12 ? `${k.slice(0, 6)}…${k.slice(-4)}` : (k ? '••••' : null));
-const annaOpts = () => ({ apiKey: annaApiKey() });
+// opts passed to every Anna LLM call: provider + key (+ optional model override).
+const annaOpts = () => ({ provider: annaProvider(), apiKey: annaApiKey(), model: readAnnaSettings().model || undefined });
 
 function readPortfolios() { try { return JSON.parse(fs.readFileSync(PORTFOLIO_FILE, 'utf8')); } catch { return []; } }
 function writePortfolios(rows) { fs.writeFileSync(PORTFOLIO_FILE, JSON.stringify(rows, null, 2)); }
@@ -1435,42 +1443,47 @@ async function annaCarriers() {
   return out;
 }
 
-// ── Anna settings (Anthropic API key) ────────────────────────────────────────
-// The key is stored server-side and never returned to the client (only a masked
-// hint). Lets the team enable real Claude-powered Anna from the app UI.
+// ── Anna settings (AI provider + API key) ────────────────────────────────────
+// Supports Claude (Anthropic, default) or another provider (OpenAI). The key is
+// stored server-side and never returned to the client (only a masked hint).
 app.get('/api/anna/settings', requireAdmin, (_req, res) => {
   res.json({
     configured: Boolean(annaApiKey()),
-    source: annaKeySource(),                 // 'ui' | 'env' | null
+    provider: annaProvider(),
+    providers: anna.PROVIDERS,                // ['anthropic','openai']
+    source: annaKeySource(),                  // 'ui' | 'env' | null
     keyHint: maskKey(annaApiKey()),
-    model: anna.MODELS.fast,
+    model: readAnnaSettings().model || anna.providerModel(annaProvider(), 'fast'),
     integrations: anna.integrationStatus(),
   });
 });
 
 app.post('/api/anna/settings', requireAdmin, (req, res) => {
+  const provider = String(req.body?.provider || 'anthropic').toLowerCase();
   const apiKey = String(req.body?.apiKey || '').trim();
+  const model = String(req.body?.model || '').trim();
+  if (!anna.PROVIDERS.includes(provider)) return res.status(400).json({ error: `provider must be one of: ${anna.PROVIDERS.join(', ')}.` });
   if (!apiKey) return res.status(400).json({ error: 'apiKey is required.' });
-  if (!/^sk-/.test(apiKey)) return res.status(400).json({ error: 'That does not look like an Anthropic API key (it should start with "sk-").' });
-  const cur = readAnnaSettings();
-  writeAnnaSettings({ ...cur, anthropicApiKey: apiKey });
-  res.json({ ok: true, configured: true, source: 'ui', keyHint: maskKey(apiKey) });
+  if (!/^sk-/.test(apiKey)) return res.status(400).json({ error: 'That does not look like an API key (Anthropic and OpenAI keys start with "sk-").' });
+  writeAnnaSettings({ ...readAnnaSettings(), provider, apiKey, model: model || undefined });
+  res.json({ ok: true, configured: true, provider, source: 'ui', keyHint: maskKey(apiKey) });
 });
 
 app.delete('/api/anna/settings', requireAdmin, (_req, res) => {
   const cur = readAnnaSettings();
-  delete cur.anthropicApiKey;
+  delete cur.apiKey; delete cur.provider; delete cur.model;
   writeAnnaSettings(cur);
-  res.json({ ok: true, configured: Boolean(ANTHROPIC_API_KEY), source: annaKeySource(), keyHint: maskKey(annaApiKey()) });
+  res.json({ ok: true, configured: Boolean(annaApiKey()), provider: annaProvider(), source: annaKeySource(), keyHint: maskKey(annaApiKey()) });
 });
 
-// Verify the effective key works with a tiny live call.
+// Verify the effective key/provider works with a tiny live call.
 app.post('/api/anna/settings/test', requireAdmin, async (req, res) => {
+  const provider = String(req.body?.provider || annaProvider()).toLowerCase();
   const apiKey = String(req.body?.apiKey || '').trim() || annaApiKey();
   if (!apiKey) return res.status(400).json({ ok: false, error: 'No API key configured.' });
   try {
-    await anna.callClaude({ apiKey, model: anna.MODELS.fast, maxTokens: 8, messages: [{ role: 'user', content: 'Reply with the word OK.' }] });
-    res.json({ ok: true, message: 'Connection successful — Anna is live.' });
+    await anna.llmComplete({ provider, apiKey, maxTokens: 8, messages: [{ role: 'user', content: 'Reply with the word OK.' }] });
+    res.json({ ok: true, message: `Connection successful — Anna is live on ${provider}.` });
   } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
 });
 
@@ -1489,9 +1502,11 @@ app.post('/api/anna/chat', requireAdmin, async (req, res) => {
 app.post('/api/anna/scan', requireAdmin, async (req, res) => {
   const { dataUrl, docType } = req.body || {};
   if (!dataUrl) return res.status(400).json({ error: 'dataUrl is required.' });
-  if (!ANTHROPIC_API_KEY) return res.status(503).json({ error: 'Document scanning requires ANTHROPIC_API_KEY.' });
+  // Vision/document scanning is Anthropic-only; needs an Anthropic key.
+  const anthropicKey = annaProvider() === 'anthropic' ? annaApiKey() : (ANTHROPIC_API_KEY || '');
+  if (!anthropicKey) return res.status(503).json({ error: 'Document scanning requires an Anthropic (Claude) key. Set provider to Anthropic in Settings → Anna AI, or set ANTHROPIC_API_KEY.' });
   try {
-    res.json(await anna.extractFromDocument({ dataUrl, docType, apiKey: ANTHROPIC_API_KEY }));
+    res.json(await anna.extractFromDocument({ dataUrl, docType, apiKey: anthropicKey }));
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 

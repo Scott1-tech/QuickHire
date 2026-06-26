@@ -25,6 +25,7 @@ export { pullCompliance, checkConsent, ConsentError, INTEGRATIONS, integrationSt
 export { chat } from './chat.js';
 export { recordOutcome, tuneWeights, outcomeStats, OUTCOME_KINDS, OUTCOME_SIGNAL } from './learning.js';
 export { callClaude, callClaudeJSON, annaConfigured, MODELS } from './claude.js';
+export { llmComplete, llmJSON, providerModel, PROVIDERS, DEFAULT_MODELS } from './llm.js';
 
 import { normalizeDriver } from './normalize.js';
 import { matchDriver } from './matcher.js';

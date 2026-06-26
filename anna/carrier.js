@@ -12,7 +12,8 @@
 // design): deterministic parser by default, optional Claude path for messy text.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { callClaudeJSON, MODELS, annaConfigured } from './claude.js';
+import { annaConfigured } from './claude.js';
+import { llmJSON } from './llm.js';
 
 /**
  * Extract structured requirements from a carrier's flat free-text form fields.
@@ -23,9 +24,10 @@ import { callClaudeJSON, MODELS, annaConfigured } from './claude.js';
 export async function extractCarrierSpec(form = {}, opts = {}) {
   if (opts.ai && annaConfigured(opts.apiKey)) {
     try {
-      const out = await callClaudeJSON({
+      const out = await llmJSON({
+        provider: opts.provider,
         apiKey: opts.apiKey,
-        model: opts.model || MODELS.fast,
+        model: opts.model,
         maxTokens: 700,
         system:
           'You convert a trucking carrier\'s free-text hiring requirements into strict structured JSON for a driver-matching engine. ' +
