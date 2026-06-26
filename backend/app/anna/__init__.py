@@ -29,6 +29,10 @@ from .nudges import compute_nudges
 from .portfolio import build_portfolio, merge_records, select_carrier, write_compliance
 from .queue import create_queue
 from .spec import OPS, compile_spec
+
+from .metrics import compute_metrics, compute_nudges
+
+
 from .truth import check_consistency
 
 __all__ = [
@@ -39,8 +43,13 @@ __all__ = [
     "build_portfolio", "merge_records", "select_carrier", "write_compliance", "create_queue",
     "OPS", "compile_spec", "process_lead",
     "OUTCOME_KINDS", "OUTCOME_SIGNAL", "outcome_stats", "record_outcome", "tune_weights",
+
+    "DEFAULT_MODELS", "PROVIDERS", "llm_complete", "llm_json", "provider_model",
+    "compute_metrics", "compute_nudges", "check_consistency",
+
     "PROVIDERS", "llm_complete", "llm_json", "provider_model",
     "compute_nudges", "check_consistency",
+
 ]
 
 
