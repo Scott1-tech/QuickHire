@@ -38,8 +38,8 @@ from .normalize import DRIVER_SHAPE, extract_from_document, low_confidence_field
 from .portfolio import build_portfolio, merge_records, select_carrier, write_compliance
 from .queue import create_queue
 from .spec import OPS, compile_spec
-from .learning import OUTCOME_KINDS, OUTCOME_SIGNAL, outcome_stats, record_outcome, tune_weights
-from .metrics import compute_metrics
+from .metrics import compute_metrics, compute_nudges
+from .truth import check_consistency
 
 __all__ = [
     "extract_carrier_spec", "chat", "MODELS", "anna_configured", "call_claude", "call_claude_json",
@@ -48,13 +48,9 @@ __all__ = [
     "DRIVER_SHAPE", "extract_from_document", "low_confidence_fields", "normalize_driver",
     "build_portfolio", "merge_records", "select_carrier", "write_compliance", "create_queue",
     "OPS", "compile_spec", "process_lead",
-
-    "OUTCOME_KINDS", "OUTCOME_SIGNAL", "outcome_stats", "record_outcome", "tune_weights", "compute_metrics",
-    "DEFAULT_MODELS", "PROVIDERS", "llm_complete", "llm_json", "provider_model",
-
     "OUTCOME_KINDS", "OUTCOME_SIGNAL", "outcome_stats", "record_outcome", "tune_weights",
-    "PROVIDERS", "llm_complete", "llm_json", "provider_model",
-
+    "DEFAULT_MODELS", "PROVIDERS", "llm_complete", "llm_json", "provider_model",
+    "compute_metrics", "compute_nudges", "check_consistency",
 ]
 
 

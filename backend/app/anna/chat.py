@@ -2,12 +2,7 @@
 import json
 import re
 
-
 from .claude import anna_configured, llm_complete
-
-from .claude import anna_configured
-from .llm import llm_complete, provider_model
-
 
 PAGES = ["dashboard", "carriers", "drivers", "trucks", "hiring", "tasks", "inbox", "notifications", "settings", "anna"]
 ENTITY_TYPES = ["driver", "carrier", "candidate", "truck"]
@@ -86,24 +81,15 @@ async def chat(*, messages: list | None = None, context: dict | None = None, opt
     if not anna_configured(opts.get("apiKey")):
         return heuristic_chat(messages, context)
 
-
     out = await llm_complete(
         provider=opts.get("provider"),
         api_key=opts.get("apiKey"),
         model=opts.get("model"),
-
-    provider = opts.get("provider") or "anthropic"
-    out = await llm_complete(
-        provider=provider,
-        api_key=opts.get("apiKey"),
-        model=opts.get("model") or provider_model(provider, "fast"),
-
         max_tokens=900,
         system=_system_prompt(context),
         tools=TOOLS,
         messages=[{"role": "assistant" if m.get("role") == "assistant" else "user", "content": str(m.get("content") or "")} for m in messages],
     )
-
     reply = out.get("text") or ""
     actions = []
     for call in out.get("toolCalls") or []:
@@ -113,17 +99,6 @@ async def chat(*, messages: list | None = None, context: dict | None = None, opt
         elif call["name"] == "open_profile":
             actions.append({"type": "open_profile", "entityType": inp.get("entityType"), "name": str(inp.get("name") or "")})
         elif call["name"] == "navigate":
-
-    reply = out["text"] or ""
-    actions = []
-    for call in out["toolCalls"]:
-        name, inp = call.get("name"), call.get("input") or {}
-        if name == "create_task":
-            actions.append({"type": "create_task", "task": _sanitize_task(inp)})
-        elif name == "open_profile":
-            actions.append({"type": "open_profile", "entityType": inp.get("entityType"), "name": str(inp.get("name") or "")})
-        elif name == "navigate":
-
             actions.append({"type": "navigate", "page": inp.get("page")})
     if not reply.strip() and actions:
         reply = _confirm_action(actions[0])
