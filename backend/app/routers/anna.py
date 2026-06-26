@@ -1,5 +1,4 @@
 """/api/anna/* — Anna driver-qualification agent routes."""
-import json
 import re
 from datetime import datetime, timezone
 
@@ -7,9 +6,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from .. import anna, config
-
-from ..anna_settings import PROVIDERS, clear_settings, effective_key, key_source, mask_key, model as anna_model, provider as anna_provider, set_settings
-
 from ..anna_settings import (
     anthropic_key,
     clear_settings,
@@ -25,8 +21,6 @@ from ..errors import error
 from ..store import (
     find_carrier_by_id,
     find_portfolio,
-    kv_get,
-    kv_set,
     read_carriers,
     read_portfolios,
     upsert_carrier,
@@ -39,9 +33,6 @@ SPEC_PARSE_VERSION = 1
 
 
 async def _anna_opts() -> dict:
-
-    return {"provider": await anna_provider(), "apiKey": await effective_key(), "model": await anna_model()}
-
     # Anthropic-only flows (carrier-spec extraction, normalization, compliance
     # narration, document scanning) always use an Anthropic key.
     return {"apiKey": await anthropic_key()}
@@ -50,7 +41,6 @@ async def _anna_opts() -> dict:
 async def _chat_opts() -> dict:
     # The free-form assistant runs on whichever provider the team selected.
     return {"apiKey": await effective_key(), "provider": await effective_provider(), "model": await effective_model()}
-
 
 
 def _now() -> str:
@@ -89,44 +79,9 @@ async def _anna_carriers() -> list:
             c["structuredRequirements"] = res["requirements"]
             c["structuredSpecVersion"] = SPEC_PARSE_VERSION
             await upsert_carrier(c)
-        reqs = c["structuredRequirements"]
-        learned = await _learning_for(c["id"])
-        if learned.get("weights"):
-            reqs = {**reqs, "softWeights": learned["weights"]}
-        out.append({"id": c["id"], "name": c["name"], "requirements": reqs, "specVersion": SPEC_PARSE_VERSION})
+        out.append({"id": c["id"], "name": c["name"], "requirements": c["structuredRequirements"], "specVersion": SPEC_PARSE_VERSION})
     return out
 
-
-
-# ── Outcome-based learning, stored per-carrier in the KV table ───────────────
-def _learning_key(carrier_id: str) -> str:
-    return f"anna.learning.{carrier_id}"
-
-
-async def _learning_for(carrier_id: str) -> dict:
-    raw = await kv_get(_learning_key(carrier_id))
-    try:
-        return json.loads(raw) if raw else {}
-    except Exception:  # noqa: BLE001
-        return {}
-
-
-async def _save_learning(carrier_id: str, data: dict) -> None:
-    await kv_set(_learning_key(carrier_id), json.dumps(data))
-
-
-# ── Anna settings (Anthropic API key) ────────────────────────────────────────
-@router.get("/api/anna/settings")
-async def anna_get_settings():
-    eff = await effective_key()
-    prov = await anna_provider()
-    return {
-        "configured": bool(eff),
-        "provider": prov,
-        "providers": PROVIDERS,
-        "source": await key_source(),
-        "keyHint": mask_key(eff),
-        "model": (await anna_model()) or anna.provider_model(prov, "fast"),
 
 # ── Anna settings (AI provider + API key) ────────────────────────────────────
 # Supports Claude (Anthropic, default) or OpenAI. The key is stored server-side
@@ -142,7 +97,6 @@ async def anna_get_settings():
         "source": await key_source(),
         "keyHint": mask_key(eff),
         "model": (await effective_model()) or anna.provider_model(provider, "fast"),
-
         "integrations": anna.integration_status(),
     }
 
@@ -150,63 +104,35 @@ async def anna_get_settings():
 @router.post("/api/anna/settings")
 async def anna_set_settings(request: Request):
     body = await request.json()
-
-    prov = str(body.get("provider") or "anthropic").lower()
-    api_key = str(body.get("apiKey") or "").strip()
-    model_override = str(body.get("model") or "").strip()
-    if prov not in PROVIDERS:
-        raise error(400, f"provider must be one of: {', '.join(PROVIDERS)}.")
-
     provider = str(body.get("provider") or "anthropic").lower()
     api_key = str(body.get("apiKey") or "").strip()
     model = str(body.get("model") or "").strip()
     if provider not in anna.PROVIDERS:
         raise error(400, f"provider must be one of: {', '.join(anna.PROVIDERS)}.")
-
     if not api_key:
         raise error(400, "apiKey is required.")
     if not re.match(r"^sk-", api_key):
         raise error(400, 'That does not look like an API key (Anthropic and OpenAI keys start with "sk-").')
-
-    await set_settings(prov, api_key, model_override or None)
-    return {"ok": True, "configured": True, "provider": prov, "source": "ui", "keyHint": mask_key(api_key)}
-
     await set_settings(provider=provider, api_key=api_key, model=model or None)
     return {"ok": True, "configured": True, "provider": provider, "source": "ui", "keyHint": mask_key(api_key)}
-
 
 
 @router.delete("/api/anna/settings")
 async def anna_delete_settings():
     await clear_settings()
-
-    return {"ok": True, "configured": bool(await effective_key()), "provider": await anna_provider(),
-            "source": await key_source(), "keyHint": mask_key(await effective_key())}
-
     return {"ok": True, "configured": bool(await effective_key()), "provider": await effective_provider(), "source": await key_source(), "keyHint": mask_key(await effective_key())}
-
 
 
 @router.post("/api/anna/settings/test")
 async def anna_test_settings(request: Request):
     body = await request.json()
-
-    prov = str(body.get("provider") or await anna_provider()).lower()
-
     provider = str(body.get("provider") or await effective_provider()).lower()
-
     api_key = str(body.get("apiKey") or "").strip() or await effective_key()
     if not api_key:
         raise error(400, "No API key configured.")
     try:
-
-        await anna.llm_complete(provider=prov, api_key=api_key, max_tokens=8,
-                                messages=[{"role": "user", "content": "Reply with the word OK."}])
-        return {"ok": True, "message": f"Connection successful — Anna is live on {prov}."}
-
         await anna.llm_complete(provider=provider, api_key=api_key, max_tokens=8, messages=[{"role": "user", "content": "Reply with the word OK."}])
         return {"ok": True, "message": f"Connection successful — Anna is live on {provider}."}
-
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail={"ok": False, "error": str(e)})
 
@@ -228,12 +154,10 @@ async def anna_scan(request: Request):
     body = await request.json()
     if not body.get("dataUrl"):
         raise error(400, "dataUrl is required.")
-    # Vision/document scanning is Anthropic-only; needs a Claude key.
-    anthropic_key = (await effective_key()) if (await anna_provider()) == "anthropic" else config.ANTHROPIC_API_KEY
-    if not anthropic_key:
-        raise error(503, "Document scanning requires an Anthropic (Claude) key. Set provider to Anthropic in Settings → Anna AI, or set ANTHROPIC_API_KEY.")
+    if not config.ANTHROPIC_API_KEY:
+        raise error(503, "Document scanning requires ANTHROPIC_API_KEY.")
     try:
-        return await anna.extract_from_document({"dataUrl": body.get("dataUrl"), "docType": body.get("docType"), "apiKey": anthropic_key})
+        return await anna.extract_from_document({"dataUrl": body.get("dataUrl"), "docType": body.get("docType"), "apiKey": config.ANTHROPIC_API_KEY})
     except Exception as e:  # noqa: BLE001
         raise error(502, str(e))
 
@@ -415,7 +339,6 @@ async def anna_packet(pid: str, request: Request):
             "status": review.get("status"), "decidedBy": review.get("decidedBy"), "decidedAt": review.get("decidedAt"),
             "reason": review.get("decisionReason"), "carrierSelectedBy": review.get("carrierSelectedBy"),
         },
-        "outcome": p.get("outcome"),
         "auditTrail": p.get("audit") or [],
     }
     if (request.query_params.get("format") or "") == "html":
@@ -636,40 +559,3 @@ td{{padding:4px 8px}} .meta{{color:#888;font-size:12px}} .verdict{{display:inlin
 <h2>Audit Trail</h2>
 <table class="audit"><tr><th>When</th><th>Actor</th><th>Event</th><th>Detail</th></tr>{audit}</table>
 </body></html>"""
-
-
-# ── Outcome capture + learning ───────────────────────────────────────────────
-@router.post("/api/anna/portfolios/{pid}/outcome")
-async def anna_outcome(pid: str, request: Request):
-    p = await find_portfolio(pid)
-    if not p:
-        raise error(404, "Not found")
-    body = await request.json()
-    outcome = body.get("outcome")
-    if outcome not in anna.OUTCOME_KINDS:
-        raise error(400, f"outcome must be one of: {', '.join(anna.OUTCOME_KINDS)}.")
-    who = body.get("by") or (p.get("review") or {}).get("assignedRecruiter") or "Recruiter"
-    p["outcome"] = {"status": outcome, "note": body.get("note") or "", "by": who, "at": _now()}
-    _audit_log(p, "outcome", f"Outcome recorded: {outcome}{(' — ' + body['note']) if body.get('note') else ''}.", who)
-
-    learning = None
-    carrier_id = (p.get("carrier") or {}).get("carrierId")
-    carrier = await find_carrier_by_id(carrier_id) if carrier_id else None
-    if carrier:
-        base = anna.compile_spec({})["softWeights"]
-        prior = await _learning_for(carrier_id)
-        updated = anna.record_outcome(prior, outcome=outcome,
-                                      breakdown=(p.get("carrier") or {}).get("scoreBreakdown") or {}, base_weights=base)
-        await _save_learning(carrier_id, {"samples": updated["samples"], "weights": updated["weights"], "stats": updated["stats"]})
-        learning = {"carrier": carrier.get("name"), **updated["stats"], "tuned": bool(updated["weights"])}
-        if updated["weights"]:
-            _audit_log(p, "learning", f"Anna re-tuned {carrier.get('name')}'s match weights from "
-                       f"{updated['stats']['total']} placements ({updated['stats']['successRate']}% success).")
-    await upsert_portfolio(p)
-    return {"ok": True, "outcome": p["outcome"], "learning": learning}
-
-
-# ── Metrics (ROI view) ───────────────────────────────────────────────────────
-@router.get("/api/anna/metrics")
-async def anna_metrics():
-    return anna.compute_metrics(await read_portfolios())
