@@ -126,7 +126,7 @@ export default function Dashboard() {
         footer={<Link to="/carriers" onClick={close} className="text-[13px] font-semibold text-primary flex items-center gap-1.5">Go to Carriers <Icon name="arrowRight" size={15} /></Link>}>
         <div className="flex flex-col gap-2.5">
           {s.carriers.map((c) => (
-            <Link key={c.id} to={`/carriers/${c.id}`} onClick={() => { s.setCurrentCarrierId(c.id); close(); }}
+            <Link key={c.id} to={`/carriers/${c.id}`} onClick={close}
               className="card p-3.5 flex items-center gap-3 hover:shadow-card transition">
               <div className="flex-1 min-w-0">
                 <div className="text-[13.5px] font-bold text-ink uppercase truncate">{c.name}</div>

@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { Carrier, Candidate, Driver, Truck, Employee, Task, ChecklistStep, Role, Stage } from '@/types';
+import type { Carrier, Candidate, Driver, Truck, Employee, Task, ChecklistStep, Role, Stage, PipelineStage, StageColor } from '@/types';
+import { DEFAULT_PIPELINE } from '@/types';
+import { setStageColorRegistry } from '@/lib/pipeline';
 import { CARRIERS, CANDIDATES, DRIVERS, TRUCKS, EMPLOYEES, TASKS, CHECKLIST_TEMPLATE } from '@/data/mock';
 
 interface Store {
@@ -30,6 +32,14 @@ interface Store {
   reorderChecklist: (id: string, dir: 'up' | 'down') => void;
   addChecklistStep: (step: { name: string; group: ChecklistStep['group']; description?: string }) => void;
   removeChecklistStep: (id: string) => void;
+  // hiring pipeline stages (board columns) — fully customizable by full-access users
+  pipeline: PipelineStage[];
+  addStage: (name: string, color?: StageColor) => void;
+  renameStage: (id: string, name: string) => void;
+  setStageColor: (id: string, color: StageColor) => void;
+  reorderStage: (id: string, dir: 'left' | 'right') => void;
+  removeStage: (id: string) => void;
+  resetPipeline: () => void;
   // mutations
   moveCandidate: (id: string, stage: Stage) => void;
   addCandidate: (c: Partial<Candidate>) => Candidate;
@@ -62,11 +72,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [employees, setEmployees] = useState<Employee[]>(EMPLOYEES);
   const [tasks, setTasks] = useState<Task[]>(TASKS);
   const [checklistTemplate, setChecklistTemplate] = useState<ChecklistStep[]>(CHECKLIST_TEMPLATE);
+  const [pipeline, setPipeline] = useState<PipelineStage[]>(DEFAULT_PIPELINE);
   const currentUser = 'Fleet Admin';
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
+
+  // Keep the shared name→colour registry in sync so <Pill> shows stage colours.
+  useEffect(() => {
+    setStageColorRegistry(pipeline);
+  }, [pipeline]);
 
   const currentCarrier = useMemo(
     () => carriers.find((c) => c.id === currentCarrierId) ?? carriers[0],
@@ -110,6 +126,44 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ...prev, { id: uid('ck'), name: step.name, group: step.group, status: 'action', description: step.description },
     ]),
     removeChecklistStep: (id) => setChecklistTemplate((prev) => prev.filter((x) => x.id !== id)),
+    pipeline,
+    addStage: (name, color = 'slate') => {
+      const clean = name.trim();
+      if (!clean) return;
+      setPipeline((prev) => prev.some((s) => s.name.toLowerCase() === clean.toLowerCase())
+        ? prev
+        : [...prev, { id: uid('st'), name: clean, color }]);
+    },
+    renameStage: (id, name) => {
+      const clean = name.trim();
+      if (!clean) return;
+      setPipeline((prev) => {
+        const target = prev.find((s) => s.id === id);
+        if (!target || target.name === clean) return prev;
+        const from = target.name;
+        // Move every candidate sitting in the old stage name onto the new one.
+        setCandidates((cs) => cs.map((c) => (c.stage === from ? { ...c, stage: clean } : c)));
+        return prev.map((s) => (s.id === id ? { ...s, name: clean } : s));
+      });
+    },
+    setStageColor: (id, color) => setPipeline((prev) => prev.map((s) => (s.id === id ? { ...s, color } : s))),
+    reorderStage: (id, dir) => setPipeline((prev) => {
+      const idx = prev.findIndex((s) => s.id === id);
+      const swap = dir === 'left' ? idx - 1 : idx + 1;
+      if (idx < 0 || swap < 0 || swap >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[swap]] = [next[swap], next[idx]];
+      return next;
+    }),
+    removeStage: (id) => setPipeline((prev) => {
+      if (prev.length <= 1) return prev; // keep at least one column
+      const removed = prev.find((s) => s.id === id);
+      const next = prev.filter((s) => s.id !== id);
+      // Candidates in the removed stage fall back to the first remaining stage.
+      if (removed) setCandidates((cs) => cs.map((c) => (c.stage === removed.name ? { ...c, stage: next[0].name } : c)));
+      return next;
+    }),
+    resetPipeline: () => setPipeline(DEFAULT_PIPELINE),
     moveCandidate: (id, stage) =>
       setCandidates((prev) =>
         prev.map((c) => (c.id === id ? { ...c, stage, stageEnteredAt: new Date().toISOString() } : c)),
@@ -208,6 +262,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const created: Task = {
         id: uid('tk'),
         carrierId: t.carrierId ?? currentCarrierId,
+        driverId: t.driverId,
         title: t.title ?? 'New Task',
         status: t.status ?? 'TO DO',
         assignee: t.assignee,

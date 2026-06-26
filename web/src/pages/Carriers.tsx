@@ -88,7 +88,7 @@ export default function Carriers() {
             const cands = CANDIDATES.filter((x) => x.carrierId === c.id).length;
             return (
               <div key={c.id} className="card p-5 hover:shadow-card transition cursor-pointer"
-                onClick={() => { s.setCurrentCarrierId(c.id); nav(`/carriers/${c.id}`); }}>
+                onClick={() => nav(`/carriers/${c.id}`)}>
                 <div className="flex items-start justify-between">
                   <div>
                     <div className="text-[15px] font-extrabold text-ink uppercase">{c.name}</div>

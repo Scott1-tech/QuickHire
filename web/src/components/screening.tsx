@@ -51,6 +51,45 @@ export function saveReqs(carrierId: string, reqs: Reqs) {
   localStorage.setItem(`qh_req_${carrierId}`, JSON.stringify(reqs));
 }
 
+// Per-candidate screening record — remembered between visits so the CDL/MVR/PSP/
+// Insurance data doesn't have to be re-typed each time.
+export function loadProfile(candidateId: string): Driver | null {
+  try {
+    const raw = localStorage.getItem(`qh_screen_${candidateId}`);
+    if (raw) return JSON.parse(raw) as Driver;
+  } catch { /* ignore */ }
+  return null;
+}
+export function saveProfile(candidateId: string, driver: Driver) {
+  localStorage.setItem(`qh_screen_${candidateId}`, JSON.stringify(driver));
+}
+
+// ── Integration seam ─────────────────────────────────────────────────────────
+// Single place where applicant data is pulled from connected sources. Today it
+// derives CDL basics from a linked driver record; once FMCSA (PSP) and Tenstreet
+// (MVR / employment verification) are connected they populate the rest here, and
+// the screening form auto-fills instead of being typed.
+export interface SourceMap { cdl: string; mvr: string; psp: string; insurance: string }
+export function pullFromSources(
+  name: string,
+  drivers: { name: string; type: string; hireDate: string }[],
+): { driver: Driver; sources: SourceMap } {
+  const driver = { ...clone(EMPTY_DRIVER), name };
+  const sources: SourceMap = {
+    cdl: 'Manual entry',
+    mvr: 'Tenstreet — not connected',
+    psp: 'FMCSA PSP — not connected',
+    insurance: 'Manual entry',
+  };
+  const match = drivers.find((d) => d.name.toUpperCase() === name.toUpperCase());
+  if (match) {
+    driver.cdl.type = match.type === 'owner-operator' ? 'owner-operator' : 'company';
+    driver.cdl.experienceYears = Math.max(0, Math.floor((Date.now() - new Date(match.hireDate).getTime()) / (365.25 * 864e5)));
+    sources.cdl = 'Driver record';
+  }
+  return { driver, sources };
+}
+
 // Screen a driver against requirements via the backend (AI, or rule-engine fallback).
 export async function runScreen(requirements: Reqs, driver: Driver): Promise<Result> {
   const res = await fetch('/api/screen', {

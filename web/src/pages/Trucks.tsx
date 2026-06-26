@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useStore } from '@/store';
-import { PageHeader, Pill } from '@/ui';
+import { PageHeader, Pill, AssignmentIcon } from '@/ui';
 import DataTable, { type Column } from '@/components/DataTable';
 import CreateModal from '@/components/CreateModal';
 import type { Truck } from '@/types';
@@ -25,15 +25,16 @@ export default function Trucks() {
     t.status !== 'Inactive');
 
   const cols: Column<Truck>[] = [
+    { key: 'availability', header: 'Avail.', sortValue: (t) => (t.operatorDriverId ? 1 : 0), render: (t) => <AssignmentIcon assigned={!!t.operatorDriverId} size={16} /> },
     { key: 'unit', header: 'Unit #', sortValue: (t) => t.unit, render: (t) => <Link to={`/carriers/${t.carrierId}/trucks/${t.id}`} className="font-bold text-info">#{t.unit}</Link> },
     { key: 'make', header: 'Make', render: (t) => `${t.make}` },
     { key: 'model', header: 'Model' },
     { key: 'year', header: 'Year', sortValue: (t) => t.year },
     { key: 'plate', header: 'Plate' },
     { key: 'mc', header: 'MC', render: (t) => t.mc ?? '—' },
-    { key: 'operator', header: 'Operator', render: (t) => {
-      const d = s.drivers.find((x) => x.id === t.operatorDriverId);
-      return d ? <Link to={`/carriers/${t.carrierId}/drivers/${d.id}`} className="text-info">{d.name}</Link> : <span className="text-muted">—</span>;
+    { key: 'operator', header: 'Working with', render: (t) => {
+      const d = s.allDrivers.find((x) => x.id === t.operatorDriverId);
+      return d ? <Link to={`/carriers/${t.carrierId}/drivers/${d.id}`} className="text-info">{d.name}</Link> : <span className="text-muted">— Available —</span>;
     } },
     { key: 'owner', header: 'Owner', render: (t) => t.owner ?? '—' },
     { key: 'odometer', header: 'Odometer', sortValue: (t) => t.odometer ?? 0, render: (t) => t.odometer?.toLocaleString() ?? '—' },

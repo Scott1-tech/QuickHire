@@ -18,9 +18,9 @@ Workdeck dashboard  ◄──────── completed application ── Dri
 
 ## Stack
 
-- **Backend:** Node.js + Express (`server.js`)
-- **Storage:** simple JSON file store + uploaded files on disk (`data/`) — no external DB needed
-- **Email:** Nodemailer (optional SMTP) · **SMS:** Twilio REST (optional)
+- **Backend:** Python + FastAPI (`backend/`, run with Uvicorn) — see [`backend/README.md`](./backend/README.md)
+- **Storage:** PostgreSQL (one JSONB row per entity) + uploaded files on disk (`data/`)
+- **Email:** Resend (primary) / SMTP (fallback) · **SMS:** Twilio REST (optional)
 - **Frontend:** static HTML + vanilla JS + Tailwind (CDN), Inter font, brand color `#b01d30`
 
 ## Pages
@@ -29,12 +29,19 @@ Workdeck dashboard  ◄──────── completed application ── Dri
 |-------|---------|
 | `/` | **Workdeck dashboard** — invite drivers, see all applications, open submitted details (incl. uploaded docs + signature). |
 | `/apply.html?token=…` | **Driver application** — Step 1 (qualification) + Step 2 (consents & signature). Only reachable with a valid invite token. |
+| `/docusign` | **DocuSign console** — send offer letters & DOT consents for e-signature. Contracts **auto-fill** from the driver's application (CDL, address, DOB…); the driver only reviews & corrects. Falls back to a fully-demoable simulated mode until `DOCUSIGN_*` is configured. |
 
 ## Run locally
 
 ```bash
-npm install
-npm start          # http://localhost:3000
+cd backend
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+
+# Point at a Postgres instance (defaults to localhost/quickhire):
+export DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/quickhire
+
+uvicorn app.main:app --host 0.0.0.0 --port 3000   # http://localhost:3000
 ```
 
 Open `http://localhost:3000`, invite a driver, copy the generated link, open it in another
@@ -45,11 +52,13 @@ tab, complete the form, then watch it appear as **Submitted** in the dashboard.
 
 ## Deploy to Railway
 
-1. Connect the repo to Railway (it auto-detects Node via `railway.json` / Nixpacks).
-2. Set environment variables (see `.env.example`) — at minimum `ADMIN_PASSWORD` and `PUBLIC_URL`.
-3. **Add a Volume** mounted at `/app/data` (set `DATA_DIR=/app/data`) so submissions and
-   uploaded files persist across deploys (Railway's normal filesystem is ephemeral).
-4. Add SMTP vars to send invite emails, and Twilio vars to send SMS (both optional).
+1. Connect the repo to Railway (it builds the Python image via `railway.json` → `Dockerfile`).
+2. **Add a PostgreSQL** service and set `DATABASE_URL` (Railway's `postgres://` URL works —
+   the app upgrades it to the async driver automatically).
+3. Set environment variables (see `.env.example`) — at minimum `ADMIN_PASSWORD` and `PUBLIC_URL`.
+4. **Add a Volume** mounted at `/app/data` (set `DATA_DIR=/app/data`) so uploaded files
+   persist across deploys (Railway's normal filesystem is ephemeral).
+5. Add SMTP/Resend vars to send invite emails, and Twilio vars to send SMS (both optional).
 
 ## Application link sending (email + SMS)
 
@@ -91,6 +100,26 @@ See [`.env.example`](./.env.example). Key ones:
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` — SMS invites.
 - `LINK_TTL_DAYS` — link expiry window (default 14). `SUPPORT_CONTACT` — shown to drivers.
 - `ANTHROPIC_API_KEY` — Molly AI summaries. `TELEGRAM_*` — Documents-tab Telegram send.
+
+## DocuSign e-Signature (offer letters & consents)
+
+Send a driver their offer letter or DOT consent forms for legally-binding
+e-signature, tracked back on the candidate record.
+
+- **Auto-fill:** every contract is pre-populated from the data QuickHire already
+  collected (name, DOB, address, CDL number/state/class/expiration, phone, email).
+  The driver only **reviews and corrects** — they never retype. Missing fields
+  (e.g. SSN, which we don't collect) render blank-but-editable and are flagged in
+  the console. Implemented with DocuSign prefilled, editable text tabs.
+- **Connected to the pipeline:** when an offer letter is signed, the
+  "Offer Letter Sent/Signed" checklist step auto-completes and the event lands in
+  the candidate's Activity trail. Status updates arrive via DocuSign Connect
+  webhooks (or a manual refresh).
+- **Simulated by default:** with no `DOCUSIGN_*` env vars set, envelopes are
+  created locally and clearly flagged `simulated` so the full
+  send → review → sign → complete flow works in dev. Set the env vars (JWT Grant
+  auth — see `.env.example`) to flip to real, live signing with no code changes.
+- See [`backend/README.md`](./backend/README.md) for the backend layout and API.
 
 ## Notes
 

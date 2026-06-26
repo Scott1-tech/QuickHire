@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>DocuSign — QuickHire</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config={theme:{extend:{colors:{primary:{500:'#b01d30',600:'#8f1727'},accent:{50:'#fef2f4',100:'#fde6e9',200:'#f7c4cc',500:'#b01d30',600:'#8f1727'}},fontFamily:{sans:['Inter','sans-serif']}}}}</script>
+<style>
+body{font-family:'Inter',sans-serif;}
+.pill{display:inline-flex;align-items:center;padding:.2rem .65rem;border-radius:9999px;font-size:.72rem;font-weight:600;}
+.lbl{display:block;font-size:.8rem;font-weight:500;color:#6b7280;margin-bottom:.25rem;}
+.field{width:100%;padding:.55rem .85rem;border:1.5px solid #e5e7eb;border-radius:.625rem;font-size:.875rem;outline:none;background:#fff;}
+.field:focus{border-color:#b01d30;}
+.btn{padding:.6rem 1rem;border-radius:.625rem;font-size:.85rem;font-weight:600;transition:all .15s;cursor:pointer;}
+.btn-primary{background:#b01d30;color:#fff;}.btn-primary:hover{background:#8f1727;}
+.btn-ghost{border:1px solid #e5e7eb;color:#374151;background:#fff;}.btn-ghost:hover{background:#f9fafb;}
+.btn:disabled{opacity:.5;cursor:not-allowed;}
+.card{background:#fff;border:1px solid #e5e7eb;border-radius:1rem;box-shadow:0 1px 2px rgba(0,0,0,.04);}
+table.env{width:100%;border-collapse:collapse;}
+table.env th{text-align:left;font-size:.7rem;text-transform:uppercase;letter-spacing:.03em;color:#9ca3af;padding:.5rem .6rem;border-bottom:1px solid #eef0f2;}
+table.env td{padding:.6rem .6rem;border-bottom:1px solid #f3f4f6;font-size:.83rem;vertical-align:middle;}
+.fieldchip{font-size:.72rem;padding:.15rem .5rem;border-radius:9999px;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;}
+.fieldchip.miss{background:#fef2f4;color:#b91c1c;border-color:#f7c4cc;}
+</style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+
+<!-- Sticky header -->
+<header class="sticky top-0 z-50 bg-white border-b border-gray-200">
+  <div class="max-w-[1280px] mx-auto px-4 h-14 flex items-center gap-3">
+    <div class="text-sm text-gray-500 flex items-center gap-1.5">
+      <a href="/" class="hover:text-accent-600 font-medium text-gray-700">QuickHire</a>
+      <span class="text-gray-300">›</span>
+      <span class="text-accent-600 font-semibold">DocuSign · e-Signature</span>
+    </div>
+    <span id="modeBadge" class="pill bg-gray-100 text-gray-500">…</span>
+    <div class="flex-1"></div>
+    <button onclick="location.href='/'" class="text-sm text-gray-400 hover:text-gray-700">← Back</button>
+  </div>
+</header>
+
+<div class="max-w-[1280px] mx-auto px-4 py-6 space-y-5">
+
+  <!-- Mode / status banner -->
+  <div id="statusBanner" class="card p-4 text-sm"></div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+    <!-- Send card -->
+    <div class="card p-5">
+      <h2 class="font-bold text-lg mb-1">Send a document for e-signature</h2>
+      <p class="text-sm text-gray-500 mb-4">The contract is <strong>auto-filled</strong> from the driver's QuickHire
+        application — they only review &amp; correct, never retype.</p>
+
+      <label class="lbl">Driver</label>
+      <select id="candidateSel" class="field mb-3"></select>
+
+      <label class="lbl">Document</label>
+      <select id="docTypeSel" class="field mb-3"></select>
+      <p id="docDesc" class="text-xs text-gray-400 -mt-2 mb-3"></p>
+
+      <!-- Offer-letter-only fields -->
+      <div id="offerFields" class="hidden grid grid-cols-2 gap-3 mb-3">
+        <div><label class="lbl">Position</label><input id="f_position" class="field" placeholder="Company Driver (CDL-A)"/></div>
+        <div><label class="lbl">Compensation</label><input id="f_payRate" class="field" placeholder="$0.62 / mile"/></div>
+        <div><label class="lbl">Start / Orientation</label><input id="f_startDate" class="field" placeholder="2026-07-01"/></div>
+        <div><label class="lbl">Reports To</label><input id="f_supervisor" class="field" placeholder="Safety & Driver Mgmt"/></div>
+      </div>
+
+      <div class="flex items-center gap-2 mb-3">
+        <input type="checkbox" id="embeddedChk" class="w-4 h-4 accent-[#b01d30]"/>
+        <label for="embeddedChk" class="text-sm text-gray-600">In-app signing (embedded) instead of emailing the driver</label>
+      </div>
+
+      <div class="flex gap-2">
+        <button id="previewBtn" class="btn btn-ghost flex-1">Preview auto-fill</button>
+        <button id="sendBtn" class="btn btn-primary flex-1">Send for signature</button>
+      </div>
+      <p id="sendMsg" class="hidden text-sm mt-3"></p>
+    </div>
+
+    <!-- Auto-fill preview -->
+    <div class="card p-5">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-bold text-lg">Auto-fill preview</h2>
+        <span id="previewLabel" class="pill bg-accent-50 text-accent-600 hidden"></span>
+      </div>
+      <p id="previewEmpty" class="text-sm text-gray-400">Pick a driver and document, then <em>Preview auto-fill</em> to see
+        every field pre-populated from their record.</p>
+      <div id="previewBody" class="hidden">
+        <div id="fieldChips" class="flex flex-wrap gap-1.5 mb-3"></div>
+        <iframe id="docFrame" class="w-full h-72 border border-gray-200 rounded-lg bg-white"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <!-- Envelopes -->
+  <div class="card p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-bold text-lg">Envelopes</h2>
+      <button id="reloadEnv" class="btn btn-ghost text-xs">↻ Refresh list</button>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="env">
+        <thead><tr><th>Driver</th><th>Document</th><th>Status</th><th>Signer</th><th>Updated</th><th>Actions</th></tr></thead>
+        <tbody id="envRows"><tr><td colspan="6" class="text-gray-400 text-sm py-4">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Templates (live mode) -->
+  <div id="templatesCard" class="card p-5 hidden">
+    <h2 class="font-bold text-lg mb-3">Account templates</h2>
+    <div id="templatesBody" class="text-sm text-gray-500"></div>
+  </div>
+
+</div>
+
+<script src="/docusign.js"></script>
+</body>
+</html>
