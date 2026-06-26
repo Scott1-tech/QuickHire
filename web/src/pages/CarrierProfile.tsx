@@ -46,6 +46,37 @@ export default function CarrierProfile() {
   const openTruck = (carrierId: string, truckId: string) => { s.setCurrentCarrierId(carrierId); nav(`/carriers/${carrierId}/trucks/${truckId}`); };
   const openDriver = (carrierId: string, driverId: string) => { s.setCurrentCarrierId(carrierId); nav(`/carriers/${carrierId}/drivers/${driverId}`); };
 
+  const [fmcsaOpen, setFmcsaOpen] = useState(false);
+  const [fmcsaDot, setFmcsaDot] = useState('');
+  const [fmcsaMc, setFmcsaMc] = useState('');
+  const [fmcsaResult, setFmcsaResult] = useState<Record<string, any> | null>(null);
+  const [fmcsaBusy, setFmcsaBusy] = useState(false);
+  const h = () => ({ 'Content-Type': 'application/json', 'x-admin-token': localStorage.getItem('qh_admin') ?? '' });
+
+  const fmcsaLookup = async () => {
+    if (!fmcsaDot && !fmcsaMc) return;
+    setFmcsaBusy(true); setFmcsaResult(null);
+    try {
+      const params = new URLSearchParams();
+      if (fmcsaDot) params.set('dot', fmcsaDot);
+      if (fmcsaMc) params.set('mc', fmcsaMc);
+      const r = await fetch(`/api/fmcsa/lookup?${params}`, { headers: h() });
+      const d = await r.json();
+      setFmcsaResult(d);
+    } catch { setFmcsaResult({ error: 'Lookup failed' }); }
+    finally { setFmcsaBusy(false); }
+  };
+
+  const fmcsaFill = async () => {
+    if (!fmcsaDot && !fmcsaMc) return;
+    setFmcsaBusy(true);
+    try {
+      await fetch(`/api/carriers/${id}/fmcsa-fill`, { method: 'POST', headers: h(), body: JSON.stringify({ dot: fmcsaDot, mc: fmcsaMc }) });
+      setFmcsaOpen(false); load();
+    } catch { /* ignore */ }
+    finally { setFmcsaBusy(false); }
+  };
+
   const save = async () => {
     setBusy(true);
     try { await updateCarrier(id, { requirements: draft }); setEditing(false); load(); }
@@ -63,6 +94,7 @@ export default function CarrierProfile() {
       <PageHeader crumbs={[{ label: 'Carriers', to: '/carriers' }, { label: rec.name }]}
         actions={
           <div className="flex gap-2">
+            {!editing && <button onClick={() => setFmcsaOpen(true)} className="btn-ghost">🔍 FMCSA Lookup</button>}
             {!editing && <button onClick={() => setSendOpen(true)} className="btn-ghost">✉ Send to carrier</button>}
             {!editing && <button onClick={() => { setDraft(rec.requirements); setEditing(true); }} className="btn-primary">
               {rec.progress.filled ? '✎ Edit requirements' : '✎ Fill in requirements'}</button>}
@@ -88,6 +120,14 @@ export default function CarrierProfile() {
             <div className="text-right">
               <Pill kind={meta.kind}>{meta.label}</Pill>
               <div className="text-[12px] text-muted mt-2">{rec.progress.filled} of {rec.progress.total} answered</div>
+              {(rec as any).completeness && (
+                <div className="mt-2">
+                  <div className="text-[12px] text-muted">Profile {(rec as any).completeness.percent}% complete</div>
+                  <div className="w-24 h-1.5 bg-slate-200 rounded-full overflow-hidden mt-1 ml-auto">
+                    <div className="h-full bg-primary rounded-full" style={{ width: `${(rec as any).completeness.percent}%` }} />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
           {rec.status === 'awaiting_carrier' && (
@@ -206,6 +246,46 @@ export default function CarrierProfile() {
       </div>
 
       {sendOpen && <SendLink rec={rec} onClose={() => setSendOpen(false)} onSent={load} />}
+
+      {fmcsaOpen && (
+        <div className="fixed inset-0 bg-black/40 z-50 grid place-items-center p-4" onClick={() => setFmcsaOpen(false)}>
+          <div className="card p-6 w-[480px] max-w-full shadow-pop" onClick={(e) => e.stopPropagation()}>
+            <div className="text-[16px] font-extrabold text-ink mb-1">🔍 FMCSA Carrier Lookup</div>
+            <p className="text-[13px] text-muted mb-4">Enter a DOT or MC number to auto-fill carrier information from the FMCSA database.</p>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div>
+                <label className="field-label">DOT Number</label>
+                <input value={fmcsaDot} onChange={(e) => setFmcsaDot(e.target.value)} placeholder="e.g. 1234567" className="input" />
+              </div>
+              <div>
+                <label className="field-label">MC Number</label>
+                <input value={fmcsaMc} onChange={(e) => setFmcsaMc(e.target.value)} placeholder="e.g. MC-123456" className="input" />
+              </div>
+            </div>
+            <div className="flex gap-2 mb-4">
+              <button onClick={fmcsaLookup} disabled={fmcsaBusy || (!fmcsaDot && !fmcsaMc)} className="btn-primary">{fmcsaBusy ? 'Looking up…' : 'Lookup'}</button>
+            </div>
+            {fmcsaResult && !fmcsaResult.error && (
+              <div className="bg-slate-50 rounded-xl p-4 mb-4 text-[13px] space-y-1.5">
+                {fmcsaResult.simulated && <div className="text-amber-600 text-[11px] mb-2">⚠ Demo data — configure FMCSA_API_KEY for live results</div>}
+                <div><span className="text-muted">Legal Name:</span> <span className="font-semibold">{fmcsaResult.legalName}</span></div>
+                {fmcsaResult.dbaName && <div><span className="text-muted">DBA:</span> {fmcsaResult.dbaName}</div>}
+                <div><span className="text-muted">DOT:</span> {fmcsaResult.dotNumber} · <span className="text-muted">MC:</span> {fmcsaResult.mcNumber}</div>
+                <div><span className="text-muted">Status:</span> {fmcsaResult.operatingStatus}</div>
+                {fmcsaResult.phone && <div><span className="text-muted">Phone:</span> {fmcsaResult.phone}</div>}
+                {fmcsaResult.physicalAddress && <div><span className="text-muted">Address:</span> {fmcsaResult.physicalAddress.street}, {fmcsaResult.physicalAddress.city}, {fmcsaResult.physicalAddress.state}</div>}
+              </div>
+            )}
+            {fmcsaResult?.error && <div className="text-red-600 text-[13px] mb-4">{fmcsaResult.error}</div>}
+            <div className="flex gap-2">
+              {fmcsaResult && !fmcsaResult.error && (
+                <button onClick={fmcsaFill} disabled={fmcsaBusy} className="btn-primary flex-1">Apply to Carrier Profile</button>
+              )}
+              <button onClick={() => setFmcsaOpen(false)} className="btn-ghost">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

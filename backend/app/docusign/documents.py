@@ -16,6 +16,7 @@ def anchor(tok: str) -> str:
 
 
 DATA_FIELDS = [
+    # Driver personal
     {"key": "fullName", "label": "Full Legal Name", "anchor": "/f_name/", "required": True},
     {"key": "dob", "label": "Date of Birth", "anchor": "/f_dob/"},
     {"key": "ssn", "label": "SSN", "anchor": "/f_ssn/"},
@@ -25,36 +26,102 @@ DATA_FIELDS = [
     {"key": "zip", "label": "ZIP", "anchor": "/f_zip/"},
     {"key": "phone", "label": "Phone", "anchor": "/f_phone/"},
     {"key": "email", "label": "Email", "anchor": "/f_email/"},
+    # CDL
     {"key": "cdlNumber", "label": "CDL Number", "anchor": "/f_cdln/", "required": True},
     {"key": "cdlState", "label": "CDL State", "anchor": "/f_cdls/"},
     {"key": "cdlClass", "label": "CDL Class", "anchor": "/f_cdlc/"},
     {"key": "cdlExp", "label": "CDL Expiration", "anchor": "/f_cdle/"},
+    {"key": "medCardExp", "label": "Medical Card Expiration", "anchor": "/f_mce/"},
+    {"key": "endorsements", "label": "Endorsements", "anchor": "/f_end/"},
+    {"key": "positionType", "label": "Position Type", "anchor": "/f_pos/"},
+    {"key": "prevEmployers", "label": "Previous Employers", "anchor": "/f_prev/"},
+    # Carrier / offer fields
+    {"key": "carrierName", "label": "Carrier Name", "anchor": "/f_carr/"},
+    {"key": "dotNumber", "label": "DOT Number", "anchor": "/f_dot/"},
+    {"key": "mcNumber", "label": "MC Number", "anchor": "/f_mc/"},
+    {"key": "recruiterName", "label": "Recruiter Name", "anchor": "/f_rec/"},
+    {"key": "payRate", "label": "Pay Rate", "anchor": "/f_pay/"},
+    {"key": "startDate", "label": "Start Date", "anchor": "/f_start/"},
+    {"key": "truckUnit", "label": "Truck / Unit #", "anchor": "/f_truck/"},
+    {"key": "employmentType", "label": "Employment Type", "anchor": "/f_emptype/"},
 ]
 
+# Fields that must be present before sending (driver vs carrier buckets)
+REQUIRED_DRIVER_FIELDS = {"fullName", "email", "cdlNumber"}
+REQUIRED_CARRIER_FIELDS: set = set()
 
-def driver_profile(candidate: dict | None = None) -> dict:
+# Document packages: each package is a list of doc types sent as one envelope
+DOC_PACKAGES = {
+    "company_driver": {
+        "label": "Company Driver Package",
+        "description": "Offer Letter + MVR Consent + PSP Consent + Clearinghouse Consent + Drug Testing Consent",
+        "docs": ["offer_letter", "mvr_consent", "psp_consent", "clearinghouse_consent", "drug_test_consent"],
+    },
+    "owner_operator": {
+        "label": "Owner-Operator Package",
+        "description": "Owner-Operator Agreement + Equipment Lease + MVR + PSP + Clearinghouse",
+        "docs": ["owner_operator_agreement", "lease_agreement", "mvr_consent", "psp_consent", "clearinghouse_consent"],
+    },
+}
+
+
+def driver_profile(candidate: dict | None = None, carrier: dict | None = None, extra_fields: dict | None = None) -> dict:
     candidate = candidate or {}
+    carrier = carrier or {}
     a = candidate.get("application") or {}
+    extra = extra_fields or {}
     name = candidate.get("name") or " ".join(x for x in [a.get("firstName"), a.get("lastName")] if x).strip()
+    emps = a.get("employers") or []
+    prev_str = "; ".join(e.get("companyName") or e.get("name") or "" for e in emps if e.get("companyName") or e.get("name"))
     return {
-        "fullName": name or "",
-        "dob": a.get("dateOfBirth") or a.get("dob") or "",
-        "ssn": a.get("ssn") or a.get("socialSecurityNumber") or "",
-        "address": a.get("address") or a.get("street") or "",
-        "city": a.get("city") or "",
-        "state": a.get("state") or "",
-        "zip": a.get("zipcode") or a.get("zip") or a.get("postalCode") or "",
-        "phone": candidate.get("phone") or a.get("phone") or "",
-        "email": candidate.get("email") or a.get("email") or "",
-        "cdlNumber": a.get("cdlNumber") or "",
-        "cdlState": a.get("cdlState") or "",
-        "cdlClass": a.get("cdlClass") or "",
-        "cdlExp": a.get("cdlExpirationDate") or a.get("cdlExp") or "",
+        "fullName": extra.get("fullName") or name or "",
+        "dob": extra.get("dob") or a.get("dateOfBirth") or a.get("dob") or "",
+        "ssn": extra.get("ssn") or a.get("ssn") or a.get("socialSecurityNumber") or "",
+        "address": extra.get("address") or a.get("address") or a.get("street") or "",
+        "city": extra.get("city") or a.get("city") or "",
+        "state": extra.get("state") or a.get("state") or "",
+        "zip": extra.get("zip") or a.get("zipcode") or a.get("zip") or a.get("postalCode") or "",
+        "phone": extra.get("phone") or candidate.get("phone") or a.get("phone") or "",
+        "email": extra.get("email") or candidate.get("email") or a.get("email") or "",
+        "cdlNumber": extra.get("cdlNumber") or a.get("cdlNumber") or "",
+        "cdlState": extra.get("cdlState") or a.get("cdlState") or "",
+        "cdlClass": extra.get("cdlClass") or a.get("cdlClass") or "",
+        "cdlExp": extra.get("cdlExp") or a.get("cdlExpirationDate") or a.get("cdlExp") or "",
+        "medCardExp": extra.get("medCardExp") or a.get("medCardExpiration") or a.get("medCardExp") or "",
+        "endorsements": extra.get("endorsements") or (
+            ", ".join(a.get("endorsements") or []) if isinstance(a.get("endorsements"), list) else (a.get("endorsements") or "")
+        ),
+        "positionType": extra.get("positionType") or a.get("position") or a.get("positionType") or "",
+        "prevEmployers": extra.get("prevEmployers") or prev_str or "",
+        # Carrier fields
+        "carrierName": extra.get("carrierName") or carrier.get("name") or os.environ.get("COMPANY_NAME", COMPANY),
+        "dotNumber": extra.get("dotNumber") or carrier.get("requirements", {}).get("dotNumber") or carrier.get("dotNumber") or "",
+        "mcNumber": extra.get("mcNumber") or carrier.get("requirements", {}).get("mcNumber") or carrier.get("mcNumber") or "",
+        "recruiterName": extra.get("recruiterName") or candidate.get("recruiter") or "",
+        "payRate": extra.get("payRate") or "",
+        "startDate": extra.get("startDate") or "",
+        "truckUnit": extra.get("truckUnit") or "",
+        "employmentType": extra.get("employmentType") or a.get("position") or "",
     }
 
 
 def missing_fields(profile: dict) -> list:
     return [f["label"] for f in DATA_FIELDS if not str(profile.get(f["key"]) or "").strip()]
+
+
+def missing_required_fields(profile: dict) -> list[dict]:
+    """Return only required-field gaps categorized as driver vs carrier."""
+    gaps = []
+    for f in DATA_FIELDS:
+        val = str(profile.get(f["key"]) or "").strip()
+        if not val:
+            bucket = "carrier" if f["key"] in ("carrierName", "dotNumber", "mcNumber", "recruiterName", "payRate", "startDate", "truckUnit", "employmentType") else "driver"
+            gaps.append({"key": f["key"], "label": f["label"], "bucket": bucket})
+    return gaps
+
+
+def package_catalog() -> list:
+    return [{"type": t, "label": v["label"], "description": v["description"], "docs": v["docs"]} for t, v in DOC_PACKAGES.items()]
 
 
 def _page(title: str, inner: str) -> str:
@@ -103,16 +170,18 @@ def _review_block(profile: dict, simulated: bool) -> str:
 # build(candidate, fields, review) functions per document type.
 def _offer_letter(c, f, review):
     f = f or {}
+    profile = driver_profile(c, extra_fields=f)
     return _page("Offer of Employment — Professional Driver", f"""
       <p>Dear {esc(c.get('name'))},</p>
-      <p>We are pleased to offer you a position as a <strong>{esc(f.get('position') or 'Company Driver (CDL-A)')}</strong>
-         with {esc(COMPANY)}. We were impressed with your qualifications and look forward to having you on the team.</p>
+      <p>We are pleased to offer you a position as a <strong>{esc(f.get('positionType') or f.get('position') or profile.get('positionType') or 'Company Driver (CDL-A)')}</strong>
+         with {esc(profile.get('carrierName') or COMPANY)}. We were impressed with your qualifications and look forward to having you on the team.</p>
       {_kv([
-        ('Position', f.get('position') or 'Company Driver (CDL-A)'),
-        ('Compensation', f.get('payRate') or 'Per company pay schedule'),
-        ('Start / Orientation Date', f.get('startDate') or 'To be scheduled'),
-        ('Reports To', f.get('supervisor') or 'Safety & Driver Management'),
-        ('Employment Type', f.get('employmentType') or 'Full-time'),
+        ('Position', f.get('positionType') or f.get('position') or profile.get('positionType') or 'Company Driver (CDL-A)'),
+        ('Compensation', f.get('payRate') or profile.get('payRate') or anchor('/f_pay/') or 'Per company pay schedule'),
+        ('Start / Orientation Date', f.get('startDate') or profile.get('startDate') or anchor('/f_start/') or 'To be scheduled'),
+        ('Truck / Unit #', f.get('truckUnit') or profile.get('truckUnit') or anchor('/f_truck/') or 'TBD'),
+        ('Employment Type', f.get('employmentType') or profile.get('employmentType') or 'Full-time'),
+        ('Recruiter', f.get('recruiterName') or profile.get('recruiterName') or ''),
       ])}
       {review}
       <h2>Acceptance</h2>
@@ -220,11 +289,19 @@ DOC_TEMPLATES = {
     "owner_operator_agreement": {"label": "Owner-Operator Agreement", "description": "Independent Contractor (owner-operator) lease & operating agreement.", "build": _owner_operator_agreement},
     "company_driver_agreement": {"label": "Company Driver Agreement", "description": "Employment agreement for a company (W-2) CDL driver.", "build": _company_driver_agreement},
     "lease_agreement": {"label": "Equipment Lease Agreement", "description": "Lease of a tractor/trailer between the carrier and driver.", "build": _lease_agreement},
+    "w9_form": {"label": "W-9 Tax Form", "description": "IRS W-9 Request for Taxpayer Identification Number.", "build": w9_form},
 }
 
 
 def document_catalog() -> list:
     return [{"type": t, "label": v["label"], "description": v["description"]} for t, v in DOC_TEMPLATES.items()]
+
+
+def w9_form(c, f, review):
+    return _page("W-9 Request for Taxpayer Identification", f"""
+      <p>Under penalties of perjury, I certify that the information below is true, correct, and complete.</p>
+      {review}
+      <p>Federal tax classification: <strong>Individual/sole proprietor</strong></p>""")
 
 
 def build_document_html(doc_type: str, candidate: dict | None, fields: dict | None = None, simulated: bool = True) -> str:

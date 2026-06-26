@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse, Response
 from ..definitions import now_iso
 from ..deps import base_url, require_admin
 from ..docusign import service as docusign
-from ..docusign.documents import DOC_TEMPLATES
+from ..docusign.documents import DOC_PACKAGES, DOC_TEMPLATES
 from ..errors import error
 from ..store import add_activity, find_by_id, read_all, upsert
 
@@ -39,6 +39,22 @@ async def _find_envelope_global(envelope_id: str):
         if e:
             return {"candidate": c, "record": e}
     return None
+
+
+async def _reconcile_and_store(c: dict, prev: dict, updated: dict) -> None:
+    """Reconcile envelope state and optionally store the signed PDF."""
+    _reconcile_envelope(c, prev, updated)
+    if updated.get("status") == "completed" and prev.get("status") != "completed":
+        try:
+            pdf_doc = await docusign.store_signed_pdf(updated, c)
+            if pdf_doc:
+                doc_key = f"signed_{updated.get('docType', 'document').replace(':', '_')}"
+                c.setdefault("documents", {})[doc_key] = pdf_doc
+                add_activity(c, "signed_pdf_stored", "DocuSign",
+                             f"Signed PDF stored as \"{pdf_doc['name']}\".",
+                             channel="docusign", envelopeId=updated.get("envelopeId"))
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _reconcile_envelope(c: dict, prev: dict, updated: dict) -> None:
@@ -134,7 +150,7 @@ async def ds_refresh(envelope_id: str):
         raise error(404, "Envelope not found")
     try:
         updated = await docusign.refresh(found["record"])
-        _reconcile_envelope(found["candidate"], found["record"], updated)
+        await _reconcile_and_store(found["candidate"], found["record"], updated)
         _save_envelope(found["candidate"], updated)
         await upsert(found["candidate"])
         return _strip_html(updated)
@@ -194,6 +210,57 @@ async def ds_void(envelope_id: str, request: Request):
         raise error(502, str(e))
 
 
+@router.post("/api/docusign/candidates/{cid}/field-check", dependencies=[admin])
+async def ds_field_check(cid: str, request: Request):
+    c = await find_by_id(cid)
+    if not c:
+        raise error(404, "Not found")
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        pass
+    return docusign.field_check(candidate=c, extra=(body or {}).get("fields"))
+
+
+@router.post("/api/docusign/candidates/{cid}/send-package", dependencies=[admin])
+async def ds_send_package(cid: str, request: Request):
+    c = await find_by_id(cid)
+    if not c:
+        raise error(404, "Not found")
+    body = await request.json()
+    package_type = body.get("packageType")
+    if not package_type or package_type not in DOC_PACKAGES:
+        raise error(400, "Unknown package type")
+    try:
+        record = await docusign.send_package(
+            candidate=c, package_type=package_type, fields=body.get("fields"),
+            signer=body.get("signer"), email_subject=body.get("emailSubject"), message=body.get("message"),
+        )
+        _save_envelope(c, record)
+        pkg = DOC_PACKAGES[package_type]
+        add_activity(c, "docusign_sent", "Admin",
+                     f"Document package \"{pkg['label']}\" sent for e-signature to {record['signer']['email']} via DocuSign{' (simulated)' if record.get('simulated') else ''}.",
+                     channel="docusign", envelopeId=record.get("envelopeId"), packageType=package_type)
+        await upsert(c)
+        return _strip_html(record)
+    except Exception as e:  # noqa: BLE001
+        raise error(400, str(e))
+
+
+@router.post("/api/docusign/envelopes/{envelope_id}/remind", dependencies=[admin])
+async def ds_remind(envelope_id: str):
+    found = await _find_envelope_global(envelope_id)
+    if not found:
+        raise error(404, "Envelope not found")
+    result = await docusign.send_reminder(found["record"])
+    if result.get("ok"):
+        add_activity(found["candidate"], "docusign_reminder", "Admin",
+                     f"Reminder sent for DocuSign envelope {envelope_id}.", channel="docusign", envelopeId=envelope_id)
+        await upsert(found["candidate"])
+    return result
+
+
 async def _advance_simulated(envelope_id: str, to_status: str):
     found = await _find_envelope_global(envelope_id)
     if not found:
@@ -201,7 +268,7 @@ async def _advance_simulated(envelope_id: str, to_status: str):
     if not found["record"].get("simulated"):
         return {"error": 400}
     updated = docusign.simulate_advance(found["record"], to_status)
-    _reconcile_envelope(found["candidate"], found["record"], updated)
+    await _reconcile_and_store(found["candidate"], found["record"], updated)
     _save_envelope(found["candidate"], updated)
     await upsert(found["candidate"])
     return {"updated": updated}
@@ -256,7 +323,7 @@ async def ds_webhook(request: Request):
         found = await _find_envelope_global(event["envelopeId"])
         if found:
             updated = docusign.apply_webhook_event(found["record"], event)
-            _reconcile_envelope(found["candidate"], found["record"], updated)
+            await _reconcile_and_store(found["candidate"], found["record"], updated)
             _save_envelope(found["candidate"], updated)
             await upsert(found["candidate"])
     return {"ok": True}

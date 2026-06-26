@@ -31,10 +31,34 @@ def _clean_requirements(input_: dict | None = None) -> dict:
     return out
 
 
+_CARRIER_REQUIRED = {"dotNumber", "mcNumber", "name", "email", "phone", "physicalAddress"}
+_CARRIER_PROFILE_FIELDS = {"dotNumber", "mcNumber", "physicalAddress", "phone", "insuranceOnFile", "w9OnFile", "requirementsProfile"}
+
+
 def _carrier_progress(c: dict) -> dict:
     reqs = c.get("requirements") or {}
     filled = len([fid for fid in CARRIER_FIELD_IDS if reqs.get(fid)])
     return {"filled": filled, "total": len(CARRIER_FIELD_IDS)}
+
+
+def _carrier_completeness(c: dict) -> dict:
+    """Compute a completeness percentage for the carrier profile."""
+    score_fields = [
+        ("name", bool(c.get("name"))),
+        ("email", bool(c.get("email"))),
+        ("phone", bool(c.get("phone"))),
+        ("ownerName", bool(c.get("ownerName"))),
+        ("dotNumber", bool((c.get("requirements") or {}).get("dotNumber"))),
+        ("mcNumber", bool((c.get("requirements") or {}).get("mcNumber"))),
+        ("insurance", bool((c.get("requirements") or {}).get("insuranceCoverage") or (c.get("requirements") or {}).get("insurance"))),
+        ("requirements", bool(c.get("requirements") and len(c.get("requirements") or {}) >= 3)),
+        ("w9", bool((c.get("requirements") or {}).get("w9") or (c.get("requirements") or {}).get("w9OnFile"))),
+        ("contactFilled", bool(c.get("email") or c.get("phone"))),
+    ]
+    filled = [label for label, ok in score_fields if ok]
+    pct = round((len(filled) / len(score_fields)) * 100)
+    missing_labels = [label for label, ok in score_fields if not ok]
+    return {"percent": pct, "filledCount": len(filled), "total": len(score_fields), "missing": missing_labels}
 
 
 def _carrier_summary(c: dict) -> dict:
@@ -45,6 +69,7 @@ def _carrier_summary(c: dict) -> dict:
         "linkSentCount": c.get("linkSentCount") or 0, "linkLastSentAt": c.get("linkLastSentAt"),
         "linkLastStatus": c.get("linkLastStatus"), "linkExpiresAt": c.get("linkExpiresAt"),
         "progress": _carrier_progress(c),
+        "completeness": _carrier_completeness(c),
     }
 
 
@@ -125,7 +150,7 @@ async def get_carrier(cid: str):
     if not c:
         raise error(404, "Not found")
     safe = {k: v for k, v in c.items() if k != "token"}
-    return {**safe, "sections": CARRIER_FORM, "progress": _carrier_progress(c), "hasLink": bool(c.get("token"))}
+    return {**safe, "sections": CARRIER_FORM, "progress": _carrier_progress(c), "completeness": _carrier_completeness(c), "hasLink": bool(c.get("token"))}
 
 
 @router.patch("/api/carriers/{cid}", dependencies=[Depends(require_admin)])
@@ -173,6 +198,56 @@ async def resend_carrier(cid: str, request: Request):
         c["status"] = "awaiting_carrier"
     await upsert_carrier(c)
     return {"link": dispatch["link"], "email": dispatch["email"], "sms": dispatch["sms"], "anySuccess": dispatch["anySuccess"]}
+
+
+@router.post("/api/carriers/{cid}/fmcsa-fill", dependencies=[Depends(require_admin)])
+async def fmcsa_fill_carrier(cid: str, request: Request):
+    """Pre-fill carrier fields from FMCSA data (pass {dot, mc} in body)."""
+    import httpx as _httpx
+    from .. import config as cfg
+    import os
+    c = await find_carrier_by_id(cid)
+    if not c:
+        raise error(404, "Not found")
+    body = await request.json()
+    dot = body.get("dot") or ""
+    mc = body.get("mc") or ""
+    key = os.environ.get("FMCSA_API_KEY", "")
+
+    if not key:
+        # Demo fill
+        reqs = c.get("requirements") or {}
+        reqs["dotNumber"] = dot or reqs.get("dotNumber", "")
+        reqs["mcNumber"] = mc or reqs.get("mcNumber", "")
+        c["requirements"] = reqs
+        add_activity(c, "fmcsa_filled", "Admin", "Carrier fields updated (FMCSA demo — configure FMCSA_API_KEY for live data).")
+        await upsert_carrier(c)
+        return {"ok": True, "simulated": True, "message": "Configure FMCSA_API_KEY for live lookup."}
+
+    try:
+        if dot:
+            url = f"https://mobile.fmcsa.dot.gov/qc/services/carriers/{dot}?webKey={key}"
+        else:
+            url = f"https://mobile.fmcsa.dot.gov/qc/services/carriers/mc/{mc}?webKey={key}"
+        async with _httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(url, headers={"Accept": "application/json"})
+            r.raise_for_status()
+            data = r.json()
+        carrier_data = data.get("content") or {}
+        reqs = c.get("requirements") or {}
+        reqs["dotNumber"] = carrier_data.get("dotNumber") or dot
+        reqs["mcNumber"] = carrier_data.get("mcNumber") or mc
+        if carrier_data.get("legalName"):
+            c["name"] = carrier_data["legalName"]
+        if carrier_data.get("telephone"):
+            c["phone"] = carrier_data["telephone"]
+        c["requirements"] = reqs
+        c["updatedAt"] = now_iso()
+        add_activity(c, "fmcsa_filled", "Admin", f"Carrier profile filled from FMCSA DOT#{dot or ''} MC#{mc or ''}.")
+        await upsert_carrier(c)
+        return {"ok": True, "simulated": False, "legalName": carrier_data.get("legalName"), "dotNumber": reqs["dotNumber"]}
+    except Exception as e:  # noqa: BLE001
+        raise error(502, f"FMCSA lookup failed: {e}")
 
 
 @router.delete("/api/carriers/{cid}", dependencies=[Depends(require_admin)])
