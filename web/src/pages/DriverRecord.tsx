@@ -20,6 +20,8 @@ export default function DriverRecord() {
   const truck = s.allTrucks.find((t) => t.id === d.assignedTruckId);
   const carrier = s.carriers.find((c) => c.id === d.carrierId);
   const driverTasks = s.allTasks.filter((t) => t.driverId === d.id);
+  // Available trucks under this driver's carrier — shown inline so they can be picked here.
+  const availableTrucks = s.allTrucks.filter((t) => t.carrierId === d.carrierId && !t.operatorDriverId && t.status !== 'Inactive');
 
   return (
     <>
@@ -64,7 +66,29 @@ export default function DriverRecord() {
                       </Link>
                       <button onClick={() => s.assignDriverToTruck(truck.id, null)} className="btn-ghost py-1 text-[12px] text-danger">Unassign</button>
                     </div>
-                  ) : <div className="text-[13px] text-muted">No truck assigned. Pick an available truck from {carrier?.name ?? 'this carrier'}.</div>}
+                  ) : availableTrucks.length === 0 ? (
+                    <div className="text-[13px] text-muted">No available trucks under {carrier?.name ?? 'this carrier'}. Free one up or add a truck.</div>
+                  ) : (
+                    <div>
+                      <div className="text-[12px] text-muted mb-2">Available trucks under {carrier?.name ?? 'this carrier'} — pick one to assign:</div>
+                      <div className="flex flex-col gap-2">
+                        {availableTrucks.slice(0, 5).map((t) => (
+                          <button key={t.id} onClick={() => s.assignDriverToTruck(t.id, d.id)}
+                            className="w-full text-left p-2.5 rounded-lg border border-line hover:border-primary transition flex items-center gap-3">
+                            <AssignmentIcon assigned={false} size={16} />
+                            <span className="flex-1 min-w-0">
+                              <span className="block font-semibold text-ink truncate">Unit #{t.unit} — {t.make} {t.model} {t.year}</span>
+                              <span className="block text-[11px] text-muted">{t.plate}</span>
+                            </span>
+                            <span className="text-[12px] font-semibold text-primary">Assign</span>
+                          </button>
+                        ))}
+                      </div>
+                      {availableTrucks.length > 5 && (
+                        <button onClick={() => setShowAssign(true)} className="text-[12px] text-primary font-semibold mt-2">See all {availableTrucks.length} available →</button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Tasks linked to this driver — create one here and it's pre-linked to the driver + carrier. */}

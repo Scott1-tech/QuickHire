@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useStore } from '@/store';
 import Icon from '@/components/Icon';
 import { AssignmentIcon } from '@/ui';
-import type { Task, TaskStatus, TaskPriority, TaskChecklistItem, TaskComment } from '@/types';
+import type { Task, TaskStatus, TaskPriority, TaskChecklistItem, TaskComment, Truck } from '@/types';
 
 type Layout = 'modal' | 'full' | 'sidebar';
 const STATUSES: TaskStatus[] = ['TO DO', 'IN PROGRESS', 'REVIEW NEEDED', 'LONG-TERM', 'COMPLETE'];
@@ -66,7 +66,6 @@ export default function TaskModal({ taskId, createSeed, onClose }: {
   // driver is working with (carrier + assigned vehicle).
   const forDriver = draft.driverId ? s.allDrivers.find((d) => d.id === draft.driverId) : undefined;
   const forDriverCarrier = forDriver ? s.carriers.find((c) => c.id === forDriver.carrierId) : undefined;
-  const forDriverTruck = forDriver?.assignedTruckId ? s.allTrucks.find((t) => t.id === forDriver.assignedTruckId) : undefined;
 
   const selectCarrier = (carrierId: string) => {
     const keepDriver = draft.driverId && s.allDrivers.find((d) => d.id === draft.driverId)?.carrierId === carrierId;
@@ -192,15 +191,17 @@ export default function TaskModal({ taskId, createSeed, onClose }: {
                   <DriverPick value={draft.driverId} drivers={s.allDrivers} carriers={s.carriers} onChange={selectDriver} />
                 </Prop>
                 {forDriver && (
-                  <Prop icon="link" label="Working with">
-                    <div className="flex flex-col gap-0.5">
+                  <>
+                    <Prop icon="link" label="Working with">
                       <span className="text-[13px] text-[#1d2430]">{forDriverCarrier?.name ?? '—'}</span>
-                      <span className="flex items-center gap-1.5 text-[12.5px] text-[#7c828d]">
-                        <AssignmentIcon assigned={!!forDriverTruck} size={13} />
-                        {forDriverTruck ? `Unit #${forDriverTruck.unit} · ${forDriverTruck.make} ${forDriverTruck.model}` : 'No vehicle assigned'}
-                      </span>
-                    </div>
-                  </Prop>
+                    </Prop>
+                    <Prop icon="truck" label="Vehicle">
+                      <VehiclePick carrierId={forDriver.carrierId}
+                        assignedTruckId={forDriver.assignedTruckId ?? null} trucks={s.allTrucks}
+                        onAssign={(tid) => s.assignDriverToTruck(tid, forDriver.id)}
+                        onUnassign={(tid) => s.assignDriverToTruck(tid, null)} />
+                    </Prop>
+                  </>
                 )}
                 <Prop icon="user" label="Assignees">
                   <AssigneePick value={draft.assignee} employees={employees} onChange={(v) => patch({ assignee: v })} />
@@ -450,6 +451,64 @@ function DriverPick({ value, drivers, carriers, onChange }: {
             ))}
             {filtered.length === 0 && <div className="px-2 py-2 text-[12.5px] text-[#a3a8b0]">No matches.</div>}
           </div>
+        </div>
+      )}
+    </Pop>
+  );
+}
+
+// Assign a vehicle straight from the task bar: once a driver (and therefore a
+// carrier) is linked, list that carrier's available trucks and pick one. Picking
+// assigns the truck to the driver in the store, so the change sticks everywhere.
+function VehiclePick({ carrierId, assignedTruckId, trucks, onAssign, onUnassign }: {
+  carrierId: string; assignedTruckId: string | null; trucks: Truck[];
+  onAssign: (truckId: string) => void; onUnassign: (truckId: string) => void;
+}) {
+  const [q, setQ] = useState('');
+  const current = trucks.find((t) => t.id === assignedTruckId);
+  // Available trucks under this carrier (plus the current one, so it stays shown).
+  const options = trucks.filter((t) => t.carrierId === carrierId && t.status !== 'Inactive' && (!t.operatorDriverId || t.id === assignedTruckId));
+  const filtered = options.filter((t) => `#${t.unit} ${t.make} ${t.model} ${t.plate}`.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <Pop width={300} trigger={(toggle) => (
+      <button onClick={toggle} className="flex items-center gap-2 text-[13px]">
+        {current
+          ? <AssignmentIcon assigned size={16} />
+          : <span className="w-[22px] h-[22px] rounded-full border border-dashed border-[#c2c6cc] grid place-items-center text-[#c2c6cc]"><Icon name="plus" size={11} /></span>}
+        <span style={{ color: current ? '#1d2430' : '#a3a8b0' }}>{current ? `Unit #${current.unit} · ${current.make} ${current.model}` : 'Pick available truck'}</span>
+        <Icon name="chevronDown" size={13} className="text-[#a3a8b0]" />
+      </button>
+    )}>
+      {(close) => (
+        <div className="p-2">
+          <div className="flex items-center gap-2 border border-[#e8eaed] rounded-md px-2 py-1.5 mb-1">
+            <Icon name="search" size={14} className="text-[#a3a8b0]" />
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search trucks…" className="bg-transparent outline-none text-[13px] flex-1" />
+          </div>
+          <div className="max-h-56 overflow-y-auto">
+            <div className="text-[11px] font-bold text-[#a3a8b0] px-1 pt-1.5 pb-1">Available under this carrier</div>
+            {filtered.map((t) => {
+              const isCurrent = t.id === assignedTruckId;
+              return (
+                <button key={t.id} onClick={() => { onAssign(t.id); close(); }}
+                  className="w-full flex items-center gap-2.5 px-1.5 py-1.5 rounded-lg hover:bg-[#f4f5f7] text-[13px] text-left">
+                  <AssignmentIcon assigned={isCurrent} size={16} />
+                  <span className="flex-1 min-w-0">
+                    <span className="block truncate font-medium text-[#1d2430]">Unit #{t.unit} · {t.make} {t.model}</span>
+                    <span className="block text-[11px] text-[#a3a8b0]">{t.year} · {t.plate}</span>
+                  </span>
+                  {isCurrent && <Icon name="check" size={14} className="text-[#7b68ee]" />}
+                </button>
+              );
+            })}
+            {filtered.length === 0 && <div className="px-2 py-2 text-[12.5px] text-[#a3a8b0]">No available trucks for this carrier.</div>}
+          </div>
+          {current && (
+            <button onClick={() => { onUnassign(current.id); close(); }}
+              className="w-full mt-1 border-t border-[#f0f1f3] pt-2 text-left px-1.5 py-1 text-[13px] text-[#e3492f] hover:bg-[#fdf0ef] rounded-b">
+              Unassign Unit #{current.unit}
+            </button>
+          )}
         </div>
       )}
     </Pop>
