@@ -1,0 +1,29 @@
+name: backend import check
+
+# Guards the production branch against the failure mode that took the deploy
+# down repeatedly: a merge that leaves backend/ with a SyntaxError or a bad
+# import, which only surfaces when uvicorn crashes on Railway. This catches it
+# on the PR instead. Importing app.main does NOT touch the database (the DB
+# init runs in the lifespan on server startup, not at import time).
+
+on:
+  pull_request:
+    branches: [claude/zealous-ritchie-eoqtjc]
+  push:
+    branches: [claude/zealous-ritchie-eoqtjc]
+
+jobs:
+  import-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        run: pip install --no-cache-dir -r backend/requirements.txt
+      - name: Byte-compile backend (catches SyntaxErrors)
+        run: python -m compileall -q backend/app
+      - name: Import the app (catches NameErrors / bad imports)
+        working-directory: backend
+        run: python -c "import app.main; print('app.main imported OK')"
