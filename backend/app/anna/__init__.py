@@ -25,6 +25,14 @@ from .integrations import (
     normalize_consent,
     pull_compliance,
 )
+from .learning import (
+    OUTCOME_KINDS,
+    OUTCOME_SIGNAL,
+    outcome_stats,
+    record_outcome,
+    tune_weights,
+)
+from .llm import PROVIDERS, llm_complete, llm_json, provider_model
 from .matcher import STATUS, evaluate_gates, match_driver, score_soft, suggest_rematch
 from .normalize import DRIVER_SHAPE, extract_from_document, low_confidence_fields, normalize_driver
 from .portfolio import build_portfolio, merge_records, select_carrier, write_compliance
@@ -40,8 +48,13 @@ __all__ = [
     "DRIVER_SHAPE", "extract_from_document", "low_confidence_fields", "normalize_driver",
     "build_portfolio", "merge_records", "select_carrier", "write_compliance", "create_queue",
     "OPS", "compile_spec", "process_lead",
+
     "OUTCOME_KINDS", "OUTCOME_SIGNAL", "outcome_stats", "record_outcome", "tune_weights", "compute_metrics",
     "DEFAULT_MODELS", "PROVIDERS", "llm_complete", "llm_json", "provider_model",
+
+    "OUTCOME_KINDS", "OUTCOME_SIGNAL", "outcome_stats", "record_outcome", "tune_weights",
+    "PROVIDERS", "llm_complete", "llm_json", "provider_model",
+
 ]
 
 
