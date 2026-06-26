@@ -6,7 +6,16 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from .. import anna, config
-from ..anna_settings import clear_key, effective_key, key_source, mask_key, set_key
+from ..anna_settings import (
+    anthropic_key,
+    clear_settings,
+    effective_key,
+    effective_model,
+    effective_provider,
+    key_source,
+    mask_key,
+    set_settings,
+)
 from ..deps import require_admin
 from ..errors import error
 from ..store import (
@@ -24,7 +33,14 @@ SPEC_PARSE_VERSION = 1
 
 
 async def _anna_opts() -> dict:
-    return {"apiKey": await effective_key()}
+    # Anthropic-only flows (carrier-spec extraction, normalization, compliance
+    # narration, document scanning) always use an Anthropic key.
+    return {"apiKey": await anthropic_key()}
+
+
+async def _chat_opts() -> dict:
+    # The free-form assistant runs on whichever provider the team selected.
+    return {"apiKey": await effective_key(), "provider": await effective_provider(), "model": await effective_model()}
 
 
 def _now() -> str:
@@ -49,6 +65,7 @@ def _portfolio_summary(p: dict) -> dict:
         "reviewStatus": review.get("status") or "pending",
         "recruiter": review.get("assignedRecruiter"),
         "complianceFlag": compliance.get("flag"),
+        "outcome": (p.get("outcome") or {}).get("status"),
     }
 
 
@@ -66,15 +83,20 @@ async def _anna_carriers() -> list:
     return out
 
 
-# ── Anna settings (Anthropic API key) ────────────────────────────────────────
+# ── Anna settings (AI provider + API key) ────────────────────────────────────
+# Supports Claude (Anthropic, default) or OpenAI. The key is stored server-side
+# and never returned to the client (only a masked hint).
 @router.get("/api/anna/settings")
 async def anna_get_settings():
     eff = await effective_key()
+    provider = await effective_provider()
     return {
         "configured": bool(eff),
+        "provider": provider,
+        "providers": anna.PROVIDERS,
         "source": await key_source(),
         "keyHint": mask_key(eff),
-        "model": anna.MODELS["fast"],
+        "model": (await effective_model()) or anna.provider_model(provider, "fast"),
         "integrations": anna.integration_status(),
     }
 
@@ -82,30 +104,35 @@ async def anna_get_settings():
 @router.post("/api/anna/settings")
 async def anna_set_settings(request: Request):
     body = await request.json()
+    provider = str(body.get("provider") or "anthropic").lower()
     api_key = str(body.get("apiKey") or "").strip()
+    model = str(body.get("model") or "").strip()
+    if provider not in anna.PROVIDERS:
+        raise error(400, f"provider must be one of: {', '.join(anna.PROVIDERS)}.")
     if not api_key:
         raise error(400, "apiKey is required.")
     if not re.match(r"^sk-", api_key):
-        raise error(400, 'That does not look like an Anthropic API key (it should start with "sk-").')
-    await set_key(api_key)
-    return {"ok": True, "configured": True, "source": "ui", "keyHint": mask_key(api_key)}
+        raise error(400, 'That does not look like an API key (Anthropic and OpenAI keys start with "sk-").')
+    await set_settings(provider=provider, api_key=api_key, model=model or None)
+    return {"ok": True, "configured": True, "provider": provider, "source": "ui", "keyHint": mask_key(api_key)}
 
 
 @router.delete("/api/anna/settings")
 async def anna_delete_settings():
-    await clear_key()
-    return {"ok": True, "configured": bool(config.ANTHROPIC_API_KEY), "source": await key_source(), "keyHint": mask_key(await effective_key())}
+    await clear_settings()
+    return {"ok": True, "configured": bool(await effective_key()), "provider": await effective_provider(), "source": await key_source(), "keyHint": mask_key(await effective_key())}
 
 
 @router.post("/api/anna/settings/test")
 async def anna_test_settings(request: Request):
     body = await request.json()
+    provider = str(body.get("provider") or await effective_provider()).lower()
     api_key = str(body.get("apiKey") or "").strip() or await effective_key()
     if not api_key:
         raise error(400, "No API key configured.")
     try:
-        await anna.call_claude(api_key=api_key, model=anna.MODELS["fast"], max_tokens=8, messages=[{"role": "user", "content": "Reply with the word OK."}])
-        return {"ok": True, "message": "Connection successful — Anna is live."}
+        await anna.llm_complete(provider=provider, api_key=api_key, max_tokens=8, messages=[{"role": "user", "content": "Reply with the word OK."}])
+        return {"ok": True, "message": f"Connection successful — Anna is live on {provider}."}
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail={"ok": False, "error": str(e)})
 
@@ -117,7 +144,7 @@ async def anna_chat(request: Request):
     if not isinstance(messages, list) or not messages:
         raise error(400, "messages[] is required.")
     try:
-        return await anna.chat(messages=messages, context=body.get("context") or {}, opts=await _anna_opts())
+        return await anna.chat(messages=messages, context=body.get("context") or {}, opts=await _chat_opts())
     except Exception as e:  # noqa: BLE001
         raise error(502, str(e))
 
@@ -195,6 +222,94 @@ async def anna_rematch(request: Request):
 @router.get("/api/anna/portfolios")
 async def anna_portfolios():
     return [_portfolio_summary(p) for p in await read_portfolios()]
+
+
+# ── Metrics — the ROI view (all derived from portfolios + outcomes) ───────────
+_GOOD_OUTCOMES = ["hired", "started", "retained_90d"]
+_BAD_OUTCOMES = ["washed_out", "rejected", "declined_by_driver"]
+_MINUTES_SAVED_PER_LEAD = 25  # est. manual screen+match+summarize time Anna replaces
+
+
+def _hours_between(a, b):
+    if not a or not b:
+        return None
+    try:
+        ta = datetime.fromisoformat(str(a).replace("Z", "+00:00"))
+        tb = datetime.fromisoformat(str(b).replace("Z", "+00:00"))
+        return (tb - ta).total_seconds() / 3600
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _avg(arr):
+    arr = [x for x in arr if x is not None and x >= 0]
+    return round(sum(arr) / len(arr), 1) if arr else None
+
+
+@router.get("/api/anna/metrics")
+async def anna_metrics():
+    ps = await read_portfolios()
+    leads = len(ps)
+
+    def status_count(st):
+        return len([p for p in ps if ((p.get("review") or {}).get("status") or "awaiting_carrier") == st])
+
+    matched = len([p for p in ps if any(r.get("status") == "ELIGIBLE" for r in (p.get("recommendations") or []))])
+    with_sel = [p for p in ps if (p.get("carrier") or {}).get("carrierId")]
+
+    compliance = {"approve": 0, "reject": 0, "review": 0}
+    for p in ps:
+        flag = (p.get("compliance") or {}).get("flag")
+        if flag:
+            compliance[flag] = compliance.get(flag, 0) + 1
+
+    outcome_counts: dict = {}
+    good = bad = 0
+    for p in ps:
+        o = (p.get("outcome") or {}).get("status")
+        if not o:
+            continue
+        outcome_counts[o] = outcome_counts.get(o, 0) + 1
+        if o in _GOOD_OUTCOMES:
+            good += 1
+        elif o in _BAD_OUTCOMES:
+            bad += 1
+
+    pc: dict = {}
+    for p in ps:
+        c = p.get("carrier") or {}
+        cid = c.get("carrierId")
+        if not cid:
+            continue
+        entry = pc.setdefault(cid, {"name": c.get("carrierName"), "selections": 0, "good": 0, "bad": 0})
+        entry["selections"] += 1
+        o = (p.get("outcome") or {}).get("status")
+        if o in _GOOD_OUTCOMES:
+            entry["good"] += 1
+        elif o in _BAD_OUTCOMES:
+            entry["bad"] += 1
+    per_carrier = sorted(
+        ({**c, "successRate": round(c["good"] / (c["good"] + c["bad"]) * 100) if (c["good"] + c["bad"]) else None} for c in pc.values()),
+        key=lambda c: c["selections"], reverse=True,
+    )
+
+    return {
+        "generatedAt": _now(),
+        "leads": leads,
+        "matched": matched,
+        "matchRate": round(matched / leads * 100) if leads else None,
+        "pipeline": {
+            "awaiting_carrier": status_count("awaiting_carrier"), "pending": status_count("pending"),
+            "approved": status_count("approved"), "rejected": status_count("rejected"),
+        },
+        "offersSelected": len(with_sel),
+        "avgHoursToSelect": _avg([_hours_between(p.get("createdAt"), (p.get("review") or {}).get("carrierSelectedAt")) for p in with_sel]),
+        "avgHoursToDecision": _avg([_hours_between(p.get("createdAt"), (p.get("review") or {}).get("decidedAt")) for p in ps]),
+        "compliance": compliance,
+        "outcomes": {"counts": outcome_counts, "good": good, "bad": bad, "successRate": round(good / (good + bad) * 100) if (good + bad) else None},
+        "recruiterHoursSaved": round(leads * _MINUTES_SAVED_PER_LEAD / 60, 1),
+        "perCarrier": per_carrier,
+    }
 
 
 @router.get("/api/anna/portfolios/{pid}")
@@ -335,6 +450,42 @@ async def anna_decision(pid: str, request: Request):
         except Exception:  # noqa: BLE001
             pass
     return {"ok": True, "review": p["review"], "rematch": rematch}
+
+
+@router.post("/api/anna/portfolios/{pid}/outcome")
+async def anna_outcome(pid: str, request: Request):
+    p = await find_portfolio(pid)
+    if not p:
+        raise error(404, "Not found")
+    body = await request.json()
+    outcome = body.get("outcome")
+    if outcome not in anna.OUTCOME_KINDS:
+        raise error(400, f"outcome must be one of: {', '.join(anna.OUTCOME_KINDS)}.")
+    who = body.get("by") or (p.get("review") or {}).get("assignedRecruiter") or "Recruiter"
+    note = body.get("note") or ""
+    p["outcome"] = {"status": outcome, "note": note, "by": who, "at": _now()}
+    _audit_log(p, "outcome", f"Outcome recorded: {outcome}{(' — ' + note) if note else ''}.", who)
+
+    # Outcome-based learning: nudge the selected carrier's soft-match weights.
+    learning = None
+    carrier_sel = p.get("carrier") or {}
+    if carrier_sel.get("carrierId"):
+        carrier = await find_carrier_by_id(carrier_sel["carrierId"])
+        if carrier:
+            base_weights = anna.compile_spec({}).get("softWeights") or {}
+            rec = next((r for r in (p.get("recommendations") or []) if r.get("carrierId") == carrier_sel["carrierId"]), None)
+            breakdown = (rec or {}).get("scoreBreakdown") or {}
+            updated = anna.record_outcome(carrier.get("annaLearning") or {}, outcome=outcome, breakdown=breakdown, base_weights=base_weights)
+            carrier["annaLearning"] = {"samples": updated["samples"], "weights": updated["weights"], "stats": updated["stats"]}
+            sr = carrier.get("structuredRequirements") or {}
+            sr["softWeights"] = updated["weights"] or base_weights  # applied to future matching
+            carrier["structuredRequirements"] = sr
+            await upsert_carrier(carrier)
+            learning = {"carrier": carrier["name"], **updated["stats"], "tuned": bool(updated["weights"])}
+            if updated["weights"]:
+                _audit_log(p, "learning", f"Anna re-tuned {carrier['name']}'s match weights from {updated['stats']['total']} placements ({updated['stats']['successRate']}% success).")
+    await upsert_portfolio(p)
+    return {"ok": True, "outcome": p["outcome"], "learning": learning}
 
 
 # ── Printable compliance packet (self-contained HTML) ────────────────────────
