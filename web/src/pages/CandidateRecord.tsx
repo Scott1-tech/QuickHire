@@ -12,7 +12,7 @@ const TABS = ['Pipeline', 'Anna', 'Application', 'PEV', 'Documents'];
 const GROUPS: ChecklistStep['group'][] = ['Compliance & Eligibility', 'Risk Screening', 'Health & Safety', 'Employment Setup'];
 const RECRUITERS: Record<string, string> = { u1: 'Nina Patel', u2: 'Dana Reed', u3: 'Sam Pike' };
 
-type ActionKind = 'Note' | 'Email' | 'Call' | 'Task' | 'Meeting';
+type ActionKind = 'Note' | 'Email' | 'Call' | 'SMS' | 'Task' | 'Meeting';
 
 interface Activity {
   id: string;
@@ -34,6 +34,7 @@ const ACTIONS: { key: ActionKind; icon: string; label: string; tip: string }[] =
   { key: 'Note', icon: '📝', label: 'Note', tip: 'Create a note' },
   { key: 'Email', icon: '✉️', label: 'Email', tip: 'Send an email' },
   { key: 'Call', icon: '📞', label: 'Call', tip: 'Log a call' },
+  { key: 'SMS', icon: '💬', label: 'SMS', tip: 'Send SMS via RingCentral' },
   { key: 'Task', icon: '✅', label: 'Task', tip: 'Create a task' },
   { key: 'Meeting', icon: '📅', label: 'Meeting', tip: 'Schedule a meeting' },
 ];
@@ -324,7 +325,7 @@ export default function CandidateRecord() {
       </div>
 
       {showTruck && <SelectTruck carrierId={c.carrierId} onClose={() => setShowTruck(false)} onPick={(tid) => { s.assignTruck(c.id, tid); s.moveCandidate(c.id, lastStage); addActivity('Stage', `Moved to ${lastStage} and truck assigned.`); setShowTruck(false); }} />}
-      {action && <ActionModal kind={action} candidate={c} recruiter={recruiter} onClose={() => setAction(null)} onLog={addActivity} />}
+      {action && <ActionModal kind={action} candidate={c} recruiter={recruiter} onClose={() => setAction(null)} onLog={addActivity} candidateId={c.id} />}
       {creatingTask && <TaskModal createSeed={{ carrierId: c.carrierId, assignee: recruiter, title: `Hiring — ${c.name}` }} onClose={() => setCreatingTask(false)} />}
       {showEdit && <EditCandidate name={c.name} email={c.email} phone={c.phone ?? ''} onClose={() => setShowEdit(false)} />}
     </>
@@ -373,24 +374,43 @@ function EditableField({ label, value, onSave, link }: { label: string; value: s
   );
 }
 
-function ActionModal({ kind, candidate, recruiter, onClose, onLog }: {
+function ActionModal({ kind, candidate, recruiter, onClose, onLog, candidateId }: {
   kind: ActionKind;
   candidate: { name: string; email: string; phone?: string };
   recruiter: string;
   onClose: () => void;
   onLog: (type: Activity['type'], text: string) => void;
+  candidateId?: string;
 }) {
   const [text, setText] = useState('');
+  const [callResult, setCallResult] = useState('connected');
+  const [sending, setSending] = useState(false);
+  const [smsOk, setSmsOk] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { ref.current?.focus(); }, []);
 
-  const TITLES: Record<ActionKind, string> = { Note: 'Add Note', Email: `Email ${candidate.name}`, Call: 'Log Call', Task: 'Create Task', Meeting: 'Schedule Meeting' };
-  const PLACEHOLDERS: Record<ActionKind, string> = { Note: 'Write a note…', Email: 'Message body…', Call: 'Call outcome & notes…', Task: 'Task description…', Meeting: 'Meeting agenda, date & time…' };
-  const SAVES: Record<ActionKind, string> = { Note: 'Save Note', Email: 'Send & Log', Call: 'Log Call', Task: 'Create Task', Meeting: 'Schedule' };
-  const PREFIX: Record<ActionKind, string> = { Note: '', Email: 'Emailed: ', Call: 'Call: ', Task: 'Task: ', Meeting: 'Meeting: ' };
+  const h = () => ({ 'Content-Type': 'application/json', 'x-admin-token': localStorage.getItem('qh_admin') ?? '' });
 
-  const submit = () => {
-    if (!text.trim()) return;
+  const TITLES: Record<ActionKind, string> = { Note: 'Add Note', Email: `Email ${candidate.name}`, Call: 'Log Call', SMS: 'Send SMS', Task: 'Create Task', Meeting: 'Schedule Meeting' };
+  const PLACEHOLDERS: Record<ActionKind, string> = { Note: 'Write a note…', Email: 'Message body…', Call: 'Call outcome & notes…', SMS: 'Type your message…', Task: 'Task description…', Meeting: 'Meeting agenda, date & time…' };
+  const SAVES: Record<ActionKind, string> = { Note: 'Save Note', Email: 'Send & Log', Call: 'Log Call', SMS: 'Send SMS', Task: 'Create Task', Meeting: 'Schedule' };
+  const PREFIX: Record<ActionKind, string> = { Note: '', Email: 'Emailed: ', Call: 'Call: ', SMS: 'SMS: ', Task: 'Task: ', Meeting: 'Meeting: ' };
+
+  const submit = async () => {
+    if (kind === 'SMS' && candidateId) {
+      if (!text.trim()) return;
+      setSending(true);
+      try {
+        await fetch(`/api/candidates/${candidateId}/sms`, { method: 'POST', headers: h(), body: JSON.stringify({ text: text.trim() }) });
+        setSmsOk(true); onLog('SMS' as any, `SMS: ${text.trim()}`); setTimeout(onClose, 1000);
+      } catch { onLog('SMS' as any, `SMS (manual): ${text.trim()}`); onClose(); }
+      finally { setSending(false); }
+      return;
+    }
+    if (kind === 'Call' && candidateId) {
+      await fetch(`/api/candidates/${candidateId}/call-log`, { method: 'POST', headers: h(), body: JSON.stringify({ result: callResult, notes: text.trim() }) }).catch(() => {});
+    }
+    if (!text.trim() && kind !== 'Call') return;
     if (kind === 'Email') window.location.href = `mailto:${candidate.email}?body=${encodeURIComponent(text)}`;
     onLog(kind, `${PREFIX[kind]}${text.trim()}`);
     onClose();
@@ -402,13 +422,30 @@ function ActionModal({ kind, candidate, recruiter, onClose, onLog }: {
         <div className="text-[16px] font-extrabold text-ink mb-1">{TITLES[kind]}</div>
         {kind === 'Call' && <a href={`tel:${candidate.phone}`} className="text-[13px] text-info font-semibold block mb-2">{candidate.phone ?? '—'}</a>}
         {kind === 'Email' && <div className="text-[13px] text-muted mb-2">{candidate.email}</div>}
+        {kind === 'SMS' && <div className="text-[13px] text-muted mb-2">To: {candidate.phone ?? 'No phone on file'}</div>}
         <div className="text-[12px] text-muted mb-2">Logged as: <span className="font-semibold text-ink">{recruiter}</span></div>
-        <textarea ref={ref} value={text} onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && e.metaKey) submit(); }}
-          placeholder={PLACEHOLDERS[kind]} className="input h-28 resize-none" />
+        {kind === 'Call' && (
+          <div className="mb-3">
+            <label className="field-label">Call Result</label>
+            <select value={callResult} onChange={(e) => setCallResult(e.target.value)} className="input">
+              <option value="connected">Connected</option>
+              <option value="no_answer">No Answer</option>
+              <option value="voicemail">Left Voicemail</option>
+              <option value="bad_number">Bad Number</option>
+              <option value="follow_up_needed">Follow-up Needed</option>
+            </select>
+          </div>
+        )}
+        {smsOk ? (
+          <div className="text-green-600 font-semibold text-center py-4">✓ SMS sent!</div>
+        ) : (
+          <textarea ref={ref} value={text} onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && e.metaKey) submit(); }}
+            placeholder={PLACEHOLDERS[kind]} className="input h-28 resize-none" />
+        )}
         <p className="text-[11px] text-muted mt-1.5">⌘ Enter to save</p>
         <div className="flex gap-2 mt-4">
-          <button onClick={submit} className="btn-primary flex-1">{SAVES[kind]}</button>
+          <button onClick={submit} disabled={sending} className="btn-primary flex-1">{sending ? 'Sending…' : SAVES[kind]}</button>
           <button onClick={onClose} className="btn-ghost">Cancel</button>
         </div>
       </div>

@@ -1,40 +1,138 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-
-// Driver Qualification Portal — public, tokenized. Navy/Crimson palette. No marketing nav.
-// TODO: resolve token -> { candidateId, carrierId, companyName }; POST application on submit.
 
 const STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
 const EQUIPMENT = ['Dry Van','Flatbed','Refrigerated (Reefer)','Tanker','Hazmat','Auto Hauler','Intermodal','LTL','Heavy Haul','Other'];
 const ENDORSEMENTS = ['H-Hazmat','N-Tank Vehicles','P-Passenger','S-School Bus','T-Double/Triple','X-Hazmat+Tank'];
 
+type Status = 'loading' | 'pending' | 'submitted' | 'expired' | 'invalid';
+
 export default function DriverPortal() {
-  const { token } = useParams();
-  const companyName = 'National Carrier Xpress Corp.'; // TODO: from token
+  const { token } = useParams<{ token: string }>();
+  const [pageStatus, setPageStatus] = useState<Status>('loading');
+  const [companyName, setCompanyName] = useState('');
+  const [supportContact, setSupportContact] = useState('');
   const [step, setStep] = useState(1);
   const [done, setDone] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
   const [ineligible, setIneligible] = useState(false);
-  const [form, setForm] = useState<Record<string, any>>({ experience: '', years: '', equipment: [] as string[], position: 'Company Driver', endorsements: [] as string[], firstName: '', lastName: '' });
+  const [form, setForm] = useState<Record<string, any>>({
+    experience: '', years: '', equipment: [] as string[], position: 'Company Driver',
+    endorsements: [] as string[], firstName: '', lastName: '', email: '', phone: '',
+  });
   const [confirm, setConfirm] = useState<null | { msg: string; onYes: () => void; onNo: () => void }>(null);
   const [ocrBanner, setOcrBanner] = useState(false);
   const [autoFilled, setAutoFilled] = useState<Set<string>>(new Set());
   const [consents, setConsents] = useState({ psp: false, mvr: false, emp: false });
   const [sigConfirmed, setSigConfirmed] = useState(false);
+  const [files, setFiles] = useState<Record<string, { dataUrl: string; name: string } | null>>({});
+  const [sigData, setSigData] = useState<{ dataUrl: string; mode: string; name: string } | null>(null);
+  const [requestLinkSent, setRequestLinkSent] = useState(false);
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const set = (k: string, v: any) => setForm((f) => ({ ...f, [k]: v }));
   const toggleArr = (k: string, v: string) => setForm((f) => ({ ...f, [k]: f[k].includes(v) ? f[k].filter((x: string) => x !== v) : [...f[k], v] }));
 
-  if (done) return <Success first={form.firstName || 'Driver'} company={companyName} />;
+  // Load token info on mount + restore draft
+  useEffect(() => {
+    if (!token) { setPageStatus('invalid'); return; }
+    const savedDraft = localStorage.getItem(`qh_draft_${token}`);
+    fetch(`/api/apply/${token}`)
+      .then(async (r) => {
+        const data = await r.json();
+        if (r.status === 404 || r.status === 400) { setPageStatus('invalid'); return; }
+        if (r.status === 410) { setPageStatus('expired'); setSupportContact(data.support || ''); return; }
+        setCompanyName(data.companyName || '');
+        setSupportContact(data.support || '');
+        if (data.status === 'submitted') { setDone(true); setPageStatus('submitted'); return; }
+        setPageStatus('pending');
+        // Restore draft
+        if (savedDraft) {
+          try {
+            const draft = JSON.parse(savedDraft);
+            setForm((f) => ({ ...f, ...draft.form }));
+            setConsents((c) => ({ ...c, ...(draft.consents || {}) }));
+          } catch { /* ignore */ }
+        }
+      })
+      .catch(() => setPageStatus('invalid'));
+  }, [token]);
+
+  // Auto-save draft on every change
+  useEffect(() => {
+    if (pageStatus !== 'pending') return;
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(async () => {
+      try {
+        localStorage.setItem(`qh_draft_${token}`, JSON.stringify({ form, consents }));
+        await fetch(`/api/apply/${token}/draft`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ draft: { form, consents } }),
+        });
+      } catch { /* silent */ }
+    }, 1500);
+    return () => { if (draftTimer.current) clearTimeout(draftTimer.current); };
+  }, [form, consents, pageStatus]);
+
+  const handleSubmit = async () => {
+    if (!token) return;
+    setSubmitting(true);
+    setSubmitError('');
+    const application = {
+      firstName: form.firstName, lastName: form.lastName, email: form.email, phone: form.phone,
+      dateOfBirth: form.dob, ssn: form.ssn, address: form.street, city: form.city, state: form.state,
+      zipcode: form.zip, cdlNumber: form.cdlNumber, cdlState: form.cdlState, cdlClass: form.cdlClass,
+      cdlExpirationDate: form.cdlExp, medCardExpiration: form.medCardExp,
+      endorsements: form.endorsements, position: form.position, yearsExperience: form.years,
+      equipment: form.equipment, accidents: form.accidents, dui: form.dui, sap: form.sap,
+      referral: form.referral, message: form.message,
+      consentPsp: consents.psp, consentMvr: consents.mvr, consentEmployment: consents.emp,
+      employers: form.empName ? [{ companyName: form.empName, phone: form.empPhone, dotNumber: form.empDot, mcNumber: form.empMc }] : [],
+    };
+    try {
+      const r = await fetch(`/api/apply/${token}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ application, files, signature: sigData }),
+      });
+      const data = await r.json();
+      if (!r.ok) { setSubmitError(data.error || 'Submission failed. Please try again.'); return; }
+      localStorage.removeItem(`qh_draft_${token}`);
+      setDone(true);
+    } catch { setSubmitError('Network error. Please check your connection and try again.'); }
+    finally { setSubmitting(false); }
+  };
+
+  const handleRequestNewLink = async () => {
+    try {
+      await fetch(`/api/apply/${token}/request-new-link`, { method: 'POST' });
+      setRequestLinkSent(true);
+    } catch { setRequestLinkSent(true); }
+  };
+
+  if (pageStatus === 'loading') return <CenteredMsg icon="⏳" title="Loading…" />;
+  if (pageStatus === 'invalid') return <CenteredMsg icon="🔗" title="Invalid Link" body="This application link is not valid. Please contact your recruiter for a new one." />;
+  if (pageStatus === 'expired') return (
+    <CenteredMsg icon="⏰" title="Link Expired" body="This application link has expired.">
+      {supportContact && <p className="text-[13px] text-slate-500 mb-4">Contact us at <a href={`mailto:${supportContact}`} className="text-[#2563EB]">{supportContact}</a> for assistance.</p>}
+      {!requestLinkSent ? (
+        <button onClick={handleRequestNewLink} className="bg-[#A4193D] text-white font-bold px-6 py-2.5 rounded-xl text-sm">Request New Link</button>
+      ) : (
+        <div className="bg-green-50 text-green-700 border border-green-200 rounded-xl p-4 text-sm">✓ Request sent. We'll send a new link shortly.</div>
+      )}
+    </CenteredMsg>
+  );
+  if (done) return <Success first={form.firstName || 'Driver'} company={companyName} application={form} />;
 
   return (
     <div className="min-h-screen bg-[#F5F7FB] text-[#0F1B2D]">
-      {/* Hero */}
       <div className="bg-[#0A1F3D] text-white text-center py-12 px-4" style={{ backgroundImage: 'repeating-linear-gradient(135deg,rgba(255,255,255,.03) 0 2px,transparent 2px 14px)' }}>
         <h1 className="text-3xl font-extrabold" style={{ fontFamily: 'Sora, Inter, sans-serif' }}>Qualification Portal</h1>
         <p className="max-w-xl mx-auto mt-3 text-white/80 text-[15px]">Take the step. Apply now, get qualified, and start earning consistent, reliable income with <b className="text-white">{companyName}</b>.</p>
       </div>
 
-      {/* Stepper */}
       <div className="max-w-2xl mx-auto flex items-center gap-3 px-4 -mt-6">
         {[['Application', 'Driver Information'], ['Consents', 'Authorizations & Employment']].map(([t, sub], i) => {
           const n = i + 1, isDone = step > n, isActive = step === n;
@@ -52,7 +150,6 @@ export default function DriverPortal() {
 
         {step === 1 ? (
           <>
-            {/* Experience */}
             <Section icon="🛡" title="Experience Qualification" tint>
               <Label req>Do you have at least one (1) year of CDL driving experience?</Label>
               <YesNo value={form.experience} onChange={(v) => {
@@ -69,20 +166,21 @@ export default function DriverPortal() {
               )}
             </Section>
 
-            {/* Documents */}
             <Section icon="🖼" title="Document Uploads">
               <p className="text-[13px] text-slate-500 mb-3">Upload clear photos or scans. All image and document formats accepted (max 10MB each).</p>
               <div className="grid sm:grid-cols-3 gap-3">
-                <Upload label="CDL Front" hint="Side with your PHOTO" onFile={() => { setOcrBanner(true); setAutoFilled(new Set(['firstName', 'lastName', 'cdlNumber', 'cdlState', 'dob'])); set('firstName', 'JOHN'); set('lastName', 'DRIVER'); set('cdlNumber', 'D1234567'); set('cdlState', 'TX'); set('dob', '1990-05-12'); }} />
-                <Upload label="CDL Back" hint="Side with BARCODE" />
-                <Upload label="Medical Card" hint="DOT Medical Certificate" />
+                <Upload label="CDL Front" hint="Side with your PHOTO" accept="image/*,application/pdf" onFile={(file, dataUrl) => {
+                  setFiles((f) => ({ ...f, cdlFront: { dataUrl, name: file.name } }));
+                  setOcrBanner(true);
+                  setAutoFilled(new Set(['firstName', 'lastName', 'cdlNumber', 'cdlState', 'dob']));
+                }} />
+                <Upload label="CDL Back" hint="Side with BARCODE" accept="image/*,application/pdf" onFile={(file, dataUrl) => setFiles((f) => ({ ...f, cdlBack: { dataUrl, name: file.name } }))} />
+                <Upload label="Medical Card" hint="DOT Medical Certificate" accept="image/*,application/pdf" onFile={(file, dataUrl) => setFiles((f) => ({ ...f, medicalCard: { dataUrl, name: file.name } }))} />
               </div>
-              <button className="text-[13px] text-[#2563EB] mt-3">＋ Add another CDL photo (optional)</button>
               {ocrBanner && <div className="bg-blue-50 border border-blue-200 text-[#1D4ED8] rounded-lg p-3 mt-3 text-[13px] flex items-center gap-2">
                 We auto-filled some fields from your CDL — please review for accuracy.<button onClick={() => setOcrBanner(false)} className="ml-auto">✕</button></div>}
             </Section>
 
-            {/* Personal */}
             <Section icon="👤" title="Personal Information">
               <div className="grid sm:grid-cols-2 gap-3">
                 <Field label="First Name" req value={form.firstName} onChange={(v) => set('firstName', v)} warn={autoFilled.has('firstName')} />
@@ -93,7 +191,6 @@ export default function DriverPortal() {
               </div>
             </Section>
 
-            {/* Address */}
             <Section icon="📍" title="Address">
               <div className="grid sm:grid-cols-2 gap-3">
                 <Field label="Street Address" req value={form.street || ''} onChange={(v) => set('street', v)} />
@@ -103,19 +200,23 @@ export default function DriverPortal() {
               </div>
             </Section>
 
-            {/* CDL */}
             <Section icon="🪪" title="CDL Information">
               <div className="grid sm:grid-cols-2 gap-3">
                 <Field label="CDL Number" req value={form.cdlNumber || ''} onChange={(v) => set('cdlNumber', v)} warn={autoFilled.has('cdlNumber')} />
                 <div><Label req>CDL State</Label><StateSelect value={form.cdlState} onChange={(v) => set('cdlState', v)} warn={autoFilled.has('cdlState')} /></div>
-                <div><Label>CDL Issued Date</Label><input type="date" className="dp-input" /></div>
-                <div><Label>CDL Expiration Date</Label><input type="date" className="dp-input" /></div>
+                <div>
+                  <Label>CDL Class</Label>
+                  <select value={form.cdlClass || ''} onChange={(e) => set('cdlClass', e.target.value)} className="dp-input">
+                    <option value="">Select…</option><option>Class A</option><option>Class B</option><option>Class C</option>
+                  </select>
+                </div>
+                <div><Label req>CDL Expiration Date</Label><input type="date" value={form.cdlExp || ''} onChange={(e) => set('cdlExp', e.target.value)} className="dp-input" /></div>
+                <div><Label>Medical Card Expiration</Label><input type="date" value={form.medCardExp || ''} onChange={(e) => set('medCardExp', e.target.value)} className="dp-input" /></div>
               </div>
               <Label className="mt-4">Endorsements <span className="text-[#2563EB]">(optional)</span></Label>
               <Pills options={ENDORSEMENTS} selected={form.endorsements} onToggle={(v) => toggleArr('endorsements', v)} />
             </Section>
 
-            {/* Compliance History */}
             <Section icon="✅" title="Compliance History">
               <Label req>Accidents in past 3 years?</Label>
               <YesNo value={form.accidents} onChange={(v) => set('accidents', v)} />
@@ -125,7 +226,6 @@ export default function DriverPortal() {
               <YesNo value={form.sap} onChange={(v) => { if (v === 'Yes') setConfirm({ msg: 'You indicated you completed a SAP program. If confirmed, we are unable to proceed due to our insurance and safety requirements.', onYes: () => { set('sap', 'Yes'); setIneligible(true); setConfirm(null); }, onNo: () => setConfirm(null) }); else set('sap', 'No'); }} />
             </Section>
 
-            {/* Position & Referral */}
             <Section icon="💼" title="Position & Referral">
               <Label>Position Type</Label>
               <div className="flex gap-2 mb-3">
@@ -138,14 +238,14 @@ export default function DriverPortal() {
                   <Field label="Truck Year" req value={form.truckYear || ''} onChange={(v) => set('truckYear', v)} />
                   <Field label="Truck Make" req value={form.truckMake || ''} onChange={(v) => set('truckMake', v)} />
                   <Field label="Truck Model" req value={form.truckModel || ''} onChange={(v) => set('truckModel', v)} />
-                  <Upload label="Truck Picture" hint="JPG/PNG/PDF" />
-                  <Upload label="DOT Inspection" hint="JPG/PNG/PDF" />
                 </div>
               )}
               <Label className="mt-4">Additional Message <span className="text-[#2563EB]">(optional)</span></Label>
-              <textarea className="dp-input h-20 resize-none" />
+              <textarea className="dp-input h-20 resize-none" value={form.message || ''} onChange={(e) => set('message', e.target.value)} />
               <Label className="mt-3" req>How did you hear about us?</Label>
-              <select className="dp-input"><option value="">Select…</option><option>Referral</option><option>Job Board</option><option>Social Media</option><option>Other</option></select>
+              <select className="dp-input" value={form.referral || ''} onChange={(e) => set('referral', e.target.value)}>
+                <option value="">Select…</option><option>Referral</option><option>Job Board</option><option>Social Media</option><option>Other</option>
+              </select>
             </Section>
 
             <button disabled={ineligible} onClick={() => setStep(2)}
@@ -165,14 +265,13 @@ export default function DriverPortal() {
             </Section>
 
             <Section icon="🏢" title="Previous Employers">
-              <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 text-[13px] mb-3">At least one employer with name and phone is required. Start typing a company name to search the FMCSA database for auto-fill.</div>
+              <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 text-[13px] mb-3">At least one employer with name and phone is required.</div>
               <div className="grid sm:grid-cols-2 gap-3">
                 <Field label="Employer Name" req value={form.empName || ''} onChange={(v) => set('empName', v)} />
                 <Field label="Phone" req value={form.empPhone || ''} onChange={(v) => set('empPhone', v)} />
                 <Field label="DOT Number" value={form.empDot || ''} onChange={(v) => set('empDot', v)} />
                 <Field label="MC Number" value={form.empMc || ''} onChange={(v) => set('empMc', v)} />
               </div>
-              <button className="text-[13px] text-[#2563EB] mt-3">＋ Add Another Employer</button>
             </Section>
 
             <Section icon="📄" title="Required Consent Documents">
@@ -187,16 +286,19 @@ export default function DriverPortal() {
 
             <Section icon="✍" title="Your Signature">
               <p className="text-[12px] text-slate-500 mb-3">This signature applies to all consent documents above.</p>
-              <SignaturePad onConfirm={setSigConfirmed} confirmed={sigConfirmed} />
+              <SignaturePad onConfirm={setSigConfirmed} confirmed={sigConfirmed} onCapture={setSigData} />
             </Section>
+
+            {submitError && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 mb-4 text-sm">{submitError}</div>}
 
             <div className="flex gap-3">
               <button onClick={() => setStep(1)} className="btn-ghost px-6">← Back</button>
-              <button disabled={ineligible || !consents.psp || !consents.mvr || !consents.emp || !sigConfirmed || !form.ssn || form.ssn !== form.ssn2 || !form.empName || !form.empPhone}
-                onClick={() => setDone(true)}
-                className="flex-1 bg-[#A4193D] hover:bg-[#8E1635] disabled:opacity-40 text-white font-bold rounded-xl py-3.5">Submit Application</button>
+              <button disabled={ineligible || !consents.psp || !consents.mvr || !consents.emp || !sigConfirmed || !form.ssn || form.ssn !== form.ssn2 || !form.empName || !form.empPhone || submitting}
+                onClick={handleSubmit}
+                className="flex-1 bg-[#A4193D] hover:bg-[#8E1635] disabled:opacity-40 text-white font-bold rounded-xl py-3.5">
+                {submitting ? 'Submitting…' : 'Submit Application'}
+              </button>
             </div>
-            <p className="text-[11px] text-slate-400 mt-3">Token: {token} · // TODO: POST application to candidate under company</p>
           </>
         )}
       </div>
@@ -207,6 +309,21 @@ export default function DriverPortal() {
         .dp-input{width:100%;border:1px solid #E2E8F0;border-radius:10px;padding:10px 12px;font-size:14px;background:#fff;outline:none}
         .dp-input:focus{box-shadow:0 0 0 3px rgba(11,37,69,.15)}
       `}</style>
+    </div>
+  );
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function CenteredMsg({ icon, title, body, children }: { icon: string; title: string; body?: string; children?: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-[#F5F7FB] grid place-items-center p-4">
+      <div className="bg-white rounded-2xl border border-[#E2E8F0] p-10 text-center max-w-md">
+        <div className="text-4xl mb-4">{icon}</div>
+        <h1 className="text-xl font-extrabold mb-2">{title}</h1>
+        {body && <p className="text-slate-600 text-[15px] mb-4">{body}</p>}
+        {children}
+      </div>
     </div>
   );
 }
@@ -222,12 +339,15 @@ function Section({ icon, title, children, tint }: { icon: string; title: string;
     </div>
   );
 }
+
 function Label({ children, req, className = '' }: { children: React.ReactNode; req?: boolean; className?: string }) {
   return <label className={`block text-[13px] font-semibold mb-1.5 ${className}`}>{children}{req && <span className="text-red-500"> *</span>}</label>;
 }
+
 function Field({ label, req, value, onChange, placeholder, warn }: { label: string; req?: boolean; value: string; onChange: (v: string) => void; placeholder?: string; warn?: boolean }) {
   return <div><Label req={req}>{label}</Label><input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={`dp-input ${warn ? 'ring-2 ring-amber-300' : ''}`} /></div>;
 }
+
 function YesNo({ value, onChange }: { value?: string; onChange: (v: string) => void }) {
   return (
     <div className="flex gap-2">
@@ -237,6 +357,7 @@ function YesNo({ value, onChange }: { value?: string; onChange: (v: string) => v
     </div>
   );
 }
+
 function Pills({ options, selected, onToggle }: { options: string[]; selected: string[]; onToggle: (v: string) => void }) {
   return (
     <div className="flex flex-wrap gap-2 mt-1">
@@ -246,21 +367,34 @@ function Pills({ options, selected, onToggle }: { options: string[]; selected: s
     </div>
   );
 }
+
 function StateSelect({ value, onChange, warn }: { value?: string; onChange: (v: string) => void; warn?: boolean }) {
   return <select value={value || ''} onChange={(e) => onChange(e.target.value)} className={`dp-input ${warn ? 'ring-2 ring-amber-300' : ''}`}><option value="">Select state…</option>{STATES.map((s) => <option key={s}>{s}</option>)}</select>;
 }
-function Upload({ label, hint, onFile }: { label: string; hint: string; onFile?: () => void }) {
+
+function Upload({ label, hint, accept, onFile }: { label: string; hint: string; accept?: string; onFile?: (file: File, dataUrl: string) => void }) {
   const [name, setName] = useState('');
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setName(f.name);
+    const reader = new FileReader();
+    reader.onload = () => onFile?.(f, reader.result as string);
+    reader.readAsDataURL(f);
+  };
   return (
     <div className="border border-[#E2E8F0] rounded-xl p-3 text-center">
       <div className="text-[13px] font-semibold">{label}</div>
       <div className="text-[11px] text-slate-500 mb-2">{hint}</div>
-      <label className="inline-block bg-[#0B2545] text-white text-[12px] rounded-lg px-3 py-1.5 cursor-pointer">Choose File
-        <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) { setName(f.name); onFile?.(); } }} /></label>
+      <label className="inline-block bg-[#0B2545] text-white text-[12px] rounded-lg px-3 py-1.5 cursor-pointer">
+        📷 Capture / Upload
+        <input type="file" accept={accept || 'image/*,application/pdf'} capture="environment" className="hidden" onChange={handleChange} />
+      </label>
       {name && <div className="text-[11px] text-[#16A34A] mt-2 truncate">✓ {name}</div>}
     </div>
   );
 }
+
 function ConfirmModal({ msg, onYes, onNo }: { msg: string; onYes: () => void; onNo: () => void }) {
   return (
     <div className="fixed inset-0 bg-black/40 z-50 grid place-items-center p-4">
@@ -272,7 +406,8 @@ function ConfirmModal({ msg, onYes, onNo }: { msg: string; onYes: () => void; on
     </div>
   );
 }
-function SignaturePad({ onConfirm, confirmed }: { onConfirm: (v: boolean) => void; confirmed: boolean }) {
+
+function SignaturePad({ onConfirm, confirmed, onCapture }: { onConfirm: (v: boolean) => void; confirmed: boolean; onCapture?: (data: { dataUrl: string; mode: string; name: string } | null) => void }) {
   const [mode, setMode] = useState<'draw' | 'type'>('draw');
   const [typed, setTyped] = useState('');
   const [ack, setAck] = useState(false);
@@ -283,14 +418,23 @@ function SignaturePad({ onConfirm, confirmed }: { onConfirm: (v: boolean) => voi
   const pos = (e: React.PointerEvent) => { const r = canvas.current!.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
   const start = (e: React.PointerEvent) => { drawing.current = true; const c = canvas.current!.getContext('2d')!; const p = pos(e); c.beginPath(); c.moveTo(p.x, p.y); };
   const draw = (e: React.PointerEvent) => { if (!drawing.current) return; const c = canvas.current!.getContext('2d')!; const p = pos(e); c.lineTo(p.x, p.y); c.strokeStyle = '#0B2545'; c.lineWidth = 2; c.stroke(); setHasDrawn(true); };
-  const clear = () => { const c = canvas.current!; c.getContext('2d')!.clearRect(0, 0, c.width, c.height); setHasDrawn(false); onConfirm(false); };
+  const clear = () => { const c = canvas.current!; c.getContext('2d')!.clearRect(0, 0, c.width, c.height); setHasDrawn(false); onConfirm(false); onCapture?.(null); };
 
   const canConfirm = mode === 'draw' ? hasDrawn : typed.trim().length > 1 && ack;
+
+  const handleConfirm = () => {
+    onConfirm(true);
+    if (mode === 'draw' && canvas.current) {
+      onCapture?.({ dataUrl: canvas.current.toDataURL('image/png'), mode: 'draw', name: '' });
+    } else {
+      onCapture?.({ dataUrl: '', mode: 'type', name: typed.trim() });
+    }
+  };
 
   return (
     <div>
       <div className="flex gap-2 mb-3">
-        {(['draw', 'type'] as const).map((m) => <button key={m} onClick={() => { setMode(m); onConfirm(false); }} className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold border ${mode === m ? 'bg-[#0B2545] text-white border-[#0B2545]' : 'border-[#E2E8F0]'}`}>{m === 'draw' ? 'Draw Signature' : 'Type Signature'}</button>)}
+        {(['draw', 'type'] as const).map((m) => <button key={m} onClick={() => { setMode(m); onConfirm(false); onCapture?.(null); }} className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold border ${mode === m ? 'bg-[#0B2545] text-white border-[#0B2545]' : 'border-[#E2E8F0]'}`}>{m === 'draw' ? 'Draw Signature' : 'Type Signature'}</button>)}
       </div>
       {mode === 'draw' ? (
         <>
@@ -304,17 +448,42 @@ function SignaturePad({ onConfirm, confirmed }: { onConfirm: (v: boolean) => voi
           <label className="flex items-center gap-2 text-[12px] text-slate-600"><input type="checkbox" checked={ack} onChange={(e) => { setAck(e.target.checked); onConfirm(false); }} /> By typing my name above, I acknowledge that this constitutes my legal electronic signature.</label>
         </>
       )}
-      <button disabled={!canConfirm} onClick={() => onConfirm(true)} className={`mt-3 w-full rounded-lg py-2.5 font-bold text-white ${confirmed ? 'bg-[#16A34A]' : 'bg-[#0B2545] disabled:opacity-40'}`}>{confirmed ? '✓ Signature Confirmed' : 'Confirm Signature'}</button>
+      <button disabled={!canConfirm} onClick={handleConfirm} className={`mt-3 w-full rounded-lg py-2.5 font-bold text-white ${confirmed ? 'bg-[#16A34A]' : 'bg-[#0B2545] disabled:opacity-40'}`}>{confirmed ? '✓ Signature Confirmed' : 'Confirm Signature'}</button>
     </div>
   );
 }
-function Success({ first, company }: { first: string; company: string }) {
+
+function Success({ first, company, application }: { first: string; company: string; application: Record<string, any> }) {
+  const submitted = [
+    application.firstName && `Name: ${application.firstName} ${application.lastName}`,
+    application.email && `Email: ${application.email}`,
+    application.phone && `Phone: ${application.phone}`,
+    application.cdlNumber && `CDL: ${application.cdlNumber}`,
+    application.position && `Position: ${application.position}`,
+  ].filter(Boolean);
+
   return (
     <div className="min-h-screen bg-[#F5F7FB] grid place-items-center p-4">
-      <div className="bg-white rounded-2xl border border-[#E2E8F0] p-10 text-center max-w-md">
+      <div className="bg-white rounded-2xl border border-[#E2E8F0] p-10 text-center max-w-md w-full">
         <div className="w-16 h-16 rounded-full bg-[#16A34A] text-white grid place-items-center text-3xl mx-auto mb-4">✓</div>
         <h1 className="text-2xl font-extrabold mb-2">Thank you, {first}!</h1>
-        <p className="text-slate-600 text-[15px]">Your application to <b>{company}</b> has been submitted. A recruiter will be in touch shortly.</p>
+        <p className="text-slate-600 text-[15px] mb-6">Your application to <b>{company}</b> has been successfully submitted.</p>
+
+        {submitted.length > 0 && (
+          <div className="bg-slate-50 rounded-xl p-4 text-left mb-6">
+            <div className="text-[12px] font-bold text-slate-500 uppercase mb-2">What We Received</div>
+            {submitted.map((s) => <div key={s} className="text-[13px] text-slate-700 py-1 border-b border-slate-100 last:border-0">✓ {s}</div>)}
+          </div>
+        )}
+
+        <div className="bg-blue-50 rounded-xl p-4 text-left text-[13px] text-[#1D4ED8]">
+          <div className="font-bold mb-1">What happens next?</div>
+          <ol className="list-decimal ml-4 space-y-1">
+            <li>A recruiter will review your application within 1–2 business days.</li>
+            <li>We may contact you to complete additional documents or schedule a screening call.</li>
+            <li>Once approved, you'll receive an offer letter to sign electronically.</li>
+          </ol>
+        </div>
       </div>
     </div>
   );

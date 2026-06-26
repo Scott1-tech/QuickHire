@@ -107,6 +107,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <NavItem to="/inbox" icon="mail" label="Inbox" />
           <NavItem to="/tasks" icon="listChecklist" label="Tasks" badge={taskCount} />
           {can(s.role, 'research') && <NavItem to="/research" icon="search" label="Research" />}
+          <NavItem to="/compliance" icon="shield" label="Compliance" />
           <NavItem to="/docusign" icon="clipboardCheck" label="DocuSign — e-Sign" />
           {/* Anna lives outside the SPA (standalone workspace), so use a real anchor. */}
           <a href="/anna" className={itemCls(false)} title={collapsed ? 'Anna — AI Agent' : undefined}>

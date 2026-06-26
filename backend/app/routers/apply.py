@@ -94,6 +94,41 @@ async def submit_apply(token: str, request: Request):
     return {"ok": True}
 
 
+@router.patch("/api/apply/{token}/draft")
+async def save_draft(token: str, request: Request):
+    """Save a partial draft so drivers can resume later."""
+    c = await find_by_token(token)
+    if not c:
+        raise error(404, "This application link is not valid.")
+    if c.get("submittedAt"):
+        return {"ok": True, "status": "submitted"}
+    if _link_expired(c):
+        raise error(410, EXPIRED_MSG, expired=True)
+    body = await request.json()
+    c["draft"] = body.get("draft") or {}
+    await upsert(c)
+    return {"ok": True, "status": "draft_saved"}
+
+
+@router.post("/api/apply/{token}/request-new-link")
+async def request_new_link(token: str, request: Request):
+    """Driver requests a fresh link when theirs has expired."""
+    c = await find_by_token(token)
+    if not c:
+        raise error(404, "Link not found.")
+    if config.NOTIFY_EMAIL:
+        try:
+            await send_plain_email(
+                config.NOTIFY_EMAIL,
+                f"Driver requesting new application link — {c.get('name', 'Unknown')}",
+                f"<p><strong>{c.get('name')}</strong> ({c.get('email')}) requested a new application link because theirs expired.</p>"
+                f"<p>Please resend their link from the QuickHire workdeck dashboard.</p>",
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    return {"ok": True, "support": config.SUPPORT_CONTACT}
+
+
 # ── Legacy compat ────────────────────────────────────────────────────────────
 @router.get("/api/admin/applications", dependencies=[Depends(require_admin)])
 async def legacy_applications():
@@ -124,5 +159,7 @@ async def legacy_file(cid: str, field: str):
         with open(path, "rb") as fh:
             while chunk := fh.read(65536):
                 yield chunk
+    import re
+    safe_name = re.sub(r'[^\w.\-]', '_', meta.get("name") or "file")[:128]
     return StreamingResponse(it(), media_type=meta.get("mime") or "application/octet-stream",
-                             headers={"Content-Disposition": f'inline; filename="{meta.get("name")}"'})
+                             headers={"Content-Disposition": f'inline; filename="{safe_name}"'})

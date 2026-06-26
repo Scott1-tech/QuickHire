@@ -5,10 +5,11 @@ import uuid
 from datetime import datetime, timezone
 
 from . import embedded, envelopes as env, templates as templates_api, webhooks
-from .client import consent_url  # noqa: F401  (re-exported for parity)
+from .client import api_fetch, consent_url  # noqa: F401  (re-exported for parity)
 from .config import config, is_configured, mode
 from .documents import (
     DATA_FIELDS,
+    DOC_PACKAGES,
     DOC_TEMPLATES,
     build_document_html,
     build_signer_tabs,
@@ -17,6 +18,8 @@ from .documents import (
     html_document,
     merge_tabs,
     missing_fields,
+    missing_required_fields,
+    package_catalog,
     placed_fields_to_tabs,
     simple_pdf,
 )
@@ -49,6 +52,20 @@ def status() -> dict:
         "apiBase": config["apiBase"],
         "hasWebhookSecret": bool(config["webhookSecret"]),
         "documents": document_catalog(),
+        "packages": package_catalog(),
+    }
+
+
+def field_check(*, candidate: dict, carrier: dict | None = None, extra: dict | None = None) -> dict:
+    """Return missing fields split into driver / carrier buckets."""
+    profile = driver_profile(candidate, carrier=carrier, extra_fields=extra)
+    gaps = missing_required_fields(profile)
+    return {
+        "profile": profile,
+        "gaps": gaps,
+        "driverGaps": [g for g in gaps if g["bucket"] == "driver"],
+        "carrierGaps": [g for g in gaps if g["bucket"] == "carrier"],
+        "ready": len(gaps) == 0,
     }
 
 
@@ -168,6 +185,100 @@ async def send(*, candidate: dict, doc_type: str, fields: dict | None = None, si
         "signer": signer_record, "recipients": recipients, "placedFields": placed_fields, "uploadedPdf": use_pdf,
         "documentHtml": None if use_pdf else preview_html,
     })
+
+
+async def send_package(*, candidate: dict, package_type: str, fields: dict | None = None,
+                       signer: dict | None = None, email_subject: str | None = None,
+                       message: str | None = None) -> dict:
+    """Send a multi-document package as a single envelope."""
+    import os
+    pkg = DOC_PACKAGES.get(package_type)
+    if not pkg:
+        raise ValueError(f'Unknown package type "{package_type}".')
+    fields = fields or {}
+    who = {
+        "name": (signer or {}).get("name") or (candidate or {}).get("name"),
+        "email": (signer or {}).get("email") or (candidate or {}).get("email"),
+    }
+    if not who["name"] or not who["email"]:
+        raise ValueError("Signer name and email are required.")
+
+    profile = driver_profile(candidate or who, extra_fields=fields)
+    subject = email_subject or f"Please sign: {pkg['label']} — {os.environ.get('COMPANY_NAME', 'QuickHire')}"
+    tabs = build_signer_tabs(profile)
+    signer_record = {"name": who["name"], "email": who["email"], "recipientId": "1", "status": "sent", "signedAt": None}
+
+    if is_configured():
+        documents = []
+        for i, doc_type in enumerate(pkg["docs"]):
+            live_html = build_document_html(doc_type, candidate or who, fields, simulated=False)
+            label = DOC_TEMPLATES[doc_type]["label"]
+            documents.append(html_document(label, live_html, str(i + 1)))
+
+        definition = {
+            "emailSubject": subject,
+            "emailBlurb": message or None,
+            "status": "sent",
+            "documents": documents,
+            "recipients": {"signers": [{"email": who["email"], "name": who["name"], "recipientId": "1", "routingOrder": "1", "tabs": tabs}]},
+        }
+        created = await env.create_envelope(definition)
+        return _normalize({
+            "envelopeId": created.get("envelopeId"), "status": created.get("status") or "sent",
+            "simulated": False, "docType": f"package:{package_type}", "documentName": pkg["label"],
+            "emailSubject": subject, "message": message, "embedded": False, "signer": signer_record,
+            "packageType": package_type, "packageDocs": pkg["docs"],
+        })
+
+    # Simulated: build a combined preview document
+    preview_parts = []
+    for doc_type in pkg["docs"]:
+        preview_parts.append(build_document_html(doc_type, candidate or who, fields, simulated=True))
+    preview_html = "<hr style='margin:40px 0'>".join(preview_parts)
+    return _normalize({
+        "envelopeId": f"sim-pkg-{uuid.uuid4()}", "status": "sent",
+        "simulated": True, "docType": f"package:{package_type}", "documentName": pkg["label"],
+        "emailSubject": subject, "message": message, "embedded": False, "signer": signer_record,
+        "packageType": package_type, "packageDocs": pkg["docs"], "documentHtml": preview_html,
+    })
+
+
+async def send_reminder(record: dict) -> dict:
+    """Send a reminder for a pending envelope."""
+    if record.get("simulated"):
+        return {"ok": True, "simulated": True, "message": "Reminder noted (simulated mode)."}
+    try:
+        await api_fetch(f"/envelopes/{record['envelopeId']}/recipients", {
+            "method": "PUT",
+            "body": {"signers": [{"recipientId": "1", "resendEnvelope": True}]},
+        })
+        return {"ok": True, "simulated": False}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+
+
+async def store_signed_pdf(record: dict, candidate: dict) -> dict | None:
+    """Download completed signed PDF and store it on the candidate record."""
+    if record.get("status") != "completed":
+        return None
+    try:
+        result = await download(record)
+        import base64
+        b64 = base64.b64encode(result["buffer"]).decode("ascii")
+        doc_type = record.get("docType") or "signed_document"
+        safe_type = doc_type.replace(":", "_").replace(" ", "_")
+        from ..definitions import now_iso
+        return {
+            "name": result["filename"],
+            "mime": "application/pdf",
+            "dataUrl": f"data:application/pdf;base64,{b64}",
+            "signedDocumentId": safe_type,
+            "envelopeId": record.get("envelopeId"),
+            "uploadedAt": now_iso(),
+            "uploadedBy": "DocuSign",
+        }
+    except Exception:  # noqa: BLE001
+        return None
 
 
 async def refresh(record: dict) -> dict:

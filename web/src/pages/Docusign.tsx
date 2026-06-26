@@ -4,7 +4,8 @@ import { PageHeader, Pill, Empty, timeAgo } from '@/ui';
 import {
   getDocusignStatus, listEnvelopes, listCandidates,
   signingUrl, voidEnvelope, simulateComplete, docHtmlUrl, docPdfUrl, statusMeta,
-  type Envelope, type DocType, type DocusignStatus, type CandidateLite,
+  fieldCheck, sendPackage, sendReminder,
+  type Envelope, type DocType, type DocusignStatus, type CandidateLite, type FieldCheckResult, type Package,
 } from '@/lib/docusignApi';
 import EnvelopeBuilder from '@/pages/EnvelopeBuilder';
 
@@ -23,10 +24,12 @@ export default function Docusign() {
   const [candidates, setCandidates] = useState<CandidateLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [send, setSend] = useState<{ candidateId?: string; docType?: string } | null>(null);
+  const [pkgSend, setPkgSend] = useState<{ packageType: string; label: string } | null>(null);
   const [agrFolder, setAgrFolder] = useState<Folder>('inbox');
   const goAgreements = (f: Folder) => { setAgrFolder(f); setView('agreements'); };
 
   const docTypes = status?.documents ?? [];
+  const packages = status?.packages ?? [];
   const userName = (s.currentUser || 'QuickHire Admin').toUpperCase();
 
   async function reload() {
@@ -72,9 +75,10 @@ export default function Docusign() {
       <div className="flex-1 overflow-y-auto">
         {loading ? <Empty icon="⏳" title="Loading…" /> : (
           <>
-            {view === 'home' && <Home userName={userName} stats={stats} docTypes={docTypes} envelopes={envelopes}
+            {view === 'home' && <Home userName={userName} stats={stats} docTypes={docTypes} packages={packages} envelopes={envelopes}
               onStart={() => setSend({})} onUse={(t) => setSend({ docType: t })} onTemplates={() => setView('templates')}
-              onCopy={(e) => setSend({ candidateId: e.candidateId, docType: e.docType })} onStat={goAgreements} />}
+              onCopy={(e) => setSend({ candidateId: e.candidateId, docType: e.docType })} onStat={goAgreements}
+              onSendPackage={(p) => setPkgSend(p)} />}
             {view === 'agreements' && <Agreements envelopes={envelopes} onReload={reload} initialFolder={agrFolder}
               onCopy={(e) => setSend({ candidateId: e.candidateId, docType: e.docType })} />}
             {view === 'templates' && <Templates docTypes={docTypes} onUse={(t) => setSend({ docType: t })} />}
@@ -88,16 +92,20 @@ export default function Docusign() {
         <EnvelopeBuilder preset={send} candidates={candidates} docTypes={docTypes} mode={status.mode}
           onClose={() => setSend(null)} onSent={() => { setSend(null); reload(); }} />
       )}
+      {pkgSend && (
+        <PackageSendModal packageType={pkgSend.packageType} packageLabel={pkgSend.label} candidates={candidates}
+          onClose={() => setPkgSend(null)} onSent={() => { setPkgSend(null); reload(); }} />
+      )}
     </>
   );
 }
 
 // ── Home ─────────────────────────────────────────────────────────────────────
-function Home({ userName, stats, docTypes, envelopes, onStart, onUse, onTemplates, onCopy, onStat }: {
+function Home({ userName, stats, docTypes, packages, envelopes, onStart, onUse, onTemplates, onCopy, onStat, onSendPackage }: {
   userName: string; stats: { action: number; waiting: number; expiring: number; completed: number };
-  docTypes: DocType[]; envelopes: Envelope[];
+  docTypes: DocType[]; packages: Package[]; envelopes: Envelope[];
   onStart: () => void; onUse: (t: string) => void; onTemplates: () => void; onCopy: (e: Envelope) => void;
-  onStat: (folder: Folder) => void;
+  onStat: (folder: Folder) => void; onSendPackage: (p: { packageType: string; label: string }) => void;
 }) {
   const favorites = FAVORITE_TYPES.map((t) => docTypes.find((d) => d.type === t)).filter(Boolean).slice(0, 3) as DocType[];
   const recent = [...envelopes].slice(0, 6);
@@ -158,6 +166,29 @@ function Home({ userName, stats, docTypes, envelopes, onStart, onUse, onTemplate
             </div>
           ))}
         </div>
+
+        {/* Document packages */}
+        {packages.length > 0 && (
+          <>
+            <h2 className="text-xl font-bold text-ink mt-9 mb-3">Document Packages</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
+              {packages.map((pkg) => (
+                <div key={pkg.type} className="card p-5 flex gap-4 items-start hover:shadow-card transition cursor-pointer"
+                  onClick={() => onSendPackage({ packageType: pkg.type, label: pkg.label })}>
+                  <div className="text-3xl mt-0.5">📦</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[14px] font-bold text-ink">{pkg.label}</div>
+                    <div className="text-[12px] text-muted mt-0.5">{pkg.description}</div>
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {pkg.docs.map((d) => <span key={d} className="pill pill-info text-[10px]">{d.replace(/_/g, ' ')}</span>)}
+                    </div>
+                  </div>
+                  <button className="btn-primary text-[12px] py-1.5 flex-shrink-0">Send</button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
 
         {/* Agreement activity */}
         <h2 className="text-xl font-bold text-ink mt-9 mb-3">Agreement activity</h2>
@@ -253,6 +284,7 @@ function Agreements({ envelopes, onReload, onCopy, initialFolder }: { envelopes:
                     <a className="btn-ghost text-[11.5px] py-1" href={docHtmlUrl(e.envelopeId)} target="_blank" rel="noreferrer">View</a>
                     {!done && <button className="btn-ghost text-[11.5px] py-1" onClick={() => openSign(e.envelopeId)}>Sign</button>}
                     {!done && e.simulated && <button disabled={busy === e.envelopeId} className="btn-ghost text-[11.5px] py-1" onClick={() => act(e.envelopeId, () => simulateComplete(e.envelopeId))}>✔</button>}
+                    {!done && <button disabled={busy === e.envelopeId} className="btn-ghost text-[11.5px] py-1" onClick={() => act(e.envelopeId, () => sendReminder(e.envelopeId))}>Remind</button>}
                     {!done && <button disabled={busy === e.envelopeId} className="btn-ghost text-[11.5px] py-1 text-danger" onClick={() => act(e.envelopeId, () => voidEnvelope(e.envelopeId, 'Voided by recruiter'))}>Void</button>}
                     {e.status === 'completed' && <a className="btn-ghost text-[11.5px] py-1" href={docPdfUrl(e.envelopeId)} target="_blank" rel="noreferrer">⬇ PDF</a>}
                     {done && <button className="btn-ghost text-[11.5px] py-1" onClick={() => onCopy(e)}>Copy</button>}
@@ -318,6 +350,128 @@ function Reports({ envelopes }: { envelopes: Envelope[] }) {
             <div className="h-2.5 rounded-full bg-bg overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(r.n / total) * 100}%`, background: r.color }} /></div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ── PackageSendModal ─────────────────────────────────────────────────────────
+function PackageSendModal({ packageType, packageLabel, candidates, onClose, onSent }: {
+  packageType: string; packageLabel: string; candidates: CandidateLite[];
+  onClose: () => void; onSent: () => void;
+}) {
+  const [step, setStep] = useState<'pick' | 'review'>('pick');
+  const [candidateId, setCandidateId] = useState('');
+  const [check, setCheck] = useState<FieldCheckResult | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const [overrides, setOverrides] = useState<Record<string, string>>({});
+
+  const candidate = candidates.find((c) => c.id === candidateId);
+
+  const doCheck = async () => {
+    if (!candidateId) { setError('Select a driver first.'); return; }
+    setChecking(true); setError('');
+    try {
+      const result = await fieldCheck(candidateId, overrides);
+      setCheck(result); setStep('review');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Field check failed.');
+    } finally { setChecking(false); }
+  };
+
+  const doSend = async () => {
+    setSending(true); setError('');
+    try {
+      await sendPackage(candidateId, {
+        packageType,
+        fields: { ...check?.profile, ...overrides },
+        signer: candidate ? { name: candidate.name, email: candidate.email } : undefined,
+      });
+      onSent();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Send failed.');
+    } finally { setSending(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-line">
+          <div>
+            <div className="text-[15px] font-bold text-ink">📦 {packageLabel}</div>
+            <div className="text-[12px] text-muted">{step === 'pick' ? 'Select driver' : 'Review & send'}</div>
+          </div>
+          <button onClick={onClose} className="text-muted hover:text-ink text-xl">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+          {step === 'pick' && (
+            <>
+              <label className="block text-[13px] font-semibold text-ink mb-1">Driver / Candidate</label>
+              <select className="input w-full" value={candidateId} onChange={(e) => setCandidateId(e.target.value)}>
+                <option value="">— Select driver —</option>
+                {candidates.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.email}</option>)}
+              </select>
+            </>
+          )}
+
+          {step === 'review' && check && (
+            <>
+              {check.driverGaps.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                  <div className="text-[12px] font-bold text-amber-800 mb-2">Driver info missing ({check.driverGaps.length})</div>
+                  {check.driverGaps.map((g) => (
+                    <div key={g.key} className="mb-2">
+                      <label className="text-[11px] text-amber-700">{g.label}</label>
+                      <input className="input w-full mt-0.5 text-[13px]" placeholder={`Enter ${g.label}`}
+                        value={overrides[g.key] ?? ''}
+                        onChange={(ev) => setOverrides((o) => ({ ...o, [g.key]: ev.target.value }))} />
+                    </div>
+                  ))}
+                </div>
+              )}
+              {check.carrierGaps.length > 0 && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                  <div className="text-[12px] font-bold text-blue-800 mb-2">Carrier info missing ({check.carrierGaps.length})</div>
+                  {check.carrierGaps.map((g) => (
+                    <div key={g.key} className="mb-2">
+                      <label className="text-[11px] text-blue-700">{g.label}</label>
+                      <input className="input w-full mt-0.5 text-[13px]" placeholder={`Enter ${g.label}`}
+                        value={overrides[g.key] ?? ''}
+                        onChange={(ev) => setOverrides((o) => ({ ...o, [g.key]: ev.target.value }))} />
+                    </div>
+                  ))}
+                </div>
+              )}
+              {check.ready && (
+                <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-[13px] text-green-700 font-medium">
+                  ✅ All required fields filled — ready to send.
+                </div>
+              )}
+            </>
+          )}
+
+          {error && <div className="text-[13px] text-danger">{error}</div>}
+        </div>
+
+        <div className="px-6 py-4 border-t border-line flex justify-end gap-2">
+          <button onClick={onClose} className="btn-ghost">Cancel</button>
+          {step === 'pick' && (
+            <button onClick={doCheck} disabled={checking || !candidateId} className="btn-primary">
+              {checking ? 'Checking…' : 'Review Fields →'}
+            </button>
+          )}
+          {step === 'review' && (
+            <>
+              <button onClick={() => setStep('pick')} className="btn-ghost">← Back</button>
+              <button onClick={doSend} disabled={sending} className="btn-primary">
+                {sending ? 'Sending…' : 'Send Package'}
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
