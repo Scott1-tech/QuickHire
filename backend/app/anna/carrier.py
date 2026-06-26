@@ -2,7 +2,7 @@
 import json
 import re
 
-from .claude import MODELS, anna_configured, call_claude_json
+from .claude import anna_configured, llm_json
 
 
 async def extract_carrier_spec(form: dict | None = None, opts: dict | None = None) -> dict:
@@ -10,9 +10,10 @@ async def extract_carrier_spec(form: dict | None = None, opts: dict | None = Non
     opts = opts or {}
     if opts.get("ai") and anna_configured(opts.get("apiKey")):
         try:
-            out = await call_claude_json(
+            out = await llm_json(
+                provider=opts.get("provider"),
                 api_key=opts.get("apiKey"),
-                model=opts.get("model") or MODELS["fast"],
+                model=opts.get("model"),
                 max_tokens=700,
                 system=(
                     "You convert a trucking carrier's free-text hiring requirements into strict structured JSON for a driver-matching engine. "

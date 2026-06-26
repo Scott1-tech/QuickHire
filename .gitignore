@@ -7,3 +7,8 @@ data/
 # Web SPA build deps (build output public/app/ is committed for reliable deploys)
 web/node_modules/
 web/dist/
+
+# Python
+__pycache__/
+*.pyc
+service/data/

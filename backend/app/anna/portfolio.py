@@ -2,7 +2,7 @@
 import time
 from datetime import datetime, timezone
 
-from .claude import MODELS, anna_configured, call_claude
+from .claude import anna_configured, llm_complete, provider_model
 from .matcher import STATUS, evaluate_gates
 from .spec import compile_spec
 
@@ -54,6 +54,7 @@ def build_portfolio(*, driver: dict, match: dict, documents: dict | None = None,
         "carrierName": m["carrierName"],
         "status": m["status"],
         "fitScore": m["fitScore"],
+        "scoreBreakdown": m.get("scoreBreakdown") or {},
         "fitSummary": m.get("fitSummary"),
         "nearMiss": m.get("nearMiss"),
         "topReason": (m.get("reasons") or [None])[0],
@@ -82,7 +83,7 @@ def select_carrier(portfolio: dict, carrier_id: str, by: str = "Recruiter") -> d
     rec = next((r for r in (portfolio.get("recommendations") or []) if r["carrierId"] == carrier_id), None)
     if not rec:
         raise ValueError("That carrier is not in this driver's recommendation list.")
-    portfolio["carrier"] = {"carrierId": rec["carrierId"], "carrierName": rec["carrierName"], "fitScore": rec["fitScore"], "status": rec["status"]}
+    portfolio["carrier"] = {"carrierId": rec["carrierId"], "carrierName": rec["carrierName"], "fitScore": rec["fitScore"], "status": rec["status"], "scoreBreakdown": rec.get("scoreBreakdown") or {}}
     review = portfolio.get("review") or {}
     portfolio["review"] = {
         **review,
@@ -139,9 +140,10 @@ async def write_compliance(*, carrier: dict, driver: dict, records: dict | None 
     if opts.get("narrate") and anna_configured(opts.get("apiKey")):
         try:
             import json
-            out = await call_claude(
+            out = await llm_complete(
+                provider=opts.get("provider"),
                 api_key=opts.get("apiKey"),
-                model=opts.get("model") or MODELS["smart"],
+                model=opts.get("model") or provider_model(opts.get("provider") or "anthropic", "smart"),
                 max_tokens=400,
                 system="You are Anna, an FMCSA driver-qualification compliance assistant. Write a concise, factual 2-3 sentence summary for a recruiter. Do not change the provided verdict. Cite specifics.",
                 messages=[{"role": "user", "content": f"Verdict: {flag.upper()} for {spec['carrierName']}.\nGate results:\n{json.dumps(gate_results, indent=2)}\n\nWrite the summary."}],
