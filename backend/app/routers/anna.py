@@ -293,6 +293,22 @@ async def anna_metrics():
         key=lambda c: c["selections"], reverse=True,
     )
 
+    # Source ROI: which lead source actually yields hires (not just leads).
+    src: dict = {}
+    for p in ps:
+        s = p.get("leadSource") or "unknown"
+        e = src.setdefault(s, {"source": s, "leads": 0, "hired": 0, "rejected": 0})
+        e["leads"] += 1
+        o = (p.get("outcome") or {}).get("status")
+        if o in _GOOD_OUTCOMES:
+            e["hired"] += 1
+        elif o in _BAD_OUTCOMES:
+            e["rejected"] += 1
+    by_source = sorted(
+        ({**e, "hireRate": round(e["hired"] / e["leads"] * 100) if e["leads"] else None} for e in src.values()),
+        key=lambda e: e["leads"], reverse=True,
+    )
+
     return {
         "generatedAt": _now(),
         "leads": leads,
@@ -309,7 +325,50 @@ async def anna_metrics():
         "outcomes": {"counts": outcome_counts, "good": good, "bad": bad, "successRate": round(good / (good + bad) * 100) if (good + bad) else None},
         "recruiterHoursSaved": round(leads * _MINUTES_SAVED_PER_LEAD / 60, 1),
         "perCarrier": per_carrier,
+        "bySource": by_source,
     }
+
+
+# ── SLA nudges: what's stalled in the pipeline and needs a human ──────────────
+@router.get("/api/anna/nudges")
+async def anna_nudges():
+    return anna.compute_nudges(await read_portfolios())
+
+
+# ── Cross-source truth check: flag contradictions across application/records/docs
+@router.post("/api/anna/portfolios/{pid}/truth-check")
+async def anna_truth_check(pid: str, request: Request):
+    p = await find_portfolio(pid)
+    if not p:
+        raise error(404, "Not found")
+    body = await request.json()
+    truth = anna.check_consistency(driver=p.get("driver") or {}, records=body.get("records") or {}, documents=p.get("documents") or {})
+    p["truthFlags"] = truth
+    await upsert_portfolio(p)
+    return truth
+
+
+# ── Carrier re-screen: when requirements change, who flips eligibility? ────────
+@router.post("/api/anna/carriers/{cid}/rescreen")
+async def anna_rescreen(cid: str):
+    carrier = await find_carrier_by_id(cid)
+    if not carrier:
+        raise error(404, "Carrier not found")
+    res = await anna.extract_carrier_spec(carrier.get("requirements") or {}, await _anna_opts())
+    spec = anna.compile_spec({"id": cid, "name": carrier.get("name"), "requirements": res["requirements"]})
+    changes = []
+    for p in await read_portfolios():
+        ev = anna.evaluate_gates(spec, p.get("driver") or {})
+        prior = next((r for r in (p.get("recommendations") or []) if r.get("carrierId") == cid), None)
+        old_status = prior["status"] if prior else None
+        if old_status != ev["status"]:
+            changes.append({"portfolioId": p.get("id"), "driver": (p.get("driver") or {}).get("name") or "—",
+                            "was": old_status, "now": ev["status"],
+                            "reasons": [r["reason"] for r in ev["failed"] + ev["unknown"]][:3]})
+    return {"carrier": carrier.get("name"), "changed": len(changes),
+            "newlyEligible": [c for c in changes if c["now"] == "ELIGIBLE"],
+            "nowIneligible": [c for c in changes if c["was"] == "ELIGIBLE" and c["now"] != "ELIGIBLE"],
+            "all": changes}
 
 
 @router.get("/api/anna/portfolios/{pid}")
