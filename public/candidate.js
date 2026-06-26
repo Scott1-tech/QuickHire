@@ -10,7 +10,7 @@ const STAGE_COLORS = { Lead:'bg-gray-100 text-gray-700', Screening:'bg-blue-100 
 const PEV_STATUS = ['not_started','in_progress','verified','unable_to_verify'];
 const PEV_LABELS = { not_started:'Not Started', in_progress:'In Progress', verified:'Verified', unable_to_verify:'Unable to Verify' };
 const PEV_COLORS = { not_started:'bg-gray-100 text-gray-600', in_progress:'bg-blue-100 text-blue-700', verified:'bg-green-100 text-green-700', unable_to_verify:'bg-red-100 text-red-700' };
-const ACTIVITY_ICONS = { stage_change:'🔄', application_submitted:'📋', note_added:'📝', link_sent:'📨', link_resent:'📨', sms_optout:'🚫', checklist_complete:'✅', molly_summary:'🤖', document_uploaded:'📎', document_removed:'🗑', pev_updated:'🔍', candidate_created:'👤' };
+const ACTIVITY_ICONS = { stage_change:'🔄', application_submitted:'📋', note_added:'📝', link_sent:'📨', link_resent:'📨', sms_optout:'🚫', checklist_complete:'✅', molly_summary:'🤖', document_uploaded:'📎', document_removed:'🗑', pev_updated:'🔍', candidate_created:'👤', docusign_sent:'✍️', docusign_completed:'✅', docusign_declined:'✋', docusign_voided:'🗑' };
 
 function channelsLabel(c) {
   const ch = (c.linkLastChannels && c.linkLastChannels.length) ? c.linkLastChannels.join(' & ') : '—';
@@ -39,6 +39,8 @@ async function init() {
   ]);
   if (cfg.requiresPassword && !localStorage.getItem(TOKEN_KEY)) { location.href = '/login.html'; return; }
   document.getElementById('bcCompany').textContent = cfg.companyName?.replace('National Carrier Xpress Corp','NCX') || 'NCX';
+  const dsBtn = document.getElementById('docusignBtn');
+  if (dsBtn) dsBtn.href = `/docusign.html?candidate=${id}`;
   await reload();
 }
 
