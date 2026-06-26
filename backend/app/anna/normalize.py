@@ -1,7 +1,7 @@
 """Turning messy input into a structured DriverProfile (Claude + fallback)."""
 import json
 
-from .claude import anna_configured, call_claude_json, document_block, llm_json
+from .claude import MODELS, anna_configured, call_claude_json, document_block
 
 DRIVER_SHAPE = {
     "name": "string", "age": "number", "phone": "string", "email": "string",
@@ -27,10 +27,9 @@ async def normalize_driver(lead: dict | None = None, opts: dict | None = None) -
     opts = opts or {}
     if anna_configured(opts.get("apiKey")):
         try:
-            out = await llm_json(
-                provider=opts.get("provider"),
+            out = await call_claude_json(
                 api_key=opts.get("apiKey"),
-                model=opts.get("model"),
+                model=opts.get("model") or MODELS["fast"],
                 max_tokens=1024,
                 system=(
                     "You normalize raw truck-driver lead data into a strict JSON DriverProfile for an FMCSA driver-qualification system. "
@@ -59,7 +58,7 @@ async def extract_from_document(p: dict | None = None) -> dict:
     doc_type = p.get("docType") or "document"
     out = await call_claude_json(
         api_key=p.get("apiKey"),
-        model=p.get("model"),
+        model=p.get("model") or MODELS["fast"],
         max_tokens=1024,
         system=(
             "You read US commercial driver documents (CDL, DOT medical card, certificates) and extract fields for an application. "
