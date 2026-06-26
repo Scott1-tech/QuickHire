@@ -1392,7 +1392,7 @@ td{padding:4px 8px} .meta{color:#888;font-size:12px} .verdict{display:inline-blo
 ${cmp ? `<p><span class="verdict ${esc(cmp.flag)}">${esc(cmp.flag.toUpperCase())}</span> &nbsp;<span class="meta">sources: ${src} · checked ${esc(new Date(cmp.checkedAt).toLocaleString())}</span></p><p>${esc(cmp.summary)}</p><ul>${cats}</ul>` : '<p class="meta">No compliance check on file.</p>'}
 
 <h2>Recruiter Decision</h2>
-<table>${row('Status', (k.decision?.status || 'pending').toUpperCase())}${row('Decided by', k.decision?.decidedBy || '—')}${row('Decided at', k.decision?.decidedAt || '—')}${row('Reason', k.decision?.reason || '—')}</table>
+<table>${row('Status', (k.decision?.status || 'pending').toUpperCase())}${row('Decided by', k.decision?.decidedBy || '—')}${row('Decided at', k.decision?.decidedAt || '—')}${row('Reason', k.decision?.reason || '—')}${k.outcome ? row('Outcome', `${k.outcome.status}${k.outcome.note ? ' — ' + k.outcome.note : ''}`) : ''}</table>
 
 <h2>Audit Trail</h2>
 <table class="audit"><tr><th>When</th><th>Actor</th><th>Event</th><th>Detail</th></tr>${audit}</table>
@@ -1410,6 +1410,7 @@ function portfolioSummary(p) {
     reviewStatus: p.review?.status || 'pending',
     recruiter: p.review?.assignedRecruiter || null,
     complianceFlag: p.compliance?.flag || null,
+    outcome: p.outcome?.status || null,
   };
 }
 
@@ -1564,6 +1565,7 @@ app.get('/api/anna/portfolios/:id/packet', requireAdmin, (req, res) => {
       status: p.review?.status, decidedBy: p.review?.decidedBy, decidedAt: p.review?.decidedAt,
       reason: p.review?.decisionReason, carrierSelectedBy: p.review?.carrierSelectedBy,
     },
+    outcome: p.outcome || null,
     auditTrail: p.audit || [],
   };
   if ((req.query.format || '') === 'html') {
@@ -1643,6 +1645,33 @@ app.post('/api/anna/portfolios/:id/compliance', requireAdmin, async (req, res) =
     if (e.code === 'CONSENT_REQUIRED') return res.status(403).json({ error: e.message, missingConsent: e.missing });
     res.status(502).json({ error: e.message });
   }
+});
+
+// Outcome capture + learning: record what actually happened to a placement and
+// tune the selected carrier's soft-match weights from real results.
+app.post('/api/anna/portfolios/:id/outcome', requireAdmin, (req, res) => {
+  const p = findPortfolio(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  const { outcome, note, by } = req.body || {};
+  if (!anna.OUTCOME_KINDS.includes(outcome)) return res.status(400).json({ error: `outcome must be one of: ${anna.OUTCOME_KINDS.join(', ')}.` });
+  const who = by || p.review?.assignedRecruiter || 'Recruiter';
+  p.outcome = { status: outcome, note: note || '', by: who, at: new Date().toISOString() };
+  auditLog(p, 'outcome', `Outcome recorded: ${outcome}${note ? ` — ${note}` : ''}.`, who);
+
+  let learning = null;
+  const carrier = p.carrier?.carrierId ? findCarrierById(p.carrier.carrierId) : null;
+  if (carrier) {
+    const baseWeights = anna.compileSpec({}).softWeights; // stable default weights
+    const updated = anna.recordOutcome(carrier.annaLearning || {}, { outcome, breakdown: p.carrier.scoreBreakdown || {}, baseWeights });
+    carrier.annaLearning = { samples: updated.samples, weights: updated.weights, stats: updated.stats };
+    carrier.structuredRequirements = carrier.structuredRequirements || {};
+    carrier.structuredRequirements.softWeights = updated.weights || baseWeights; // applied to future matching
+    upsertCarrier(carrier);
+    learning = { carrier: carrier.name, ...updated.stats, tuned: Boolean(updated.weights) };
+    if (updated.weights) auditLog(p, 'learning', `Anna re-tuned ${carrier.name}'s match weights from ${updated.stats.total} placements (${updated.stats.successRate}% success).`);
+  }
+  upsertPortfolio(p);
+  res.json({ ok: true, outcome: p.outcome, learning });
 });
 
 // Stage 5: human checkpoint — recruiter approves or rejects.

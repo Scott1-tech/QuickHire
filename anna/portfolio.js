@@ -43,6 +43,7 @@ export function buildPortfolio({ driver, match, documents = {}, recruiter, recru
     carrierName: m.carrierName,
     status: m.status,
     fitScore: m.fitScore,
+    scoreBreakdown: m.scoreBreakdown || {},
     fitSummary: m.fitSummary || null,
     nearMiss: m.nearMiss || null,
     topReason: (m.reasons && m.reasons[0]) || null,
@@ -75,7 +76,7 @@ export function buildPortfolio({ driver, match, documents = {}, recruiter, recru
 export function selectCarrier(portfolio, carrierId, by = 'Recruiter') {
   const rec = (portfolio.recommendations || []).find((r) => r.carrierId === carrierId);
   if (!rec) throw new Error('That carrier is not in this driver\'s recommendation list.');
-  portfolio.carrier = { carrierId: rec.carrierId, carrierName: rec.carrierName, fitScore: rec.fitScore, status: rec.status };
+  portfolio.carrier = { carrierId: rec.carrierId, carrierName: rec.carrierName, fitScore: rec.fitScore, status: rec.status, scoreBreakdown: rec.scoreBreakdown || {} };
   portfolio.review = {
     ...portfolio.review,
     status: portfolio.review.status === 'awaiting_carrier' ? 'pending' : portfolio.review.status,

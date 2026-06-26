@@ -8,6 +8,7 @@ import { buildPortfolio, writeCompliance, selectCarrier as anna_selectCarrier } 
 import { createQueue } from '../queue.js';
 import { extractCarrierSpec } from '../carrier.js';
 import { pullCompliance, checkConsent, ConsentError, integrationStatus, normalizeConsent } from '../integrations.js';
+import { recordOutcome, tuneWeights, outcomeStats } from '../learning.js';
 
 let pass = 0, fail = 0;
 const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error('  ✗ ' + msg); } };
@@ -200,6 +201,27 @@ section('normalizeDriver (heuristic fallback, no API key)');
   ok(normalizeConsent({}).signedAt === null, 'no consent => null signedAt');
   // The consent normalizer composes with the gate.
   ok(checkConsent(fromApp, ['mvr', 'clearinghouse']) === true, 'normalized application consent passes the gate');
+
+  section('learning: outcome-based weight tuning');
+  const base = { experienceMargin: 0.4, cleanRecordMargin: 0.4, endorsementsMatch: 0.2 };
+  // Not enough samples yet -> keep base (null).
+  ok(tuneWeights([{ signal: 'good', breakdown: { experienceMargin: 90 } }], base) === null, 'insufficient samples => no tuning');
+  // Good hires scored high on experience, bad ones low -> experience weight should rise.
+  const samples = [
+    { signal: 'good', breakdown: { experienceMargin: 90, cleanRecordMargin: 50, endorsementsMatch: 50 } },
+    { signal: 'good', breakdown: { experienceMargin: 85, cleanRecordMargin: 50, endorsementsMatch: 50 } },
+    { signal: 'good', breakdown: { experienceMargin: 80, cleanRecordMargin: 50, endorsementsMatch: 50 } },
+    { signal: 'bad', breakdown: { experienceMargin: 20, cleanRecordMargin: 50, endorsementsMatch: 50 } },
+    { signal: 'bad', breakdown: { experienceMargin: 15, cleanRecordMargin: 50, endorsementsMatch: 50 } },
+  ];
+  const tuned = tuneWeights(samples, base);
+  ok(tuned && Math.abs(Object.values(tuned).reduce((a, b) => a + b, 0) - 1) < 1e-9, 'tuned weights re-normalize to 1');
+  ok(tuned.experienceMargin > base.experienceMargin, `experience weight rises (${base.experienceMargin} -> ${tuned.experienceMargin.toFixed(3)})`);
+  ok(tuned.cleanRecordMargin < base.cleanRecordMargin, 'flat factor relatively decreases');
+
+  const rec = recordOutcome({ samples }, { outcome: 'retained_90d', breakdown: { experienceMargin: 88, cleanRecordMargin: 50, endorsementsMatch: 50 }, baseWeights: base });
+  ok(rec.samples.length === 6 && rec.stats.good === 4 && rec.stats.bad === 2, 'recordOutcome appends sample + stats');
+  ok(outcomeStats(samples).successRate === 60, 'success rate computed (3/5 = 60%)');
 
   // ── Report ──
   console.log(`\n${fail ? '❌' : '✅'} ${pass} passed, ${fail} failed`);

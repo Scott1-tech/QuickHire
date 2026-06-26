@@ -23,6 +23,7 @@ export { buildPortfolio, writeCompliance, mergeRecords, selectCarrier } from './
 export { createQueue } from './queue.js';
 export { pullCompliance, checkConsent, ConsentError, INTEGRATIONS, integrationStatus, normalizeConsent } from './integrations.js';
 export { chat } from './chat.js';
+export { recordOutcome, tuneWeights, outcomeStats, OUTCOME_KINDS, OUTCOME_SIGNAL } from './learning.js';
 export { callClaude, callClaudeJSON, annaConfigured, MODELS } from './claude.js';
 
 import { normalizeDriver } from './normalize.js';
