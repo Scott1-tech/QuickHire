@@ -54,6 +54,7 @@ def build_portfolio(*, driver: dict, match: dict, documents: dict | None = None,
         "carrierName": m["carrierName"],
         "status": m["status"],
         "fitScore": m["fitScore"],
+        "scoreBreakdown": m.get("scoreBreakdown") or {},
         "fitSummary": m.get("fitSummary"),
         "nearMiss": m.get("nearMiss"),
         "topReason": (m.get("reasons") or [None])[0],
@@ -82,7 +83,7 @@ def select_carrier(portfolio: dict, carrier_id: str, by: str = "Recruiter") -> d
     rec = next((r for r in (portfolio.get("recommendations") or []) if r["carrierId"] == carrier_id), None)
     if not rec:
         raise ValueError("That carrier is not in this driver's recommendation list.")
-    portfolio["carrier"] = {"carrierId": rec["carrierId"], "carrierName": rec["carrierName"], "fitScore": rec["fitScore"], "status": rec["status"]}
+    portfolio["carrier"] = {"carrierId": rec["carrierId"], "carrierName": rec["carrierName"], "fitScore": rec["fitScore"], "status": rec["status"], "scoreBreakdown": rec.get("scoreBreakdown") or {}}
     review = portfolio.get("review") or {}
     portfolio["review"] = {
         **review,

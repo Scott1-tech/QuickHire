@@ -1,4 +1,5 @@
 """/api/anna/* — Anna driver-qualification agent routes."""
+import json
 import re
 from datetime import datetime, timezone
 
@@ -12,6 +13,8 @@ from ..errors import error
 from ..store import (
     find_carrier_by_id,
     find_portfolio,
+    kv_get,
+    kv_set,
     read_carriers,
     read_portfolios,
     upsert_carrier,
@@ -49,6 +52,7 @@ def _portfolio_summary(p: dict) -> dict:
         "reviewStatus": review.get("status") or "pending",
         "recruiter": review.get("assignedRecruiter"),
         "complianceFlag": compliance.get("flag"),
+        "outcome": (p.get("outcome") or {}).get("status"),
     }
 
 
@@ -62,8 +66,29 @@ async def _anna_carriers() -> list:
             c["structuredRequirements"] = res["requirements"]
             c["structuredSpecVersion"] = SPEC_PARSE_VERSION
             await upsert_carrier(c)
-        out.append({"id": c["id"], "name": c["name"], "requirements": c["structuredRequirements"], "specVersion": SPEC_PARSE_VERSION})
+        reqs = c["structuredRequirements"]
+        learned = await _learning_for(c["id"])
+        if learned.get("weights"):
+            reqs = {**reqs, "softWeights": learned["weights"]}
+        out.append({"id": c["id"], "name": c["name"], "requirements": reqs, "specVersion": SPEC_PARSE_VERSION})
     return out
+
+
+# ── Outcome-based learning, stored per-carrier in the KV table ───────────────
+def _learning_key(carrier_id: str) -> str:
+    return f"anna.learning.{carrier_id}"
+
+
+async def _learning_for(carrier_id: str) -> dict:
+    raw = await kv_get(_learning_key(carrier_id))
+    try:
+        return json.loads(raw) if raw else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+async def _save_learning(carrier_id: str, data: dict) -> None:
+    await kv_set(_learning_key(carrier_id), json.dumps(data))
 
 
 # ── Anna settings (Anthropic API key) ────────────────────────────────────────
@@ -224,6 +249,7 @@ async def anna_packet(pid: str, request: Request):
             "status": review.get("status"), "decidedBy": review.get("decidedBy"), "decidedAt": review.get("decidedAt"),
             "reason": review.get("decisionReason"), "carrierSelectedBy": review.get("carrierSelectedBy"),
         },
+        "outcome": p.get("outcome"),
         "auditTrail": p.get("audit") or [],
     }
     if (request.query_params.get("format") or "") == "html":
@@ -408,3 +434,40 @@ td{{padding:4px 8px}} .meta{{color:#888;font-size:12px}} .verdict{{display:inlin
 <h2>Audit Trail</h2>
 <table class="audit"><tr><th>When</th><th>Actor</th><th>Event</th><th>Detail</th></tr>{audit}</table>
 </body></html>"""
+
+
+# ── Outcome capture + learning ───────────────────────────────────────────────
+@router.post("/api/anna/portfolios/{pid}/outcome")
+async def anna_outcome(pid: str, request: Request):
+    p = await find_portfolio(pid)
+    if not p:
+        raise error(404, "Not found")
+    body = await request.json()
+    outcome = body.get("outcome")
+    if outcome not in anna.OUTCOME_KINDS:
+        raise error(400, f"outcome must be one of: {', '.join(anna.OUTCOME_KINDS)}.")
+    who = body.get("by") or (p.get("review") or {}).get("assignedRecruiter") or "Recruiter"
+    p["outcome"] = {"status": outcome, "note": body.get("note") or "", "by": who, "at": _now()}
+    _audit_log(p, "outcome", f"Outcome recorded: {outcome}{(' — ' + body['note']) if body.get('note') else ''}.", who)
+
+    learning = None
+    carrier_id = (p.get("carrier") or {}).get("carrierId")
+    carrier = await find_carrier_by_id(carrier_id) if carrier_id else None
+    if carrier:
+        base = anna.compile_spec({})["softWeights"]
+        prior = await _learning_for(carrier_id)
+        updated = anna.record_outcome(prior, outcome=outcome,
+                                      breakdown=(p.get("carrier") or {}).get("scoreBreakdown") or {}, base_weights=base)
+        await _save_learning(carrier_id, {"samples": updated["samples"], "weights": updated["weights"], "stats": updated["stats"]})
+        learning = {"carrier": carrier.get("name"), **updated["stats"], "tuned": bool(updated["weights"])}
+        if updated["weights"]:
+            _audit_log(p, "learning", f"Anna re-tuned {carrier.get('name')}'s match weights from "
+                       f"{updated['stats']['total']} placements ({updated['stats']['successRate']}% success).")
+    await upsert_portfolio(p)
+    return {"ok": True, "outcome": p["outcome"], "learning": learning}
+
+
+# ── Metrics (ROI view) ───────────────────────────────────────────────────────
+@router.get("/api/anna/metrics")
+async def anna_metrics():
+    return anna.compute_metrics(await read_portfolios())
