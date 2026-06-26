@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useStore } from '@/store';
 import Icon from '@/components/Icon';
 import TaskModal from '@/components/TaskModal';
+import AnnaAssistant from '@/components/AnnaAssistant';
 import { NOTIFICATIONS } from '@/data/mock';
 import type { Role } from '@/types';
 
@@ -107,6 +108,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <NavItem to="/tasks" icon="listChecklist" label="Tasks" badge={taskCount} />
           {can(s.role, 'research') && <NavItem to="/research" icon="search" label="Research" />}
           <NavItem to="/docusign" icon="clipboardCheck" label="DocuSign — e-Sign" />
+          {/* Anna lives outside the SPA (standalone workspace), so use a real anchor. */}
+          <a href="/anna" className={itemCls(false)} title={collapsed ? 'Anna — AI Agent' : undefined}>
+            <span className="w-[18px] text-center flex-shrink-0">🤖</span>
+            {!collapsed && <span className="flex-1 truncate">Anna — AI Agent</span>}
+          </a>
 
           {/* Carrier badge */}
           <div className="relative z-20 mt-3">
@@ -169,6 +175,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         onGo={(to) => { nav(to); setPaletteOpen(false); }}
         onCreateTask={() => { setPaletteOpen(false); setQuickTask(true); }} />}
       {quickTask && <TaskModal createSeed={{ assignee: s.currentUser }} onClose={() => setQuickTask(false)} />}
+
+      {/* Anna — app-wide AI assistant (ask questions, summarize, navigate, assign tasks) */}
+      <AnnaAssistant />
     </div>
   );
 }
