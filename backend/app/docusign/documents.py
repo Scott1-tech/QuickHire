@@ -279,6 +279,13 @@ def _lease_agreement(c, f, review):
       {review}""")
 
 
+def w9_form(c, f, review):
+    return _page("W-9 Request for Taxpayer Identification", f"""
+      <p>Under penalties of perjury, I certify that the information below is true, correct, and complete.</p>
+      {review}
+      <p>Federal tax classification: <strong>Individual/sole proprietor</strong></p>""")
+
+
 DOC_TEMPLATES = {
     "offer_letter": {"label": "Offer Letter", "description": "Formal offer of employment for the driver to review, correct and sign.", "build": _offer_letter},
     "mvr_consent": {"label": "MVR Consent Form", "description": "Driver authorization to pull the Motor Vehicle Record.", "build": _mvr_consent},
@@ -295,13 +302,6 @@ DOC_TEMPLATES = {
 
 def document_catalog() -> list:
     return [{"type": t, "label": v["label"], "description": v["description"]} for t, v in DOC_TEMPLATES.items()]
-
-
-def w9_form(c, f, review):
-    return _page("W-9 Request for Taxpayer Identification", f"""
-      <p>Under penalties of perjury, I certify that the information below is true, correct, and complete.</p>
-      {review}
-      <p>Federal tax classification: <strong>Individual/sole proprietor</strong></p>""")
 
 
 def build_document_html(doc_type: str, candidate: dict | None, fields: dict | None = None, simulated: bool = True) -> str:
