@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from .. import anna, config
-from ..anna_settings import clear_key, effective_key, key_source, mask_key, set_key
+from ..anna_settings import PROVIDERS, clear_settings, effective_key, key_source, mask_key, model as anna_model, provider as anna_provider, set_settings
 from ..deps import require_admin
 from ..errors import error
 from ..store import (
@@ -27,7 +27,7 @@ SPEC_PARSE_VERSION = 1
 
 
 async def _anna_opts() -> dict:
-    return {"apiKey": await effective_key()}
+    return {"provider": await anna_provider(), "apiKey": await effective_key(), "model": await anna_model()}
 
 
 def _now() -> str:
@@ -95,11 +95,14 @@ async def _save_learning(carrier_id: str, data: dict) -> None:
 @router.get("/api/anna/settings")
 async def anna_get_settings():
     eff = await effective_key()
+    prov = await anna_provider()
     return {
         "configured": bool(eff),
+        "provider": prov,
+        "providers": PROVIDERS,
         "source": await key_source(),
         "keyHint": mask_key(eff),
-        "model": anna.MODELS["fast"],
+        "model": (await anna_model()) or anna.provider_model(prov, "fast"),
         "integrations": anna.integration_status(),
     }
 
@@ -107,30 +110,37 @@ async def anna_get_settings():
 @router.post("/api/anna/settings")
 async def anna_set_settings(request: Request):
     body = await request.json()
+    prov = str(body.get("provider") or "anthropic").lower()
     api_key = str(body.get("apiKey") or "").strip()
+    model_override = str(body.get("model") or "").strip()
+    if prov not in PROVIDERS:
+        raise error(400, f"provider must be one of: {', '.join(PROVIDERS)}.")
     if not api_key:
         raise error(400, "apiKey is required.")
     if not re.match(r"^sk-", api_key):
-        raise error(400, 'That does not look like an Anthropic API key (it should start with "sk-").')
-    await set_key(api_key)
-    return {"ok": True, "configured": True, "source": "ui", "keyHint": mask_key(api_key)}
+        raise error(400, 'That does not look like an API key (Anthropic and OpenAI keys start with "sk-").')
+    await set_settings(prov, api_key, model_override or None)
+    return {"ok": True, "configured": True, "provider": prov, "source": "ui", "keyHint": mask_key(api_key)}
 
 
 @router.delete("/api/anna/settings")
 async def anna_delete_settings():
-    await clear_key()
-    return {"ok": True, "configured": bool(config.ANTHROPIC_API_KEY), "source": await key_source(), "keyHint": mask_key(await effective_key())}
+    await clear_settings()
+    return {"ok": True, "configured": bool(await effective_key()), "provider": await anna_provider(),
+            "source": await key_source(), "keyHint": mask_key(await effective_key())}
 
 
 @router.post("/api/anna/settings/test")
 async def anna_test_settings(request: Request):
     body = await request.json()
+    prov = str(body.get("provider") or await anna_provider()).lower()
     api_key = str(body.get("apiKey") or "").strip() or await effective_key()
     if not api_key:
         raise error(400, "No API key configured.")
     try:
-        await anna.call_claude(api_key=api_key, model=anna.MODELS["fast"], max_tokens=8, messages=[{"role": "user", "content": "Reply with the word OK."}])
-        return {"ok": True, "message": "Connection successful — Anna is live."}
+        await anna.llm_complete(provider=prov, api_key=api_key, max_tokens=8,
+                                messages=[{"role": "user", "content": "Reply with the word OK."}])
+        return {"ok": True, "message": f"Connection successful — Anna is live on {prov}."}
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail={"ok": False, "error": str(e)})
 
@@ -152,10 +162,12 @@ async def anna_scan(request: Request):
     body = await request.json()
     if not body.get("dataUrl"):
         raise error(400, "dataUrl is required.")
-    if not config.ANTHROPIC_API_KEY:
-        raise error(503, "Document scanning requires ANTHROPIC_API_KEY.")
+    # Vision/document scanning is Anthropic-only; needs a Claude key.
+    anthropic_key = (await effective_key()) if (await anna_provider()) == "anthropic" else config.ANTHROPIC_API_KEY
+    if not anthropic_key:
+        raise error(503, "Document scanning requires an Anthropic (Claude) key. Set provider to Anthropic in Settings → Anna AI, or set ANTHROPIC_API_KEY.")
     try:
-        return await anna.extract_from_document({"dataUrl": body.get("dataUrl"), "docType": body.get("docType"), "apiKey": config.ANTHROPIC_API_KEY})
+        return await anna.extract_from_document({"dataUrl": body.get("dataUrl"), "docType": body.get("docType"), "apiKey": anthropic_key})
     except Exception as e:  # noqa: BLE001
         raise error(502, str(e))
 

@@ -2,7 +2,7 @@
 import time
 from datetime import datetime, timezone
 
-from .claude import MODELS, anna_configured, call_claude
+from .claude import anna_configured, llm_complete, provider_model
 from .matcher import STATUS, evaluate_gates
 from .spec import compile_spec
 
@@ -140,9 +140,10 @@ async def write_compliance(*, carrier: dict, driver: dict, records: dict | None 
     if opts.get("narrate") and anna_configured(opts.get("apiKey")):
         try:
             import json
-            out = await call_claude(
+            out = await llm_complete(
+                provider=opts.get("provider"),
                 api_key=opts.get("apiKey"),
-                model=opts.get("model") or MODELS["smart"],
+                model=opts.get("model") or provider_model(opts.get("provider") or "anthropic", "smart"),
                 max_tokens=400,
                 system="You are Anna, an FMCSA driver-qualification compliance assistant. Write a concise, factual 2-3 sentence summary for a recruiter. Do not change the provided verdict. Cite specifics.",
                 messages=[{"role": "user", "content": f"Verdict: {flag.upper()} for {spec['carrierName']}.\nGate results:\n{json.dumps(gate_results, indent=2)}\n\nWrite the summary."}],

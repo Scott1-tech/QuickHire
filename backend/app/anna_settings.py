@@ -1,27 +1,45 @@
-"""Anna's effective Anthropic API key — UI-provided (stored server-side) or env.
+"""Anna's effective AI provider + API key — UI-provided (server-side) or env.
 
-Ported from server.js: a key entered in the app's Anna Settings is stored
-server-side (the KV table) and takes precedence over ANTHROPIC_API_KEY. Only a
+Supports Claude (Anthropic, default) or OpenAI. A key entered in the app's Anna
+Settings is stored server-side (KV table) and takes precedence over
+ANTHROPIC_API_KEY (which only applies when the provider is Anthropic). Only a
 masked hint is ever returned to the client.
 """
 from . import config
 from .store import kv_delete, kv_get, kv_set
 
-_KV_KEY = "anna.anthropicApiKey"
+# Back-compat: the original single-key store used "anna.anthropicApiKey".
+_KEY = "anna.apiKey"
+_LEGACY_KEY = "anna.anthropicApiKey"
+_PROVIDER = "anna.provider"
+_MODEL = "anna.model"
+
+PROVIDERS = ["anthropic", "openai"]
+
+
+async def provider() -> str:
+    return (await kv_get(_PROVIDER)) or "anthropic"
 
 
 async def stored_key() -> str | None:
-    return await kv_get(_KV_KEY)
+    return (await kv_get(_KEY)) or (await kv_get(_LEGACY_KEY))
+
+
+async def model() -> str | None:
+    return await kv_get(_MODEL)
 
 
 async def effective_key() -> str:
-    return (await stored_key()) or config.ANTHROPIC_API_KEY or ""
+    k = await stored_key()
+    if k:
+        return k
+    return config.ANTHROPIC_API_KEY if (await provider()) == "anthropic" else ""
 
 
 async def key_source() -> str | None:
     if await stored_key():
         return "ui"
-    return "env" if config.ANTHROPIC_API_KEY else None
+    return "env" if (await provider()) == "anthropic" and config.ANTHROPIC_API_KEY else None
 
 
 def mask_key(k: str | None) -> str | None:
@@ -30,9 +48,18 @@ def mask_key(k: str | None) -> str | None:
     return "••••" if k else None
 
 
-async def set_key(api_key: str) -> None:
-    await kv_set(_KV_KEY, api_key)
+async def set_settings(prov: str, api_key: str, model_override: str | None = None) -> None:
+    await kv_set(_PROVIDER, prov)
+    await kv_set(_KEY, api_key)
+    if model_override:
+        await kv_set(_MODEL, model_override)
+    else:
+        await kv_delete(_MODEL)
+    await kv_delete(_LEGACY_KEY)  # migrate off the old key
 
 
-async def clear_key() -> None:
-    await kv_delete(_KV_KEY)
+async def clear_settings() -> None:
+    await kv_delete(_KEY)
+    await kv_delete(_LEGACY_KEY)
+    await kv_delete(_PROVIDER)
+    await kv_delete(_MODEL)

@@ -6,7 +6,17 @@ high-level processLead orchestrator.
 """
 from .carrier import extract_carrier_spec
 from .chat import chat
-from .claude import MODELS, anna_configured, call_claude, call_claude_json
+from .claude import (
+    DEFAULT_MODELS,
+    MODELS,
+    PROVIDERS,
+    anna_configured,
+    call_claude,
+    call_claude_json,
+    llm_complete,
+    llm_json,
+    provider_model,
+)
 from .integrations import (
     INTEGRATIONS,
     ConsentError,
@@ -31,6 +41,7 @@ __all__ = [
     "build_portfolio", "merge_records", "select_carrier", "write_compliance", "create_queue",
     "OPS", "compile_spec", "process_lead",
     "OUTCOME_KINDS", "OUTCOME_SIGNAL", "outcome_stats", "record_outcome", "tune_weights", "compute_metrics",
+    "DEFAULT_MODELS", "PROVIDERS", "llm_complete", "llm_json", "provider_model",
 ]
 
 
