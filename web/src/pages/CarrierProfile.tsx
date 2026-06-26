@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useStore } from '@/store';
 import { PageHeader, Pill, Empty, timeAgo } from '@/ui';
 import CarrierForm from '@/components/CarrierForm';
 import LinkSender from '@/components/LinkSender';
@@ -11,6 +12,7 @@ import {
 export default function CarrierProfile() {
   const { id = '' } = useParams();
   const nav = useNavigate();
+  const s = useStore();
   const [rec, setRec] = useState<CarrierRecord | null>(null);
   const [err, setErr] = useState('');
   const [editing, setEditing] = useState(false);
@@ -35,7 +37,14 @@ export default function CarrierProfile() {
 
   const meta = statusMeta(rec.status, rec.filledBy);
   const fieldLabel = (sectionFieldId: string) =>
-    rec.sections.flatMap((s) => s.fields).find((f) => f.id === sectionFieldId)?.label ?? sectionFieldId;
+    rec.sections.flatMap((s2) => s2.fields).find((f) => f.id === sectionFieldId)?.label ?? sectionFieldId;
+
+  // Fleet shown on the profile — clicking opens the truck/driver record.
+  const carrierName = (cid: string) => s.carriers.find((c) => c.id === cid)?.name ?? '';
+  const availableTrucks = s.allTrucks.filter((t) => t.status === 'Available');
+  const assignedDrivers = s.allDrivers.filter((d) => d.assignedTruckId);
+  const openTruck = (carrierId: string, truckId: string) => { s.setCurrentCarrierId(carrierId); nav(`/carriers/${carrierId}/trucks/${truckId}`); };
+  const openDriver = (carrierId: string, driverId: string) => { s.setCurrentCarrierId(carrierId); nav(`/carriers/${carrierId}/drivers/${driverId}`); };
 
   const save = async () => {
     setBusy(true);
@@ -115,6 +124,64 @@ export default function CarrierProfile() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Fleet — available trucks & assigned drivers (click to open the record) */}
+        {!editing && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-5">
+            <div className="card p-5">
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-base font-bold text-ink">Available Trucks</div>
+                <span className="text-[12px] text-muted">{availableTrucks.length}</span>
+              </div>
+              <p className="text-[12px] text-muted mb-3">From your fleet — click a truck to open its profile.</p>
+              {availableTrucks.length === 0 ? (
+                <div className="text-[13px] text-muted py-4 text-center">No available trucks right now.</div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {availableTrucks.map((t) => (
+                    <button key={t.id} onClick={() => openTruck(t.carrierId, t.id)}
+                      className="flex items-center gap-3 p-3 rounded-lg border border-line hover:border-primary hover:shadow-card transition text-left">
+                      <span className="w-9 h-9 rounded-[10px] grid place-items-center bg-[#FFF7ED] text-[#D97706] flex-shrink-0 text-lg">🚛</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13.5px] font-bold text-ink truncate">#{t.unit} · {t.make} {t.model}</div>
+                        <div className="text-[12px] text-muted truncate">{t.year} · {t.plate} · {carrierName(t.carrierId)}</div>
+                      </div>
+                      <Pill kind={t.status}>{t.status}</Pill>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="card p-5">
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-base font-bold text-ink">Assigned Drivers</div>
+                <span className="text-[12px] text-muted">{assignedDrivers.length}</span>
+              </div>
+              <p className="text-[12px] text-muted mb-3">Drivers currently on a truck — click a driver to open its profile.</p>
+              {assignedDrivers.length === 0 ? (
+                <div className="text-[13px] text-muted py-4 text-center">No drivers assigned to a truck yet.</div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {assignedDrivers.map((d) => {
+                    const truck = s.allTrucks.find((t) => t.id === d.assignedTruckId);
+                    return (
+                      <button key={d.id} onClick={() => openDriver(d.carrierId, d.id)}
+                        className="flex items-center gap-3 p-3 rounded-lg border border-line hover:border-primary hover:shadow-card transition text-left">
+                        <span className="w-9 h-9 rounded-full bg-gradient-to-br from-primary to-purple grid place-items-center text-white text-[13px] font-bold flex-shrink-0">{d.name[0]}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[13.5px] font-bold text-ink uppercase truncate">{d.name}</div>
+                          <div className="text-[12px] text-muted truncate">{truck ? `Truck #${truck.unit}` : 'No truck'} · {carrierName(d.carrierId)}</div>
+                        </div>
+                        {d.driverStatus && <Pill kind={d.driverStatus}>{d.driverStatus}</Pill>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
