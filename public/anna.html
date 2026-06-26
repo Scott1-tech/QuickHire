@@ -20,6 +20,7 @@
     </div>
     <span id="aiBadge" class="hidden ml-2 text-[11px] font-semibold px-2 py-0.5 rounded-full"></span>
     <div class="ml-auto flex items-center gap-2">
+      <button id="metricsBtn" class="text-sm font-medium px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50">📊 Metrics</button>
       <button id="newLeadBtn" class="text-sm font-semibold px-3 py-2 rounded-lg bg-accent-500 hover:bg-accent-600 text-white">+ New lead</button>
       <a href="/" class="text-sm font-medium px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50">Dashboard</a>
     </div>
@@ -72,6 +73,17 @@
       <p id="leadErr" class="text-sm text-red-600 hidden"></p>
       <button id="leadSubmit" class="w-full py-2.5 bg-accent-500 hover:bg-accent-600 text-white rounded-xl font-semibold">Match & create portfolio</button>
     </div>
+  </div>
+</div>
+
+<!-- Metrics modal -->
+<div id="metricsModal" class="hidden fixed inset-0 bg-black/40 z-20 flex items-start justify-center p-4 overflow-y-auto">
+  <div class="bg-white rounded-2xl w-full max-w-3xl my-8">
+    <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+      <h3 class="font-bold">Anna — metrics</h3>
+      <button id="metricsClose" class="text-gray-400 hover:text-gray-700 text-xl leading-none">&times;</button>
+    </div>
+    <div id="metricsBody" class="p-5"><p class="text-sm text-gray-400 text-center py-10">Loading…</p></div>
   </div>
 </div>
 
@@ -268,6 +280,24 @@ function renderDecision(p) {
   </div>`;
 }
 
+const OUTCOMES = [['hired', 'Hired'], ['started', 'Started'], ['retained_90d', 'Retained 90d'], ['washed_out', 'Washed out'], ['declined_by_driver', 'Declined by driver']];
+const prettyOutcome = (k) => (OUTCOMES.find((o) => o[0] === k) || [k, k])[1];
+function renderOutcome(p) {
+  const decided = p.review?.status === 'approved' || p.review?.status === 'rejected';
+  if (!decided) return '';
+  if (p.outcome) {
+    return `<div class="mt-5 pt-4 border-t border-gray-100">
+      <h3 class="text-xs font-bold uppercase text-gray-400 mb-2">Outcome</h3>
+      <div class="text-sm text-gray-700">${esc(prettyOutcome(p.outcome.status))}${p.outcome.note ? ` — ${esc(p.outcome.note)}` : ''}</div>
+      <div class="text-[11px] text-gray-400">${esc(p.outcome.by || '')} · ${new Date(p.outcome.at).toLocaleString()}</div>
+    </div>`;
+  }
+  return `<div class="mt-5 pt-4 border-t border-gray-100">
+    <h3 class="text-xs font-bold uppercase text-gray-400 mb-2">Outcome <span class="normal-case font-normal text-gray-300">— feeds Anna's learning</span></h3>
+    <div class="flex flex-wrap gap-1.5">${OUTCOMES.map(([k, l]) => `<button data-outcome="${k}" class="outcomeBtn text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-200 hover:border-accent-500 hover:text-accent-600">${l}</button>`).join('')}</div>
+  </div>`;
+}
+
 const AUDIT_ICON = { lead_received: '📥', consent_intake: '✍️', consent_recorded: '✍️', carrier_selected: '🎯', compliance_check: '🔍', approved: '✅', rejected: '⛔' };
 function renderAudit(p) {
   const log = (p.audit || []).slice().reverse();
@@ -317,7 +347,8 @@ function renderDetail(p, match) {
     <div>
       <h3 class="text-xs font-bold uppercase text-gray-400 mb-2">Recruiter decision</h3>
       ${renderDecision(p)}
-    </div>` : `<p class="text-xs text-gray-400">Consent, compliance, and the approve/reject decision unlock once you select a carrier.</p>`}
+    </div>
+    ${renderOutcome(p)}` : `<p class="text-xs text-gray-400">Consent, compliance, and the approve/reject decision unlock once you select a carrier.</p>`}
 
     <div class="mt-5 pt-4 border-t border-gray-100">
       <div class="flex items-center justify-between mb-2">
@@ -326,6 +357,16 @@ function renderDetail(p, match) {
       </div>
       ${renderAudit(p)}
     </div>`;
+
+  // Wire outcome capture (feeds learning)
+  detail.querySelectorAll('.outcomeBtn').forEach((btn) => btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      const out = await api('/api/anna/portfolios/' + p.id + '/outcome', { method: 'POST', body: JSON.stringify({ outcome: btn.dataset.outcome }) });
+      await selectPortfolio(p.id); await loadQueue();
+      if (out.learning?.tuned) setTimeout(() => alert(`Anna re-tuned ${out.learning.carrier}'s matching from ${out.learning.total} placements (${out.learning.successRate}% success).`), 50);
+    } catch (e) { alert(e.message); btn.disabled = false; }
+  }));
 
   // Wire compliance-packet download (auth header -> blob -> new tab)
   document.getElementById('packetBtn')?.addEventListener('click', async () => {
@@ -454,6 +495,48 @@ document.getElementById('leadSubmit').addEventListener('click', async () => {
 });
 
 document.getElementById('refreshBtn').addEventListener('click', loadQueue);
+
+// ── Metrics ──
+const metricsModal = document.getElementById('metricsModal');
+const kpi = (label, value, sub) => `<div class="border border-gray-200 rounded-xl p-3">
+  <div class="text-2xl font-bold text-gray-900">${value}</div>
+  <div class="text-[11px] text-gray-500 uppercase tracking-wide mt-0.5">${esc(label)}</div>
+  ${sub ? `<div class="text-[11px] text-gray-400 mt-0.5">${esc(sub)}</div>` : ''}</div>`;
+async function openMetrics() {
+  metricsModal.classList.remove('hidden');
+  const body = document.getElementById('metricsBody');
+  body.innerHTML = '<p class="text-sm text-gray-400 text-center py-10">Loading…</p>';
+  try {
+    const m = await api('/api/anna/metrics');
+    const pipe = m.pipeline || {};
+    body.innerHTML = `
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 mb-4">
+        ${kpi('Leads', m.leads)}
+        ${kpi('Match rate', m.matchRate == null ? '—' : m.matchRate + '%', `${m.matched} matched`)}
+        ${kpi('Offers selected', m.offersSelected)}
+        ${kpi('Success rate', m.outcomes.successRate == null ? '—' : m.outcomes.successRate + '%', `${m.outcomes.good} good · ${m.outcomes.bad} bad`)}
+        ${kpi('Avg time to select', m.avgHoursToSelect == null ? '—' : m.avgHoursToSelect + 'h')}
+        ${kpi('Avg time to decision', m.avgHoursToDecision == null ? '—' : m.avgHoursToDecision + 'h')}
+        ${kpi('Recruiter hours saved', m.recruiterHoursSaved + 'h', 'est. vs manual')}
+        ${kpi('Compliance', `${m.compliance.approve}✓ / ${m.compliance.reject}✗`, `${m.compliance.review} review`)}
+      </div>
+      <div class="grid grid-cols-4 gap-2.5 mb-4">
+        ${kpi('Awaiting carrier', pipe.awaiting_carrier)}
+        ${kpi('Pending', pipe.pending)}
+        ${kpi('Approved', pipe.approved)}
+        ${kpi('Rejected', pipe.rejected)}
+      </div>
+      <h4 class="text-xs font-bold uppercase text-gray-400 mb-2">By carrier</h4>
+      ${m.perCarrier.length ? `<table class="w-full text-sm">
+        <thead><tr class="text-left text-[11px] text-gray-400 uppercase"><th class="py-1">Carrier</th><th>Selected</th><th>Success</th></tr></thead>
+        <tbody>${m.perCarrier.map((c) => `<tr class="border-t border-gray-100"><td class="py-1.5 font-medium">${esc(c.name)}</td><td>${c.selections}</td><td>${c.successRate == null ? '—' : c.successRate + '%'}</td></tr>`).join('')}</tbody>
+      </table>` : '<p class="text-sm text-gray-400">No carrier selections yet.</p>'}
+      <p class="text-[11px] text-gray-400 mt-4">Generated ${new Date(m.generatedAt).toLocaleString()} · hours-saved estimate assumes ~25 min of manual work per lead.</p>`;
+  } catch (e) { body.innerHTML = `<p class="text-sm text-red-600 text-center py-10">${esc(e.message)}</p>`; }
+}
+document.getElementById('metricsBtn').addEventListener('click', openMetrics);
+document.getElementById('metricsClose').addEventListener('click', () => metricsModal.classList.add('hidden'));
+metricsModal.addEventListener('click', (e) => { if (e.target === metricsModal) metricsModal.classList.add('hidden'); });
 
 // ── Boot ──
 (async () => {
