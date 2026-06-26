@@ -29,6 +29,7 @@ Workdeck dashboard  ◄──────── completed application ── Dri
 |-------|---------|
 | `/` | **Workdeck dashboard** — invite drivers, see all applications, open submitted details (incl. uploaded docs + signature). |
 | `/apply.html?token=…` | **Driver application** — Step 1 (qualification) + Step 2 (consents & signature). Only reachable with a valid invite token. |
+| `/docusign` | **DocuSign console** — send offer letters & DOT consents for e-signature. Contracts **auto-fill** from the driver's application (CDL, address, DOB…); the driver only reviews & corrects. Falls back to a fully-demoable simulated mode until `DOCUSIGN_*` is configured. |
 
 ## Run locally
 
@@ -91,6 +92,26 @@ See [`.env.example`](./.env.example). Key ones:
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` — SMS invites.
 - `LINK_TTL_DAYS` — link expiry window (default 14). `SUPPORT_CONTACT` — shown to drivers.
 - `ANTHROPIC_API_KEY` — Molly AI summaries. `TELEGRAM_*` — Documents-tab Telegram send.
+
+## DocuSign e-Signature (offer letters & consents)
+
+Send a driver their offer letter or DOT consent forms for legally-binding
+e-signature, tracked back on the candidate record.
+
+- **Auto-fill:** every contract is pre-populated from the data QuickHire already
+  collected (name, DOB, address, CDL number/state/class/expiration, phone, email).
+  The driver only **reviews and corrects** — they never retype. Missing fields
+  (e.g. SSN, which we don't collect) render blank-but-editable and are flagged in
+  the console. Implemented with DocuSign prefilled, editable text tabs.
+- **Connected to the pipeline:** when an offer letter is signed, the
+  "Offer Letter Sent/Signed" checklist step auto-completes and the event lands in
+  the candidate's Activity trail. Status updates arrive via DocuSign Connect
+  webhooks (or a manual refresh).
+- **Simulated by default:** with no `DOCUSIGN_*` env vars set, envelopes are
+  created locally and clearly flagged `simulated` so the full
+  send → review → sign → complete flow works in dev. Set the env vars (JWT Grant
+  auth — see `.env.example`) to flip to real, live signing with no code changes.
+- See [`docusign/README.md`](./docusign/README.md) for the module layout and API.
 
 ## Notes
 
