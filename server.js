@@ -1560,6 +1560,53 @@ app.post('/api/anna/rematch', requireAdmin, async (req, res) => {
 app.get('/api/anna/portfolios', requireAdmin, (_req, res) => {
   res.json(readPortfolios().map(portfolioSummary));
 });
+
+// Metrics — the ROI view (reuses outcome/audit data). All derived from portfolios.
+const GOOD_OUTCOMES = ['hired', 'started', 'retained_90d'];
+const BAD_OUTCOMES = ['washed_out', 'rejected', 'declined_by_driver'];
+const MINUTES_SAVED_PER_LEAD = 25; // est. manual screen+match+summarize time Anna replaces
+app.get('/api/anna/metrics', requireAdmin, (_req, res) => {
+  const ps = readPortfolios();
+  const leads = ps.length;
+  const hours = (a, b) => (a && b ? (new Date(b) - new Date(a)) / 3600000 : null);
+  const avg = (arr) => (arr.length ? Math.round((arr.reduce((x, y) => x + y, 0) / arr.length) * 10) / 10 : null);
+  const matched = ps.filter((p) => (p.recommendations || []).some((r) => r.status === 'ELIGIBLE')).length;
+  const status = (st) => ps.filter((p) => (p.review?.status || 'awaiting_carrier') === st).length;
+  const withSel = ps.filter((p) => p.carrier?.carrierId);
+
+  const compliance = { approve: 0, reject: 0, review: 0 };
+  ps.forEach((p) => { if (p.compliance?.flag) compliance[p.compliance.flag] = (compliance[p.compliance.flag] || 0) + 1; });
+
+  const outcomeCounts = {}; let good = 0; let bad = 0;
+  ps.forEach((p) => { const o = p.outcome?.status; if (!o) return; outcomeCounts[o] = (outcomeCounts[o] || 0) + 1; if (GOOD_OUTCOMES.includes(o)) good++; else if (BAD_OUTCOMES.includes(o)) bad++; });
+
+  const pc = {};
+  ps.forEach((p) => {
+    const c = p.carrier; if (!c?.carrierId) return;
+    (pc[c.carrierId] ||= { name: c.carrierName, selections: 0, good: 0, bad: 0 });
+    pc[c.carrierId].selections++;
+    const o = p.outcome?.status;
+    if (GOOD_OUTCOMES.includes(o)) pc[c.carrierId].good++; else if (BAD_OUTCOMES.includes(o)) pc[c.carrierId].bad++;
+  });
+  const perCarrier = Object.values(pc)
+    .map((c) => ({ ...c, successRate: (c.good + c.bad) ? Math.round((c.good / (c.good + c.bad)) * 100) : null }))
+    .sort((a, b) => b.selections - a.selections);
+
+  res.json({
+    generatedAt: new Date().toISOString(),
+    leads,
+    matched,
+    matchRate: leads ? Math.round((matched / leads) * 100) : null,
+    pipeline: { awaiting_carrier: status('awaiting_carrier'), pending: status('pending'), approved: status('approved'), rejected: status('rejected') },
+    offersSelected: withSel.length,
+    avgHoursToSelect: avg(withSel.map((p) => hours(p.createdAt, p.review?.carrierSelectedAt)).filter((x) => x != null && x >= 0)),
+    avgHoursToDecision: avg(ps.map((p) => hours(p.createdAt, p.review?.decidedAt)).filter((x) => x != null && x >= 0)),
+    compliance,
+    outcomes: { counts: outcomeCounts, good, bad, successRate: (good + bad) ? Math.round((good / (good + bad)) * 100) : null },
+    recruiterHoursSaved: Math.round((leads * MINUTES_SAVED_PER_LEAD / 60) * 10) / 10,
+    perCarrier,
+  });
+});
 app.get('/api/anna/portfolios/:id', requireAdmin, (req, res) => {
   const p = findPortfolio(req.params.id);
   if (!p) return res.status(404).json({ error: 'Not found' });
