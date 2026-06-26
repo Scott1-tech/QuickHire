@@ -64,6 +64,8 @@ export interface PlacedField {
   charLimit?: number; nameType?: string;
   // Checkbox group
   groupLabel?: string; checkboxValues?: string[]; selectRule?: string; selectNumber?: number;
+  // Size (px at 100% zoom) + auto-fill provenance
+  w?: number; h?: number; autofill?: boolean; dataKey?: string;
 }
 export interface Recipient { id: string; name: string; email: string; colorIdx: number }
 

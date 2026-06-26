@@ -70,7 +70,7 @@ export default function EnvelopeBuilder({ preset, candidates, docTypes, mode, on
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [fields, setFields] = useState<PlacedField[]>([]);
   const [selId, setSelId] = useState<string | null>(null);
-  const [tool, setTool] = useState<FType | null>(null);
+  const [tool, setTool] = useState<string | null>(null); // FType, or "af:<key>" for an auto-fill field
   const [curRecip, setCurRecip] = useState(recipients[0]?.id || '');
   const [zoom, setZoom] = useState(1);
   const [sending, setSending] = useState(false);
@@ -147,6 +147,24 @@ export default function EnvelopeBuilder({ preset, candidates, docTypes, mode, on
   const removeField = (id: string) => { commit(fieldsRef.current.filter((f) => f.id !== id)); if (selId === id) setSelId(null); };
   const dupField = (id: string) => { const f = fieldsRef.current.find((x) => x.id === id); if (!f) return; const n = { ...f, id: uid(), xPct: clamp(f.xPct + 0.02), yPct: clamp(f.yPct + 0.04) }; commit([...fieldsRef.current, n]); setSelId(n.id); };
 
+  // Driver-profile fields available for one-click auto-fill (name, CDL, address…).
+  const autofillFields = preview?.fields ?? [];
+  // Place either a standard field (FType) or an auto-fill field ("af:<key>").
+  const placeAt = (spec: string, page: number, xPct: number, yPct: number) => {
+    if (spec.startsWith('af:')) {
+      const af = autofillFields.find((a) => a.key === spec.slice(3));
+      if (!af) return;
+      const w = Math.max(120, Math.min(280, (af.value || af.label).length * 7 + 28));
+      const f: PlacedField = {
+        id: uid(), type: 'text', xPct: clamp(xPct), yPct: clamp(yPct), page, recipientId: curRecip,
+        label: af.label, value: af.value, required: Boolean(af.required), autofill: true, dataKey: af.key, readOnly: false, w,
+      };
+      commit([...fieldsRef.current, f]); setSelId(f.id); setTool(null);
+    } else {
+      addField(spec as FType, page, xPct, yPct);
+    }
+  };
+
   // Coordinates relative to a specific page (works at any zoom via the live rect).
   const xyIn = (page: number, clientX: number, clientY: number) => {
     const r = pageRefs.current[page]?.getBoundingClientRect();
@@ -176,7 +194,7 @@ export default function EnvelopeBuilder({ preset, candidates, docTypes, mode, on
 
   // ── render ──
   return (
-    <div className="fixed inset-0 z-50 bg-white flex flex-col" style={{ color: '#1a1a2e' }}>
+    <div className="fixed inset-0 z-50 bg-white flex flex-col" style={{ color: '#130032' }}>
       {step === 'setup'
         ? <SetupHeader onClose={onClose} onNext={() => setStep('fields')} onSendNow={doSend} sending={sending} />
         : <FieldsHeader onClose={onClose} onBack={() => setStep('setup')} onSend={doSend} sending={sending} />}
@@ -195,7 +213,7 @@ export default function EnvelopeBuilder({ preset, candidates, docTypes, mode, on
           <div className="w-[300px] border-r flex flex-col" style={{ borderColor: '#eceef2' }}>
             {selected
               ? <Properties field={selected} recipients={recipients} onChange={(p) => updateField(selected.id, p)} onDelete={() => removeField(selected.id)} onBack={() => setSelId(null)} onRecip={(rid) => updateField(selected.id, { recipientId: rid })} />
-              : <Palette recipients={recipients} curRecip={curRecip} setCurRecip={setCurRecip} tool={tool} setTool={setTool} onEditRecipients={() => setStep('setup')} />}
+              : <Palette recipients={recipients} curRecip={curRecip} setCurRecip={setCurRecip} tool={tool} setTool={setTool} onEditRecipients={() => setStep('setup')} autofillFields={autofillFields} />}
           </div>
 
           {/* CENTER: canvas */}
@@ -213,8 +231,8 @@ export default function EnvelopeBuilder({ preset, candidates, docTypes, mode, on
                     : <PdfPage doc={pdfDoc!} pageNum={pg.num} cssW={pg.w * zoom} cssH={pg.h * zoom} />}
                   {/* per-page overlay */}
                   <div className="absolute inset-0" style={{ cursor: tool ? 'copy' : 'default' }}
-                    onClick={(e) => { if (!tool) { setSelId(null); return; } const { xPct, yPct } = xyIn(pg.num, e.clientX, e.clientY); addField(tool, pg.num, xPct, yPct); }}
-                    onDrop={(e) => { e.preventDefault(); const t = e.dataTransfer.getData('ftype') as FType; if (!t) return; const { xPct, yPct } = xyIn(pg.num, e.clientX, e.clientY); addField(t, pg.num, xPct, yPct); }}
+                    onClick={(e) => { if (!tool) { setSelId(null); return; } const { xPct, yPct } = xyIn(pg.num, e.clientX, e.clientY); placeAt(tool, pg.num, xPct, yPct); }}
+                    onDrop={(e) => { e.preventDefault(); const t = e.dataTransfer.getData('ftype'); if (!t) return; const { xPct, yPct } = xyIn(pg.num, e.clientX, e.clientY); placeAt(t, pg.num, xPct, yPct); }}
                     onDragOver={(e) => e.preventDefault()}>
                     {fields.filter((f) => f.page === pg.num).map((f) => (
                       <FieldTag key={f.id} f={f} c={recipColor(f.recipientId)} selected={selId === f.id} zoom={zoom}
@@ -222,6 +240,7 @@ export default function EnvelopeBuilder({ preset, candidates, docTypes, mode, on
                         onPointerMove={(e) => { if (dragRef.current?.id !== f.id) return; const { xPct, yPct } = xyIn(f.page, e.clientX, e.clientY); dragRef.current.moved = true; setFields((p) => p.map((x) => (x.id === f.id ? { ...x, xPct: clamp(xPct), yPct: clamp(yPct) } : x))); }}
                         onPointerUp={() => { if (dragRef.current?.moved) pushHistory(fieldsRef.current); dragRef.current = null; }}
                         onDup={() => dupField(f.id)} onDel={() => removeField(f.id)}
+                        onResize={(w, h) => updateField(f.id, { w, h })}
                         recipients={recipients} onRecip={(rid) => updateField(f.id, { recipientId: rid })} onReq={(v) => updateField(f.id, { required: v })} />
                     ))}
                   </div>
@@ -286,7 +305,7 @@ function SetupHeader({ onClose, onNext, onSendNow, sending }: { onClose: () => v
       <div className="flex-1" />
       <span className="text-gray-400 text-lg">?</span><span className="text-gray-400 text-lg">⚙</span>
       <button onClick={onSendNow} disabled={sending} className="px-3 py-1.5 text-sm border rounded-md font-medium disabled:opacity-50" style={{ borderColor: '#d6d9e0' }}>{sending ? 'Sending…' : 'Send Now ▾'}</button>
-      <button onClick={onNext} className="px-4 py-2 text-sm rounded-md font-semibold text-white" style={{ background: '#1a1a2e' }}>Next: Add Fields</button>
+      <button onClick={onNext} className="px-4 py-2 text-sm rounded-md font-semibold text-white" style={{ background: '#130032' }}>Next: Add Fields</button>
     </div>
   );
 }
@@ -299,7 +318,7 @@ function FieldsHeader({ onClose, onBack, onSend, sending }: { onClose: () => voi
       <div className="flex-1" />
       <span className="text-gray-400 text-lg">?</span><span className="text-gray-400 text-lg">⚙</span>
       <button className="px-3 py-1.5 text-sm border rounded-md font-medium" style={{ borderColor: '#d6d9e0' }}>Preview</button>
-      <button onClick={onSend} disabled={sending} className="px-5 py-2 text-sm rounded-md font-semibold text-white disabled:opacity-50" style={{ background: '#1a1a2e' }}>{sending ? 'Sending…' : 'Send ▾'}</button>
+      <button onClick={onSend} disabled={sending} className="px-5 py-2 text-sm rounded-md font-semibold text-white disabled:opacity-50" style={{ background: '#130032' }}>{sending ? 'Sending…' : 'Send ▾'}</button>
     </div>
   );
 }
@@ -340,7 +359,7 @@ function Setup(p: {
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}
                 onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) p.onUpload(f); }}
                 className="max-w-md border-2 border-dashed rounded-lg px-4 py-7 text-center cursor-pointer transition"
-                style={{ borderColor: dragOver ? '#7c3aed' : '#d6d9e0', background: dragOver ? '#faf5ff' : '#fafbfc' }}>
+                style={{ borderColor: dragOver ? '#4c00ff' : '#d6d9e0', background: dragOver ? '#faf5ff' : '#fafbfc' }}>
                 <div className="text-2xl mb-1">⬆️</div>
                 <div className="text-sm font-medium">Upload a PDF</div>
                 <div className="text-[12px] text-gray-400">Drag & drop a PDF here, or click to browse</div>
@@ -377,11 +396,11 @@ function Setup(p: {
 
           <div className="flex items-center justify-between mb-1">
             <label className="text-sm font-medium">Message</label>
-            <span className="text-xs font-medium inline-flex items-center gap-1" style={{ color: '#7c3aed' }}>✦ AI-Assisted</span>
+            <span className="text-xs font-medium inline-flex items-center gap-1" style={{ color: '#4c00ff' }}>✦ AI-Assisted</span>
           </div>
           <textarea value={p.message} onChange={(e) => p.setMessage(e.target.value.slice(0, 10000))} rows={5} placeholder="Add a message or use AI to summarize your agreement and draft a message for your recipients…" className="w-full border rounded-md px-3 py-2 text-sm" style={{ borderColor: '#d6d9e0' }} />
           <div className="text-right text-xs text-gray-400">{p.message.length}/10000</div>
-          <button onClick={draftAI} className="inline-flex items-center gap-2 px-4 py-2 border rounded-md text-sm font-medium mt-2" style={{ borderColor: '#d6d9e0' }}><span style={{ color: '#7c3aed' }}>✦</span> Draft with AI</button>
+          <button onClick={draftAI} className="inline-flex items-center gap-2 px-4 py-2 border rounded-md text-sm font-medium mt-2" style={{ borderColor: '#d6d9e0' }}><span style={{ color: '#4c00ff' }}>✦</span> Draft with AI</button>
         </div>
 
         <hr style={{ borderColor: '#eceef2' }} />
@@ -406,8 +425,9 @@ function Setup(p: {
 }
 
 // ── Palette ──────────────────────────────────────────────────────────────────
-function Palette({ recipients, curRecip, setCurRecip, tool, setTool, onEditRecipients }: {
-  recipients: Recip[]; curRecip: string; setCurRecip: (id: string) => void; tool: FType | null; setTool: (t: FType | null) => void; onEditRecipients: () => void;
+function Palette({ recipients, curRecip, setCurRecip, tool, setTool, onEditRecipients, autofillFields }: {
+  recipients: Recip[]; curRecip: string; setCurRecip: (id: string) => void; tool: string | null; setTool: (t: string | null) => void; onEditRecipients: () => void;
+  autofillFields: { key: string; label: string; value: string; required: boolean }[];
 }) {
   const [open, setOpen] = useState(false);
   const cur = recipients.find((r) => r.id === curRecip) || recipients[0];
@@ -446,6 +466,28 @@ function Palette({ recipients, curRecip, setCurRecip, tool, setTool, onEditRecip
 
       <button className="w-full flex items-center gap-2 px-3 py-2 border rounded-lg text-sm mb-4" style={{ borderColor: '#d6d9e0' }}>📖 Standard Fields <span className="ml-auto">▾</span></button>
 
+      {/* Auto-fill from the driver's profile. Placing one pre-populates the value;
+          it stays editable so the signer can correct it if anything is wrong. */}
+      {autofillFields.length > 0 && (
+        <div className="mb-4">
+          <div className="text-xs font-semibold mb-2 flex items-center gap-1" style={{ color: '#4c00ff' }}>✦ Auto-fill from driver profile</div>
+          <div className="grid grid-cols-2 gap-2">
+            {autofillFields.map((af) => {
+              const spec = `af:${af.key}`;
+              return (
+                <button key={af.key} draggable onDragStart={(e) => e.dataTransfer.setData('ftype', spec)} onClick={() => setTool(tool === spec ? null : spec)}
+                  title={af.value ? `Auto-fills: ${af.value}` : 'No value on file — signer can complete it'}
+                  className={`flex flex-col items-start px-2.5 py-1.5 border rounded-lg text-left transition ${tool === spec ? 'ring-2' : 'hover:bg-violet-50'}`}
+                  style={{ borderColor: tool === spec ? '#4c00ff' : '#e6e8ee', background: '#faf5ff' }}>
+                  <span className="text-[12px] font-medium truncate w-full">{af.label}</span>
+                  <span className="text-[10px] truncate w-full" style={{ color: af.value ? '#4c00ff' : '#b91c1c' }}>{af.value || '— empty —'}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {PALETTE.map((grp) => (
         <div key={grp.section} className="mb-4">
           <div className="text-xs font-semibold text-gray-400 mb-2">{grp.section}</div>
@@ -453,7 +495,7 @@ function Palette({ recipients, curRecip, setCurRecip, tool, setTool, onEditRecip
             {grp.items.map((it) => (
               <button key={it.type} draggable onDragStart={(e) => e.dataTransfer.setData('ftype', it.type)} onClick={() => setTool(tool === it.type ? null : it.type)}
                 className={`flex items-center gap-2 px-3 py-2.5 border rounded-lg text-sm text-left transition ${tool === it.type ? 'ring-2' : 'hover:bg-gray-50'}`}
-                style={{ borderColor: '#e6e8ee', ...(tool === it.type ? { borderColor: '#7c3aed' } : {}) }}>
+                style={{ borderColor: '#e6e8ee', ...(tool === it.type ? { borderColor: '#4c00ff' } : {}) }}>
                 <span className="w-5 text-center text-[13px] text-violet-600">{it.icon}</span><span className="truncate">{it.label}</span>
               </button>
             ))}
@@ -467,7 +509,7 @@ function Palette({ recipients, curRecip, setCurRecip, tool, setTool, onEditRecip
 
 // ── Properties ───────────────────────────────────────────────────────────────
 function Toggle({ on, set }: { on?: boolean; set: (v: boolean) => void }) {
-  return <button onClick={() => set(!on)} className="w-10 h-5 rounded-full relative transition flex-shrink-0" style={{ background: on ? '#3b1d82' : '#cbd2dc' }}><span className="absolute top-0.5 w-4 h-4 bg-white rounded-full transition" style={{ left: on ? 22 : 2 }} /></button>;
+  return <button onClick={() => set(!on)} className="w-10 h-5 rounded-full relative transition flex-shrink-0" style={{ background: on ? '#4c00ff' : '#cbd2dc' }}><span className="absolute top-0.5 w-4 h-4 bg-white rounded-full transition" style={{ left: on ? 22 : 2 }} /></button>;
 }
 function Label({ children }: { children: ReactNode }) { return <label className="block text-[12px] font-medium text-gray-500 mb-1 mt-2">{children}</label>; }
 function Pick({ value, options, onChange, className }: { value: string; options: string[]; onChange: (v: string) => void; className?: string }) {
@@ -486,7 +528,7 @@ function Collapse({ title, children, defaultOpen }: { title: string; children?: 
   );
 }
 function BIU({ active, onClick, children }: { active?: boolean; onClick: () => void; children: ReactNode }) {
-  return <button onClick={onClick} className="w-9 h-9 grid place-items-center border rounded-md text-sm font-bold flex-shrink-0" style={{ borderColor: active ? '#3b1d82' : '#d6d9e0', background: active ? '#ede9fe' : '#fff' }}>{children}</button>;
+  return <button onClick={onClick} className="w-9 h-9 grid place-items-center border rounded-md text-sm font-bold flex-shrink-0" style={{ borderColor: active ? '#4c00ff' : '#d6d9e0', background: active ? '#ede9fe' : '#fff' }}>{children}</button>;
 }
 const inp = { className: 'w-full border rounded-md px-2 py-2 text-sm', style: { borderColor: '#d6d9e0' } };
 
@@ -638,18 +680,24 @@ function CanvasToolbar({ zoom, setZoom, onUndo, onRedo, onClear, fieldCount }: {
 }
 
 // ── Field tag ────────────────────────────────────────────────────────────────
-function FieldTag({ f, c, selected, onPointerDown, onPointerMove, onPointerUp, onDup, onDel, recipients, onRecip, onReq }: {
+function FieldTag({ f, c, selected, zoom, onPointerDown, onPointerMove, onPointerUp, onDup, onDel, onResize, recipients, onRecip, onReq }: {
   f: PlacedField; c: { bg: string; border: string; solid: string }; selected: boolean; zoom: number;
   onPointerDown: (e: React.PointerEvent) => void; onPointerMove: (e: React.PointerEvent) => void; onPointerUp: (e: React.PointerEvent) => void;
-  onDup: () => void; onDel: () => void; recipients: Recip[]; onRecip: (id: string) => void; onReq: (v: boolean) => void;
+  onDup: () => void; onDel: () => void; onResize: (w: number, h: number) => void; recipients: Recip[]; onRecip: (id: string) => void; onReq: (v: boolean) => void;
 }) {
   const isCheckbox = f.type === 'checkbox';
-  const w = DEFAULTS[f.type as FType]?.w ?? 110;
+  const baseW = f.w ?? DEFAULTS[f.type as FType]?.w ?? 110;
+  const baseH = f.h ?? (isCheckbox ? 22 : ['signature', 'initial'].includes(f.type) ? 30 : 26);
+  const boxW = (isCheckbox ? 22 : baseW) * zoom;
+  const boxH = (isCheckbox ? 22 : baseH) * zoom;
   const [menu, setMenu] = useState(false);
+  const resizing = useRef<{ sx: number; sy: number; w: number; h: number } | null>(null);
+  // Auto-fill fields show the value they pulled from the driver; others show a label.
+  const text = isCheckbox ? '' : (f.value || f.label || f.type);
   return (
     <div className="absolute" style={{ left: `${f.xPct * 100}%`, top: `${f.yPct * 100}%` }} onClick={(e) => e.stopPropagation()}>
       {selected && (
-        <div className="absolute -top-9 left-0 flex items-center gap-1 bg-white border rounded-lg shadow px-1.5 py-1 z-20" style={{ borderColor: '#e6e8ee' }} onClick={(e) => e.stopPropagation()}>
+        <div className="absolute left-0 flex items-center gap-1 bg-white border rounded-lg shadow px-1.5 py-1 z-20" style={{ top: -36, borderColor: '#e6e8ee' }} onClick={(e) => e.stopPropagation()}>
           <div className="relative">
             <button onClick={() => setMenu(!menu)} className="w-5 h-5 rounded-full grid place-items-center text-white text-[9px] font-bold" style={{ background: c.solid }}>{recipients.find((r) => r.id === f.recipientId)?.name?.split(' ').map((x) => x[0]).slice(0, 2).join('') || '?'}</button>
             {menu && <div className="absolute top-6 left-0 bg-white border rounded-lg shadow-lg py-1 z-30 w-40" style={{ borderColor: '#eceef2' }} onMouseLeave={() => setMenu(false)}>
@@ -658,22 +706,31 @@ function FieldTag({ f, c, selected, onPointerDown, onPointerMove, onPointerUp, o
           </div>
           <span className="text-gray-300">▾</span>
           {['text', 'number', 'email', 'company', 'title'].includes(f.type) && (
-            <button onClick={() => onReq(!f.required)} className="flex items-center gap-1 text-[11px] px-1"><span className="w-7 h-4 rounded-full relative" style={{ background: f.required ? '#3b1d82' : '#cbd2dc' }}><span className="absolute top-0.5 w-3 h-3 bg-white rounded-full" style={{ left: f.required ? 16 : 2 }} /></span>Required</button>
+            <button onClick={() => onReq(!f.required)} className="flex items-center gap-1 text-[11px] px-1"><span className="w-7 h-4 rounded-full relative" style={{ background: f.required ? '#4c00ff' : '#cbd2dc' }}><span className="absolute top-0.5 w-3 h-3 bg-white rounded-full" style={{ left: f.required ? 16 : 2 }} /></span>Required</button>
           )}
           <button onClick={onDup} className="w-6 h-6 grid place-items-center hover:bg-gray-100 rounded" title="Duplicate">⧉</button>
           <button onClick={onDel} className="w-6 h-6 grid place-items-center hover:bg-gray-100 rounded text-red-500" title="Delete">🗑</button>
           <button className="w-6 h-6 grid place-items-center hover:bg-gray-100 rounded" title="Settings">⚙</button>
         </div>
       )}
-      <div onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
-        className="grid place-items-center text-[11px] font-medium select-none touch-none"
-        style={{ width: isCheckbox ? 22 : w, height: isCheckbox ? 22 : 24, background: c.bg, border: `1.5px solid ${selected ? c.solid : c.border}`, borderRadius: 3, cursor: 'move', color: '#0f3d2e', outline: selected ? `2px solid ${c.solid}55` : 'none' }}>
-        {isCheckbox ? '☐' : (f.label || f.type)}
+      <div style={{ position: 'relative', width: boxW, height: boxH }}>
+        <div onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
+          className="w-full h-full flex items-center overflow-hidden whitespace-nowrap select-none touch-none"
+          style={{ padding: isCheckbox ? 0 : `0 ${4 * zoom}px`, background: c.bg, border: `1.5px solid ${selected ? c.solid : c.border}`, borderRadius: 4, cursor: 'move', color: '#0b3b2e', fontSize: Math.max(8, 11 * zoom), justifyContent: isCheckbox ? 'center' : 'flex-start', boxShadow: selected ? `0 0 0 2px ${c.solid}44` : 'none' }}>
+          {isCheckbox ? <span style={{ fontSize: Math.max(10, 14 * zoom) }}>☐</span> : <span className="truncate">{text}</span>}
+        </div>
+        {/* resize handle — drag to adjust the field size */}
+        {selected && !isCheckbox && (
+          <div onPointerDown={(e) => { e.stopPropagation(); (e.target as HTMLElement).setPointerCapture(e.pointerId); resizing.current = { sx: e.clientX, sy: e.clientY, w: baseW, h: baseH }; }}
+            onPointerMove={(e) => { if (!resizing.current) return; const dw = (e.clientX - resizing.current.sx) / zoom; const dh = (e.clientY - resizing.current.sy) / zoom; onResize(Math.max(40, Math.round(resizing.current.w + dw)), Math.max(16, Math.round(resizing.current.h + dh))); }}
+            onPointerUp={(e) => { resizing.current = null; try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ } }}
+            className="absolute rounded-sm bg-white" style={{ right: -5, bottom: -5, width: 10, height: 10, border: `2px solid ${c.solid}`, cursor: 'nwse-resize' }} />
+        )}
       </div>
       {/* add-to-group affordance for a selected checkbox */}
       {selected && isCheckbox && (
         <button onClick={(e) => { e.stopPropagation(); onDup(); }} title="Add to group"
-          className="absolute left-1/2 -translate-x-1/2 w-5 h-5 rounded grid place-items-center text-white text-[13px] leading-none" style={{ top: 26, background: '#7c3aed' }}>+</button>
+          className="absolute left-1/2 -translate-x-1/2 w-5 h-5 rounded grid place-items-center text-white text-[13px] leading-none" style={{ top: boxH + 4, background: '#4c00ff' }}>+</button>
       )}
     </div>
   );
