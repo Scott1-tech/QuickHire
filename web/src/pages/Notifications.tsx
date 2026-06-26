@@ -1,45 +1,93 @@
-import { useState } from 'react';
-import { PageHeader, Empty } from '@/ui';
-import { NOTIFICATIONS } from '@/data/mock';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { PageHeader, Empty, timeAgo } from '@/ui';
 
-const TABS = ['Primary', 'Other', 'Later', 'Cleared'];
+interface Notification {
+  id: string; type: string; title: string; body: string;
+  candidateId?: string; candidateName?: string; at?: string; severity: string;
+  cleared?: boolean;
+}
+
+const SEVERITY_ICON: Record<string, string> = {
+  error: '🚨', warning: '⚠️', success: '✅', info: 'ℹ️',
+};
+const SEVERITY_COLOR: Record<string, string> = {
+  error: 'text-red-600', warning: 'text-amber-600', success: 'text-green-600', info: 'text-blue-600',
+};
 
 export default function Notifications() {
-  const [tab, setTab] = useState('Primary');
-  const [items, setItems] = useState(NOTIFICATIONS);
-  const clear = (id: string) => setItems((p) => p.map((n) => n.id === id ? { ...n, cleared: true } : n));
+  const navigate = useNavigate();
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [cleared, setCleared] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState<'all' | 'error' | 'warning' | 'success'>('all');
 
-  const groups = ['Yesterday', 'Last 7 days'] as const;
-  const active = items.filter((n) => tab === 'Cleared' ? n.cleared : !n.cleared);
+  const h = () => ({ 'Content-Type': 'application/json', 'x-admin-token': localStorage.getItem('qh_admin') ?? '' });
+
+  useEffect(() => {
+    fetch('/api/notifications', { headers: h() })
+      .then((r) => r.json())
+      .then((d) => { setNotifications(d.notifications || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const clearAll = () => setCleared(new Set(notifications.map((n) => n.id)));
+  const clearOne = (id: string) => setCleared((s) => { const n = new Set(s); n.add(id); return n; });
+
+  const visible = notifications.filter((n) => !cleared.has(n.id) && (filter === 'all' || n.severity === filter));
+  const clearedList = notifications.filter((n) => cleared.has(n.id));
+
+  const [showCleared, setShowCleared] = useState(false);
+  const displayList = showCleared ? clearedList : visible;
 
   return (
     <>
       <PageHeader crumbs={[{ label: 'Notifications' }]}
-        actions={<button onClick={() => setItems((p) => p.map((n) => ({ ...n, cleared: true })))} className="btn-ghost">Clear all</button>} />
+        actions={
+          <div className="flex gap-2">
+            <button onClick={() => setShowCleared((s) => !s)} className="btn-ghost text-[13px]">
+              {showCleared ? 'Show Active' : `Cleared (${clearedList.length})`}
+            </button>
+            {!showCleared && visible.length > 0 && <button onClick={clearAll} className="btn-ghost text-[13px]">Clear all</button>}
+          </div>
+        } />
+
       <div className="flex-1 overflow-y-auto p-6">
-        <div className="flex gap-1 mb-4">
-          {TABS.map((t) => <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 text-[13px] font-semibold rounded-lg ${tab === t ? 'bg-primary-light text-primary' : 'text-muted'}`}>{t}</button>)}
-        </div>
-        {active.length === 0 && <Empty icon="🔔" title="Nothing here" sub="You're all caught up." />}
-        {groups.map((g) => {
-          const rows = active.filter((n) => n.group === g);
-          if (!rows.length) return null;
-          return (
-            <div key={g} className="mb-5">
-              <div className="text-[11px] font-bold text-muted uppercase mb-2">{g}</div>
-              <div className="card divide-y divide-line/60">
-                {rows.map((n) => (
-                  <div key={n.id} className="flex items-center gap-3 px-4 py-3">
-                    <div className="w-8 h-8 rounded-full bg-primary text-white text-[12px] grid place-items-center">{n.actor[0]}</div>
-                    <div className="flex-1"><div className="text-[13px] text-ink"><b>{n.actor}</b> {n.event}</div><div className="text-[11.5px] text-muted">{n.time}</div></div>
-                    {n.priority && <span className={`text-[11px] ${n.priority === 'Urgent' ? 'text-danger' : 'text-warn'}`}>⚑</span>}
-                    {tab !== 'Cleared' && <button onClick={() => clear(n.id)} className="text-[12px] text-muted hover:text-primary">Clear</button>}
-                  </div>
-                ))}
+        {!showCleared && (
+          <div className="flex gap-2 mb-4">
+            {[['all', 'All'], ['error', '🚨 Critical'], ['warning', '⚠️ Warnings'], ['success', '✅ Completed']].map(([key, label]) => (
+              <button key={key} onClick={() => setFilter(key as any)}
+                className={`px-3 py-1.5 text-[13px] font-semibold rounded-lg border ${filter === key ? 'bg-ink text-white border-ink' : 'border-line bg-surface text-muted hover:text-ink'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {loading && <Empty icon="⏳" title="Loading notifications…" />}
+        {!loading && displayList.length === 0 && <Empty icon="🔔" title="All caught up" sub="No notifications match this filter." />}
+
+        {!loading && displayList.length > 0 && (
+          <div className="card divide-y divide-line/60">
+            {displayList.map((n) => (
+              <div key={n.id} className={`flex items-start gap-3 px-4 py-3.5 ${n.candidateId ? 'cursor-pointer hover:bg-slate-50' : ''}`}
+                onClick={n.candidateId ? () => navigate(`/candidates/${n.candidateId}`) : undefined}>
+                <div className={`text-xl mt-0.5 ${SEVERITY_COLOR[n.severity] || ''}`}>{SEVERITY_ICON[n.severity] || '🔔'}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13.5px] font-semibold text-ink">{n.title}</div>
+                  <div className="text-[13px] text-muted">{n.body}</div>
+                  {n.candidateName && <div className="text-[11px] text-muted mt-0.5">Driver: {n.candidateName}</div>}
+                  {n.at && <div className="text-[11px] text-muted mt-0.5">{timeAgo(n.at)}</div>}
+                </div>
+                {!showCleared && (
+                  <button onClick={(e) => { e.stopPropagation(); clearOne(n.id); }} className="text-[12px] text-muted hover:text-primary flex-shrink-0 mt-1">
+                    Clear
+                  </button>
+                )}
               </div>
-            </div>
-          );
-        })}
+            ))}
+          </div>
+        )}
       </div>
     </>
   );

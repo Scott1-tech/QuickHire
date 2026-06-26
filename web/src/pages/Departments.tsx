@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '@/store';
 import { PageHeader } from '@/ui';
-import { TASKS } from '@/data/mock';
 import type { Task, TaskStatus } from '@/types';
 
 const COLUMNS: TaskStatus[] = ['TO DO', 'IN PROGRESS', 'REVIEW NEEDED', 'LONG-TERM', 'COMPLETE'];
@@ -11,17 +10,18 @@ const PRIORITY_COLOR: Record<string, string> = { Urgent: 'text-danger', High: 't
 export default function Departments() {
   const s = useStore();
   const [space, setSpace] = useState('Recruiting');
-  const [tasks, setTasks] = useState<Task[]>(TASKS.filter((t) => t.carrierId === s.currentCarrierId));
   const [open, setOpen] = useState<Task | null>(null);
   const [drag, setDrag] = useState<string | null>(null);
   const [adding, setAdding] = useState<TaskStatus | null>(null);
   const [draft, setDraft] = useState('');
 
-  const move = (id: string, status: TaskStatus) => setTasks((p) => p.map((t) => t.id === id ? { ...t, status } : t));
+  const tasks = s.tasks;
+
+  const move = (id: string, status: TaskStatus) => s.updateTask(id, { status });
 
   const addTask = (status: TaskStatus) => {
     if (!draft.trim()) { setAdding(null); return; }
-    setTasks((p) => [...p, { id: 'tk' + Date.now(), carrierId: s.currentCarrierId, title: draft.trim(), status, priority: 'Normal', comments: 0, attachments: 0 }]);
+    s.addTask({ carrierId: s.currentCarrierId, title: draft.trim(), status, priority: 'Normal' });
     setDraft('');
     setAdding(null);
   };

@@ -26,6 +26,7 @@ import Research from '@/pages/Research';
 import Settings from '@/pages/Settings';
 import Login from '@/pages/Login';
 import DriverPortal from '@/pages/DriverPortal';
+import ComplianceDashboard from '@/pages/ComplianceDashboard';
 
 function App({ children }: { children: React.ReactNode }) {
   return <StoreProvider><Shell>{children}</Shell></StoreProvider>;
@@ -55,6 +56,7 @@ const router = createBrowserRouter([
   { path: '/tasks', element: <App><Tasks /></App> },
   { path: '/research', element: <App><Research /></App> },
   { path: '/settings', element: <App><Settings /></App> },
+  { path: '/compliance', element: <App><ComplianceDashboard /></App> },
   { path: '*', element: <Navigate to="/dashboard" replace /> },
 ], { basename: '/app' });
 

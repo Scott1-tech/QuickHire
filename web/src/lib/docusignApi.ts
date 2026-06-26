@@ -24,11 +24,14 @@ export interface Envelope {
 export interface DocType { type: string; label: string; description: string }
 export interface DocusignStatus {
   configured: boolean; mode: 'live' | 'simulated'; accountId: string | null;
-  apiBase: string; hasWebhookSecret: boolean; documents: DocType[];
+  apiBase: string; hasWebhookSecret: boolean; documents: DocType[]; packages?: Package[];
 }
 export interface PreviewField { key: string; label: string; value: string; required: boolean }
 export interface PreviewResult { docType: string; label: string; html: string; fields: PreviewField[]; missing: string[] }
 export interface CandidateLite { id: string; name: string; email: string; phone?: string; stage?: string; submittedAt?: string | null }
+export interface Package { type: string; label: string; description: string; docs: string[] }
+export interface FieldGap { key: string; label: string; bucket: 'driver' | 'carrier' }
+export interface FieldCheckResult { profile: Record<string, string>; gaps: FieldGap[]; driverGaps: FieldGap[]; carrierGaps: FieldGap[]; ready: boolean }
 
 function headers(): HeadersInit {
   return { 'Content-Type': 'application/json', 'x-admin-token': localStorage.getItem('qh_admin') ?? '' };
@@ -64,6 +67,8 @@ export interface PlacedField {
   charLimit?: number; nameType?: string;
   // Checkbox group
   groupLabel?: string; checkboxValues?: string[]; selectRule?: string; selectNumber?: number;
+  // Size (px at 100% zoom) + auto-fill provenance
+  w?: number; h?: number; autofill?: boolean; dataKey?: string;
 }
 export interface Recipient { id: string; name: string; email: string; colorIdx: number }
 
@@ -89,6 +94,20 @@ export const simulateComplete = (envelopeId: string) =>
 
 export const docHtmlUrl = (envelopeId: string) => `/api/docusign/envelopes/${envelopeId}/document.html`;
 export const docPdfUrl = (envelopeId: string) => `/api/docusign/envelopes/${envelopeId}/document`;
+
+export const fieldCheck = (candidateId: string, fields: Record<string, string> = {}) =>
+  fetch(`/api/docusign/candidates/${candidateId}/field-check`, { method: 'POST', headers: headers(), body: JSON.stringify({ fields }) })
+    .then((r) => json<FieldCheckResult>(r));
+
+export const sendPackage = (candidateId: string, payload: {
+  packageType: string; fields?: Record<string, string>; signer?: { name: string; email: string };
+  emailSubject?: string; message?: string;
+}) =>
+  fetch(`/api/docusign/candidates/${candidateId}/send-package`, { method: 'POST', headers: headers(), body: JSON.stringify(payload) })
+    .then((r) => json<Envelope>(r));
+
+export const sendReminder = (envelopeId: string) =>
+  fetch(`/api/docusign/envelopes/${envelopeId}/remind`, { method: 'POST', headers: headers() }).then((r) => json<{ ok: boolean }>(r));
 
 // Map an envelope status to a <Pill> kind + label for the existing UI component.
 export function statusMeta(e: Envelope): { label: string; kind: string } {

@@ -34,13 +34,19 @@ _ALL_DOCS = MAIN_DOCS + OTHER_DOCS
 _ALL_DOC_IDS = [d["id"] for d in _ALL_DOCS]
 
 
+def _safe_filename(name: str) -> str:
+    import re
+    return re.sub(r'[^\w.\-]', '_', name or 'file')[:128]
+
+
 def _file_stream(path: str, mime: str, filename: str) -> StreamingResponse:
     def it():
         with open(path, "rb") as fh:
             while chunk := fh.read(65536):
                 yield chunk
+    safe = _safe_filename(filename)
     return StreamingResponse(it(), media_type=mime or "application/octet-stream",
-                             headers={"Content-Disposition": f'inline; filename="{filename}"'})
+                             headers={"Content-Disposition": f"inline; filename=\"{safe}\""})
 
 
 @router.get("/api/candidates")
