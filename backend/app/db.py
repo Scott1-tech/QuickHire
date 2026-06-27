@@ -6,6 +6,8 @@ JSONB ``data`` column holding the full record, plus a couple of indexed
 columns (``id``, ``token``) used for lookups. This keeps the data layer a thin
 mirror of the old ``readAll()/upsert()`` helpers while running on Postgres.
 """
+import os
+
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -15,6 +17,10 @@ from . import config
 class Base(DeclarativeBase):
     pass
 
+
+# For the SQLite fallback, make sure the directory for the DB file exists.
+if config.DATABASE_IS_SQLITE:
+    os.makedirs(config.DATA_DIR, exist_ok=True)
 
 engine = create_async_engine(config.DATABASE_URL, future=True, pool_pre_ping=True)
 async_session = async_sessionmaker(engine, expire_on_commit=False)

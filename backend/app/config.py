@@ -45,16 +45,26 @@ UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 # Static assets (the existing frontend lives in ../public)
 PUBLIC_DIR = os.path.join(_PROJECT_DIR, "public")
 
-# Postgres. asyncpg driver. Override with DATABASE_URL in production (e.g. Railway).
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/quickhire",
-)
-# Allow plain postgres:// URLs (Railway/Heroku style) by upgrading the driver.
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
-elif DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+# Database. If DATABASE_URL is set (e.g. a Railway/Render Postgres) use it;
+# otherwise fall back to a local SQLite file so the app works out of the box with
+# no external database — ideal for a fresh deploy or local dev. (On an ephemeral
+# free-tier filesystem SQLite resets on redeploy; set DATABASE_URL to a Postgres
+# URL — and optionally a persistent disk/volume — for durable, shared storage.)
+_DATABASE_URL_ENV = os.environ.get("DATABASE_URL", "").strip()
+if _DATABASE_URL_ENV:
+    DATABASE_URL = _DATABASE_URL_ENV
+    # Normalise driver prefixes: postgres:// (Railway/Heroku/Render) -> asyncpg,
+    # bare sqlite:// -> aiosqlite.
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL:
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+    elif DATABASE_URL.startswith("sqlite://") and "+aiosqlite" not in DATABASE_URL:
+        DATABASE_URL = DATABASE_URL.replace("sqlite://", "sqlite+aiosqlite://", 1)
+else:
+    DATABASE_URL = f"sqlite+aiosqlite:///{os.path.join(DATA_DIR, 'quickhire.db')}"
+
+DATABASE_IS_SQLITE = DATABASE_URL.startswith("sqlite")
 
 
 def email_enabled() -> bool:

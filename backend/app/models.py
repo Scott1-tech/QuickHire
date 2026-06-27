@@ -3,11 +3,15 @@
 Top-level ``id``/``token`` are duplicated out of ``data`` for indexed lookups;
 the data layer (store.py) keeps them in sync on every upsert.
 """
-from sqlalchemy import String, Text
+from sqlalchemy import JSON, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
+
+# Portable JSON column: JSONB on Postgres, generic JSON (TEXT-backed) on SQLite
+# and others, so the same models run against either backend.
+JSONType = JSON().with_variant(JSONB(), "postgresql")
 
 
 class Candidate(Base):
@@ -15,7 +19,7 @@ class Candidate(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     token: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
-    data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    data: Mapped[dict] = mapped_column(JSONType, nullable=False)
 
 
 class Carrier(Base):
@@ -23,14 +27,14 @@ class Carrier(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     token: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
-    data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    data: Mapped[dict] = mapped_column(JSONType, nullable=False)
 
 
 class Portfolio(Base):
     __tablename__ = "portfolios"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    data: Mapped[dict] = mapped_column(JSONType, nullable=False)
 
 
 class OptOut(Base):
