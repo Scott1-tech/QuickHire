@@ -104,7 +104,7 @@ async def docusign_redirect():
 
 
 # ── Build marker — open /version in a browser to confirm what's deployed. ─────
-BUILD_VERSION = "spa-assets+sqlite-2026-06-27"
+BUILD_VERSION = "spa-rebuilt-pdfjs-2026-06-27"
 
 
 @app.get("/version")
