@@ -103,6 +103,22 @@ async def docusign_redirect():
     return RedirectResponse("/docusign.html")
 
 
+# ── Build marker — open /version in a browser to confirm what's deployed. ─────
+BUILD_VERSION = "spa-assets+sqlite-2026-06-27"
+
+
+@app.get("/version")
+async def version():
+    return {"version": BUILD_VERSION, "ok": True}
+
+
+# ── SPA built assets: mount explicitly BEFORE the catch-all so JS/CSS/worker
+#    files are always served by StaticFiles with their correct MIME type. ──────
+_app_assets_dir = os.path.join(config.PUBLIC_DIR, "app", "assets")
+if os.path.isdir(_app_assets_dir):
+    app.mount("/app/assets", StaticFiles(directory=_app_assets_dir), name="app_assets")
+
+
 # ── SPA fallback for the FleetView React app under /app/* ─────────────────────
 @app.get("/app/{rest:path}")
 async def spa_fallback(rest: str):
