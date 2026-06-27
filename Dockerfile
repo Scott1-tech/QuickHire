@@ -16,7 +16,7 @@ COPY . .
 # The app serves ../public relative to backend/, so run from there.
 WORKDIR /app/backend
 
-ENV PORT=3000
-EXPOSE 3000
-
+# Do NOT hardcode/EXPOSE a port: Railway injects its own $PORT and routes the
+# public domain + healthcheck to it. Binding $PORT (with a 3000 fallback for
+# local dev) keeps the app and Railway's router on the same port.
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-3000}"]
