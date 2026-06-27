@@ -106,7 +106,16 @@ async def docusign_redirect():
 # ── SPA fallback for the FleetView React app under /app/* ─────────────────────
 @app.get("/app/{rest:path}")
 async def spa_fallback(rest: str):
-    index = os.path.join(config.PUBLIC_DIR, "app", "index.html")
+    app_root = os.path.join(config.PUBLIC_DIR, "app")
+    # Serve a real built asset (JS/CSS/worker) with its correct MIME type if it
+    # exists — otherwise this catch-all would return index.html (text/html) for
+    # /app/assets/*.js and the browser rejects the module script (blank page).
+    if rest:
+        candidate = os.path.normpath(os.path.join(app_root, rest))
+        if candidate.startswith(app_root + os.sep) and os.path.isfile(candidate):
+            return FileResponse(candidate)
+    # Otherwise it's a client-side route (/app/dashboard, …) → serve the SPA shell.
+    index = os.path.join(app_root, "index.html")
     if os.path.exists(index):
         return FileResponse(index)
     return JSONResponse(status_code=404, content={"error": "Not found"})
