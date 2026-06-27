@@ -2,12 +2,8 @@
 import json
 import re
 
-
-from .claude import anna_configured, llm_complete
-=======
 from .claude import anna_configured
 from .llm import llm_complete, provider_model
-
 
 PAGES = ["dashboard", "carriers", "drivers", "trucks", "hiring", "tasks", "inbox", "notifications", "settings", "anna"]
 ENTITY_TYPES = ["driver", "carrier", "candidate", "truck"]
@@ -52,9 +48,9 @@ def _system_prompt(context: dict | None = None) -> str:
     context = context or {}
     parts = [
         'You are Anna, the AI assistant inside QuickHire/Fleetmule — a driver-staffing platform for the trucking industry (the app is also branded "FleetView").',
-        "The app has these sections: Dashboard, Hiring (candidate pipeline), Drivers, Trucks, Carriers, Tasks, Inbox, Notifications, Settings, and the Anna workspace (driver qualification & carrier assessment).",
-        "You can: (1) answer questions about how the app works and about driver qualification / FMCSA compliance (MVR, PSP, Clearinghouse) / carrier requirements; (2) SUMMARIZE a driver, carrier, or record the user is viewing; (3) open specific records or pages when asked; (4) help create tasks.",
-        "When the user asks to go to / open / pull up a specific record, call open_profile. When they ask to go to a section, call navigate. When they ask to summarize or \"tell me about\" a record, use the context data provided to give a quick summary.",
+        "The app has these sections: Dashboard, Hiring (candidate pipeline), Drivers, Trucks, Carriers, Tasks, Inbox, Notifications, Settings, and the Anna workspace (driver qualification & carrier matching).",
+        "You can: (1) answer questions about how the app works and about driver qualification / FMCSA compliance (MVR, PSP, Clearinghouse) / carrier requirements; (2) SUMMARIZE a driver, carrier, candidate, or truck using the context provided to you; (3) NAVIGATE the user to a profile (open_profile) or a page (navigate); (4) create/assign tasks (create_task).",
+        "When the user asks to go to / open / pull up a specific record, call open_profile. When they ask to go to a section, call navigate. When they ask to summarize or \"tell me about\" a record, write a concise summary from the provided context (do not invent fields you were not given). Keep answers short and practical.",
         "Use ONLY the data in the context below; if a record is not present, say you could not find it.",
     ]
     if context.get("focus"):
@@ -73,34 +69,16 @@ async def chat(*, messages: list | None = None, context: dict | None = None, opt
     if not anna_configured(opts.get("apiKey")):
         return heuristic_chat(messages, context)
 
-
-    out = await llm_complete(
-        provider=opts.get("provider"),
-        api_key=opts.get("apiKey"),
-        model=opts.get("model"),
-
     provider = opts.get("provider") or "anthropic"
     out = await llm_complete(
         provider=provider,
         api_key=opts.get("apiKey"),
         model=opts.get("model") or provider_model(provider, "fast"),
-
         max_tokens=900,
         system=_system_prompt(context),
         tools=TOOLS,
         messages=[{"role": "assistant" if m.get("role") == "assistant" else "user", "content": str(m.get("content") or "")} for m in messages],
     )
-
-    reply = out.get("text") or ""
-    actions = []
-    for call in out.get("toolCalls") or []:
-        inp = call.get("input") or {}
-        if call["name"] == "create_task":
-            actions.append({"type": "create_task", "task": _sanitize_task(inp)})
-        elif call["name"] == "open_profile":
-            actions.append({"type": "open_profile", "entityType": inp.get("entityType"), "name": str(inp.get("name") or "")})
-        elif call["name"] == "navigate":
-
     reply = out["text"] or ""
     actions = []
     for call in out["toolCalls"]:
@@ -110,7 +88,6 @@ async def chat(*, messages: list | None = None, context: dict | None = None, opt
         elif name == "open_profile":
             actions.append({"type": "open_profile", "entityType": inp.get("entityType"), "name": str(inp.get("name") or "")})
         elif name == "navigate":
-
             actions.append({"type": "navigate", "page": inp.get("page")})
     if not reply.strip() and actions:
         reply = _confirm_action(actions[0])
@@ -158,7 +135,7 @@ def heuristic_chat(messages: list, context: dict | None = None) -> dict:
         return {"reply": _confirm_action(nav), "actions": [nav], "engine": "heuristic"}
 
     return {
-        "reply": "I can open records (\"open driver John Doe\"), summarize what you're viewing, assign tasks (\"assign a task to Jenna…\"), and navigate the app. Connect an Anthropic API key for smarter, conversational help.",
+        "reply": "I can open records (“open driver John Doe”), summarize what you're viewing, assign tasks (“assign a task to Jenna…”), and navigate the app. Connect an Anthropic API key to enable full free-form Q&A.",
         "actions": [],
         "engine": "heuristic",
     }
@@ -200,7 +177,7 @@ def _parse_task_intent(text: str):
     if m:
         assignee = m.group(1)
     title = re.sub(r"\b(?:assign(?:ed)?\s+to|to|for)\s+[A-Z][a-zA-Z]+\b", "",
-                   re.sub(r"^\s*(please\s+)?(can you\s+)?(create|add|make|set\s*up|schedule|assign|remind\s+\w+\s+to)\s+(a\s+|an\s+)?(task|reminder|follow[\s-]?up)?\s*(to\s+[A-Z][a-zA-Z]+)?\s*:\s*", "", text, flags=re.I))
+                   re.sub(r"^\s*(please\s+)?(can you\s+)?(create|add|make|set\s*up|schedule|assign|remind\s+\w+\s+to)\s+(a\s+|an\s+)?(task|reminder|follow[\s-]?up)?\s*(to\s+[A-Z][a-zA-Z]+)?\s*[:\-]?\s*", "", text, flags=re.I)).strip()
     if not title:
         title = text.strip()
     due_m = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", text)
