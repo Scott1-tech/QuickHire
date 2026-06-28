@@ -1,72 +1,19 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-:root {
-  --surface: #ffffff;
-  --bg: #f4f6fb;
-  --border: #e2e8f0;
-  --text: #0f172a;
-  --muted: #64748b;
-  --surface-hover: #f8fafc;
-}
-.dark {
-  --surface: #1e293b;
-  --bg: #0f172a;
-  --border: #334155;
-  --text: #e2e8f0;
-  --muted: #94a3b8;
-  --surface-hover: #243044;
-}
-
 * { box-sizing: border-box; }
-html, body, #root { height: 100%; }
+html, body { margin: 0; padding: 0; height: 100%; }
 body {
-  margin: 0;
-  font-family: 'Inter', system-ui, sans-serif;
-  background: var(--bg);
-  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
+  color: #1D1D1F;
+  background: #F5F5F7;
 }
+#root { height: 100%; }
 
-@layer components {
-  .card { @apply bg-surface border border-line rounded-xl; box-shadow: var(--shadow, none); }
-  .pill { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold; }
-  .btn-primary { @apply bg-primary text-white font-semibold rounded-[10px] px-4 py-2 text-sm transition-all duration-150 hover:bg-primary-700 hover:-translate-y-0.5 hover:shadow-card active:translate-y-0 active:scale-[.98]; }
-  .btn-ghost { @apply border border-line bg-surface text-ink hover:bg-[var(--surface-hover)] font-medium rounded-[10px] px-4 py-2 text-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-primary/40 active:translate-y-0 active:scale-[.98]; }
-  .input { @apply w-full bg-surface border border-line rounded-[10px] px-3 py-2.5 text-sm text-ink outline-none transition focus:ring-2 focus:ring-primary/40 focus:border-primary; }
-  .field-label { @apply block text-xs font-semibold text-muted mb-1.5; }
-}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.14); border-radius: 999px; border: 3px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.26); background-clip: content-box; }
 
-@keyframes slideIn { from { transform: translateX(24px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-@keyframes popIn { from { transform: scale(.97) translateY(8px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
-
-@media (prefers-reduced-motion: reduce) {
-  * { animation: none !important; transition: none !important; }
-}
-
-/* Status pill palette — exact master-spec tokens */
-.pill-green  { background:#DCFCE7; color:#16A34A; }
-.pill-amber  { background:#FEF3C7; color:#B45309; }
-.pill-red    { background:#FEE2E2; color:#DC2626; }
-.pill-purple { background:#EDE9FE; color:#8B5CF6; }
-.pill-slate  { background:#F1F5F9; color:#64748B; }
-.pill-blue   { background:#DBEAFE; color:#2563EB; }
-.pill-teal   { background:#CCFBF1; color:#0D9488; }
-.pill-pink   { background:#FCE7F3; color:#DB2777; }
-.pill-indigo { background:#E0E7FF; color:#4F46E5; }
-.pill-orange { background:#FFEDD5; color:#EA580C; }
-.dark .pill-green{background:#14321f;color:#86efac}
-.dark .pill-amber{background:#3a2c0a;color:#fcd34d}
-.dark .pill-red{background:#3b1416;color:#fca5a5}
-.dark .pill-purple{background:#2a2247;color:#c4b5fd}
-.dark .pill-slate{background:#2a3344;color:#cbd5e1}
-.dark .pill-blue{background:#16243f;color:#93c5fd}
-.dark .pill-teal{background:#0c2f2b;color:#5eead4}
-.dark .pill-pink{background:#3a1226;color:#f9a8d4}
-.dark .pill-indigo{background:#1e1f47;color:#a5b4fc}
-.dark .pill-orange{background:#3a1f08;color:#fdba74}
-
-.scrollbar-thin::-webkit-scrollbar { width:8px; height:8px; }
-.scrollbar-thin::-webkit-scrollbar-thumb { background:var(--border); border-radius:8px; }
+@keyframes qhFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes qhSlideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes qhSheetIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes qhToastIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes qhScaleIn { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
