@@ -2,6 +2,7 @@ import React from 'react';
 import { css, Hover as H } from './lib/dc';
 import { QuickHireLogic } from './logic';
 import TasksWorkspace from './tasks/TasksWorkspace';
+import MessagesWorkspace from './comms/MessagesWorkspace';
 
 /**
  * QuickHire — recruiter command center. Faithful React port of the QuickHire.dc
@@ -558,74 +559,7 @@ export default class QuickHire extends QuickHireLogic {
 
   // ===================== MESSAGES =====================
   renderMessages(v: any) {
-    const th = v.thread;
-    return (
-      <div style={css('display:flex; height:100%; overflow-x:auto;')}>
-        <div style={css('width:272px; flex:none; border-right:1px solid rgba(0,0,0,0.08); background:#fff; display:flex; flex-direction:column;')}>
-          <div style={css('padding:18px 18px 10px;')}><h1 style={css('margin:0; font-size:20px; font-weight:700; letter-spacing:-0.01em;')}>Inbox</h1></div>
-          <div style={css('display:flex; gap:6px; padding:0 14px 12px; overflow-x:auto;')}>
-            {v.msgFilters.map((f: any, i: number) => (<button key={i} onClick={f.onClick} style={f.style}>{f.label}</button>))}
-          </div>
-          <div style={css('flex:1; overflow-y:auto;')}>
-            {v.threads.map((t: any) => (
-              <button key={t.id} onClick={t.onClick} style={t.style}>
-                <div style={{ ...css('width:38px; height:38px; border-radius:999px; flex:none; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:650; color:#fff;'), background: t.avatarBg }}>{t.initials}</div>
-                <div style={css('flex:1; min-width:0;')}>
-                  <div style={css('display:flex; align-items:center; justify-content:space-between; gap:6px;')}><span style={css('font-size:13.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;')}>{t.name}</span><span style={css('font-size:11px; color:#8E8E93; flex:none;')}>{t.age}</span></div>
-                  <div style={css('display:flex; align-items:center; gap:6px; margin-top:2px;')}><span style={t.chanStyle}>{t.channel}</span><span style={css('font-size:12px; color:#6E6E73; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;')}>{t.preview}</span></div>
-                </div>
-                {t.unread && (<span style={css('width:8px; height:8px; border-radius:999px; background:#007AFF; flex:none;')}></span>)}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div style={css('flex:1; min-width:360px; display:flex; flex-direction:column; background:#F5F5F7;')}>
-          <div style={css('height:60px; flex:none; display:flex; align-items:center; gap:12px; padding:0 20px; background:rgba(255,255,255,0.82); backdrop-filter:blur(20px); border-bottom:1px solid rgba(0,0,0,0.07);')}>
-            <div style={{ ...css('width:34px; height:34px; border-radius:999px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:650; color:#fff;'), background: th.avatarBg }}>{th.initials}</div>
-            <div><div style={css('font-size:14px; font-weight:650;')}>{th.name}</div><div style={css('font-size:12px; color:#8E8E93;')}>{th.sub}</div></div>
-          </div>
-          <div style={css('flex:1; overflow-y:auto; padding:24px 28px; display:flex; flex-direction:column; gap:12px;')}>
-            {th.messages.map((m: any, i: number) => (
-              <div key={i} style={m.rowStyle}>
-                <div style={m.bubbleStyle}><div style={css('font-size:13.5px; line-height:1.45;')}>{m.text}</div></div>
-                <div style={{ ...css('font-size:11px; color:#8E8E93; margin-top:4px;'), ...m.metaAlign }}>{m.meta}</div>
-              </div>
-            ))}
-          </div>
-          <div style={css('flex:none; padding:14px 20px 18px; background:rgba(255,255,255,0.82); backdrop-filter:blur(20px); border-top:1px solid rgba(0,0,0,0.07);')}>
-            <div style={css('display:flex; gap:6px; margin-bottom:9px;')}>
-              {v.channels.map((cn: any, i: number) => (<button key={i} onClick={cn.onClick} style={cn.style}>{cn.label}</button>))}
-              <div style={css('flex:1;')}></div>
-              <H as="button" onClick={v.pickTemplate} style={css('height:28px; padding:0 11px; font-size:12px; font-weight:600; color:#6E6E73; background:transparent; border:1px solid rgba(0,0,0,0.10); border-radius:8px; cursor:pointer;')} hover={css('background:rgba(0,0,0,0.04);')}>Template</H>
-            </div>
-            <div style={css('display:flex; gap:10px; align-items:flex-end;')}>
-              <textarea value={v.composerText} onChange={v.onComposer} placeholder="Write a message…" style={css('flex:1; resize:none; height:44px; max-height:120px; padding:12px 14px; font-family:inherit; font-size:13.5px; background:#fff; border:1px solid rgba(0,0,0,0.10); border-radius:12px; outline:none;')}></textarea>
-              <H as="button" onClick={v.sendMessage} style={css('width:44px; height:44px; flex:none; display:flex; align-items:center; justify-content:center; background:#007AFF; border:none; border-radius:12px; color:#fff; cursor:pointer;')} hover={css('background:#0066D6;')}>{v.icSend}</H>
-            </div>
-          </div>
-        </div>
-
-        <div style={css('width:248px; flex:none; border-left:1px solid rgba(0,0,0,0.08); background:#fff; overflow-y:auto; padding:22px 18px;')}>
-          <div style={css('display:flex; flex-direction:column; align-items:center; text-align:center; padding-bottom:16px; border-bottom:1px solid rgba(0,0,0,0.07);')}>
-            <div style={{ ...css('width:56px; height:56px; border-radius:999px; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:650; color:#fff;'), background: th.avatarBg }}>{th.initials}</div>
-            <div style={css('font-size:15px; font-weight:650; margin-top:10px;')}>{th.name}</div>
-            <div style={css('margin-top:7px;')}><span style={th.stageChip}>{th.stage}</span></div>
-          </div>
-          <div style={css('padding:16px 0; border-bottom:1px solid rgba(0,0,0,0.07);')}>
-            <div style={css('font-size:11px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; color:#8E8E93; margin-bottom:10px;')}>Missing Documents</div>
-            {th.missing.map((m: any, i: number) => (
-              <div key={i} style={css('display:flex; align-items:center; gap:8px; font-size:13px; padding:5px 0; color:#C62820;')}>{v.icAlertSm3}<span>{m.name}</span></div>
-            ))}
-          </div>
-          <div style={css('display:flex; flex-direction:column; gap:8px; padding-top:16px;')}>
-            <H as="button" onClick={v.sendLink} style={css('width:100%; height:36px; background:#fff; border:1px solid rgba(0,0,0,0.12); border-radius:10px; font-size:12.5px; font-weight:600; cursor:pointer;')} hover={css('background:rgba(0,0,0,0.04);')}>Send Link</H>
-            <H as="button" onClick={v.reqDocsMsg} style={css('width:100%; height:36px; background:#fff; border:1px solid rgba(0,0,0,0.12); border-radius:10px; font-size:12.5px; font-weight:600; cursor:pointer;')} hover={css('background:rgba(0,0,0,0.04);')}>Request Docs</H>
-            <H as="button" onClick={v.scheduleCall} style={css('width:100%; height:36px; background:#fff; border:1px solid rgba(0,0,0,0.12); border-radius:10px; font-size:12.5px; font-weight:600; cursor:pointer;')} hover={css('background:rgba(0,0,0,0.04);')}>Schedule Call</H>
-          </div>
-        </div>
-      </div>
-    );
+    return <MessagesWorkspace />;
   }
 
   // ===================== SETTINGS =====================
