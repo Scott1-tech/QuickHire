@@ -66,7 +66,14 @@ export default function TasksWorkspace() {
     toggleComplete: (id: string) => setTasks((ts) => ts.map((t) => t.id === id ? { ...t, status: t.status === 'complete' ? 'todo' : 'complete', activity: [...t.activity, mkAct(t.status === 'complete' ? 'reopened this task' : 'completed this task')] } : t)),
     deleteTask: (id: string) => { setTasks((ts) => ts.filter((t) => t.id !== id)); setDetailId((d) => (d === id ? null : d)); toast('Task deleted', 'warning'); },
     duplicateTask: (id: string) => setTasks((ts) => { const t = ts.find((x) => x.id === id); if (!t) return ts; const copy = { ...t, id: 'tk' + Date.now(), title: t.title + ' (copy)', status: 'todo', activity: [mkAct('created this task')] }; toast('Task duplicated', 'success'); return [...ts, copy]; }),
-    addComment: (id: string, text: string) => setTasks((ts) => ts.map((t) => t.id === id ? { ...t, comments: [...t.comments, { id: 'm' + Date.now(), author: ME.name, text, time: iso(new Date()) }], activity: [...t.activity, mkAct('added a comment')] } : t)),
+    addComment: (id: string, text: string, mentions: string[] = []) => {
+      setTasks((ts) => ts.map((t) => t.id === id ? { ...t, comments: [...t.comments, { id: 'm' + Date.now(), author: ME.name, text, time: iso(new Date()), mentions, replies: [] }], activity: [...t.activity, mkAct('added a comment')] } : t));
+      if (mentions.length) toast('Notified ' + mentions.join(', '), 'info');
+    },
+    addReply: (taskId: string, commentId: string, text: string, mentions: string[] = []) => {
+      setTasks((ts) => ts.map((t) => t.id === taskId ? { ...t, comments: t.comments.map((c: any) => c.id === commentId ? { ...c, replies: [...(c.replies || []), { id: 'r' + Date.now(), author: ME.name, text, time: iso(new Date()), mentions }] } : c), activity: [...t.activity, mkAct('replied to a comment')] } : t));
+      if (mentions.length) toast('Notified ' + mentions.join(', '), 'info');
+    },
   }), [toast]);
 
   const filtered = React.useMemo(() => applyFilters(tasks, filters, savedView, ME), [tasks, filters, savedView]);

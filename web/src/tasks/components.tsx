@@ -1,12 +1,117 @@
 import React from 'react';
 import { Hover } from '../lib/dc';
 import {
-  T, Icon, Avatar, StatusChip, PriorityFlag, SourceChip, TagChip, CheckCircle, Btn,
+  T, Icon, Avatar, StatusChip, PriorityFlag, SourceChip, TagChip, CheckCircle, Btn, TruckStatusChip,
   StatusSelect, PrioritySelect, AssigneeSelect, Menu, MenuItem, FilterSelect,
   STATUS, STATUS_ORDER, PRIORITY_ORDER, PRIORITY, SOURCE, RELATED_ICON, dueInfo, fmtDate, iso, addDays,
   useTasksCtx,
 } from './lib';
-import { PEOPLE, nameOf, TAGS, CARRIERS } from './data';
+import { PEOPLE, nameOf, TAGS, CARRIERS, TRUCKS, CARRIER_MC } from './data';
+
+/* ---- @mention rendering ---- */
+function MentionText({ text }: { text: string }) {
+  const names = PEOPLE.map((p) => p.name).sort((a, b) => b.length - a.length);
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp('(@(?:' + names.map(esc).join('|') + '))', 'g');
+  const parts = text.split(re);
+  return <>{parts.map((p, i) => p.startsWith('@') && names.includes(p.slice(1))
+    ? <span key={i} style={{ color: '#007AFF', fontWeight: 600, background: 'rgba(0,122,255,0.08)', borderRadius: 5, padding: '0 3px' }}>{p}</span>
+    : <React.Fragment key={i}>{p}</React.Fragment>)}</>;
+}
+
+/* ---- comment composer with @mentions ---- */
+function CommentComposer({ onSubmit, onCancel, placeholder = 'Write a comment…', autoFocus, compact }: any) {
+  const [text, setText] = React.useState('');
+  const [mq, setMq] = React.useState<string | null>(null);
+  const ref = React.useRef<HTMLTextAreaElement>(null);
+  React.useEffect(() => { if (autoFocus && ref.current) ref.current.focus(); }, [autoFocus]);
+
+  const onChange = (e: any) => {
+    const v = e.target.value; setText(v);
+    const upto = v.slice(0, e.target.selectionStart);
+    const m = upto.match(/(?:^|\s)@(\w*)$/);
+    setMq(m ? m[1] : null);
+  };
+  const pick = (p: any) => {
+    const el = ref.current!; const caret = el.selectionStart;
+    const upto = text.slice(0, caret).replace(/(^|\s)@(\w*)$/, (_f, pre) => pre + '@' + p.name + ' ');
+    const nv = upto + text.slice(caret); setText(nv); setMq(null);
+    setTimeout(() => { el.focus(); el.setSelectionRange(upto.length, upto.length); }, 0);
+  };
+  const submit = () => { if (!text.trim()) return; const mentions = PEOPLE.filter((p) => text.includes('@' + p.name)).map((p) => p.name); onSubmit(text.trim(), mentions); setText(''); setMq(null); };
+  const insertAt = () => { const el = ref.current!; const c = el.selectionStart; const nv = text.slice(0, c) + '@' + text.slice(c); setText(nv); setMq(''); setTimeout(() => { el.focus(); el.setSelectionRange(c + 1, c + 1); }, 0); };
+  const filtered = mq != null ? PEOPLE.filter((p) => p.name.toLowerCase().includes(mq.toLowerCase())) : [];
+
+  return <div style={{ position: 'relative', border: `1px solid ${T.border}`, borderRadius: 12, background: '#fff', boxShadow: compact ? 'none' : '0 1px 2px rgba(0,0,0,0.03)' }}>
+    {mq != null && filtered.length > 0 && <div style={{ position: 'absolute', bottom: 'calc(100% + 6px)', left: 0, zIndex: 30, width: 230, background: '#fff', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 12, boxShadow: '0 12px 30px rgba(0,0,0,0.14)', padding: 6 }}>
+      {filtered.map((p) => <Hover key={p.initials} as="button" onClick={() => pick(p)} style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', height: 34, padding: '0 8px', border: 'none', background: 'transparent', borderRadius: 8, cursor: 'pointer', fontSize: 13 }} hover={{ background: 'rgba(0,0,0,0.05)' }}><Avatar name={p.name} size={22} />{p.name}</Hover>)}
+    </div>}
+    <textarea ref={ref} value={text} onChange={onChange} onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); } }} placeholder={placeholder} style={{ width: '100%', resize: 'none', minHeight: compact ? 38 : 44, maxHeight: 140, padding: '11px 13px 4px', border: 'none', outline: 'none', fontFamily: 'inherit', fontSize: 13.5, lineHeight: 1.5, background: 'transparent', color: T.text, display: 'block' }} />
+    <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '4px 8px 6px' }}>
+      <Hover as="button" title="Mention" onClick={insertAt} style={{ width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', borderRadius: 8, color: T.faint, cursor: 'pointer' }} hover={{ background: 'rgba(0,0,0,0.06)' }}><Icon name="atSign" size={16} /></Hover>
+      <Hover as="button" title="Attach" style={{ width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', borderRadius: 8, color: T.faint, cursor: 'pointer' }} hover={{ background: 'rgba(0,0,0,0.06)' }}><Icon name="paperclip" size={16} /></Hover>
+      <Hover as="button" title="Emoji" style={{ width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', borderRadius: 8, color: T.faint, cursor: 'pointer' }} hover={{ background: 'rgba(0,0,0,0.06)' }}><Icon name="smile" size={16} /></Hover>
+      <div style={{ flex: 1 }} />
+      {onCancel && <Hover as="button" onClick={onCancel} style={{ height: 30, padding: '0 11px', border: 'none', background: 'transparent', borderRadius: 8, color: T.muted, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }} hover={{ background: 'rgba(0,0,0,0.06)' }}>Cancel</Hover>}
+      <button onClick={submit} disabled={!text.trim()} style={{ width: 32, height: 32, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', background: text.trim() ? '#007AFF' : '#E5E5EA', border: 'none', borderRadius: 9, color: '#fff', cursor: text.trim() ? 'pointer' : 'default', transition: 'background .15s' }}><Icon name="send" size={15} /></button>
+    </div>
+  </div>;
+}
+
+/* ---- a comment with reactions + threaded replies ---- */
+function CommentBubble({ c }: any) {
+  return <div style={{ flex: 1, minWidth: 0 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ fontSize: 13, fontWeight: 600 }}>{c.author}</span><span style={{ fontSize: 11.5, color: T.faint }}>{fmtDate(c.time)}</span></div>
+    <div style={{ fontSize: 13.5, color: '#3a3a3c', marginTop: 3, lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><MentionText text={c.text} /></div>
+    {c.image && <div style={{ marginTop: 8, border: `1px solid ${T.border}`, borderRadius: 10, overflow: 'hidden', maxWidth: 280 }}><img src={c.image} alt="" style={{ display: 'block', width: '100%' }} /></div>}
+  </div>;
+}
+function CommentCard({ comment, onReply }: any) {
+  const [replying, setReplying] = React.useState(false);
+  const replies = comment.replies || [];
+  return <div style={{ background: '#fff', border: `1px solid ${T.border}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+    <div style={{ display: 'flex', gap: 11 }}>
+      <Avatar name={comment.author} size={30} />
+      <CommentBubble c={comment} />
+    </div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, paddingTop: 8, borderTop: `1px solid ${T.hair}` }}>
+      <Hover as="button" title="Like" style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', borderRadius: 7, color: T.faint, cursor: 'pointer' }} hover={{ background: 'rgba(0,0,0,0.06)', color: '#007AFF' }}><Icon name="thumbsUp" size={15} /></Hover>
+      <Hover as="button" title="React" style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', borderRadius: 7, color: T.faint, cursor: 'pointer' }} hover={{ background: 'rgba(0,0,0,0.06)' }}><Icon name="smile" size={15} /></Hover>
+      <div style={{ flex: 1 }} />
+      <Hover as="button" onClick={() => setReplying((r) => !r)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 28, padding: '0 10px', border: 'none', background: 'transparent', borderRadius: 8, color: T.muted, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }} hover={{ background: 'rgba(0,0,0,0.06)' }}><Icon name="cornerDownRight" size={14} />Reply</Hover>
+    </div>
+    {replies.length > 0 && <div style={{ marginTop: 10, paddingLeft: 14, borderLeft: `2px solid ${T.hair}`, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {replies.map((r: any) => <div key={r.id} style={{ display: 'flex', gap: 10 }}><Avatar name={r.author} size={26} /><CommentBubble c={r} /></div>)}
+    </div>}
+    {replying && <div style={{ marginTop: 10, paddingLeft: 14 }}><CommentComposer compact autoFocus placeholder={`Reply to ${comment.author}…`} onCancel={() => setReplying(false)} onSubmit={(t: string, m: string[]) => { onReply(comment.id, t, m); setReplying(false); }} /></div>}
+  </div>;
+}
+
+/* ---- carrier → truck picker ---- */
+function TruckAssign({ task }: any) {
+  const ctx = useTasksCtx();
+  const [carrier, setCarrier] = React.useState(task.carrier && CARRIER_MC[task.carrier] ? task.carrier : CARRIERS[0]);
+  const trucks = TRUCKS.filter((t) => t.carrier === carrier);
+  const selectedUnit = task.relatedType === 'truck' ? task.related : null;
+  const pick = (tr: any) => { ctx.updateTask(task.id, { carrier, relatedType: 'truck', related: 'Unit ' + tr.unit }); ctx.toast(`Assigned Unit ${tr.unit} · ${carrier}`, 'success'); };
+  return <div style={{ border: `1px solid ${T.border}`, borderRadius: 14, overflow: 'hidden', marginBottom: 22 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderBottom: `1px solid ${T.hair}` }}>
+      <span style={{ width: 32, height: 32, flex: 'none', borderRadius: 9, background: 'rgba(0,122,255,0.10)', color: '#007AFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="truck" size={17} /></span>
+      <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13.5, fontWeight: 650 }}>Assign Truck</div><div style={{ fontSize: 11.5, color: T.faint }}>{CARRIER_MC[carrier] || ''} · {trucks.length} units</div></div>
+      <Menu align="right" width={240} trigger={<Hover as="div" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 32, padding: '0 11px', borderRadius: 9, border: '1px solid rgba(0,0,0,0.10)', background: '#fff', color: '#3a3a3c', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', maxWidth: 200 }} hover={{ borderColor: 'rgba(0,0,0,0.18)' }}><Icon name="building" size={14} /><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{carrier}</span><Icon name="chevronDown" size={14} /></Hover>}>
+        {(close: any) => CARRIERS.map((c) => <MenuItem key={c} label={c} onClick={() => { setCarrier(c); close(); }} trailing={c === carrier ? <Icon name="check" size={14} style={{ color: '#007AFF' }} /> : null} />)}
+      </Menu>
+    </div>
+    <div style={{ maxHeight: 224, overflowY: 'auto' }}>
+      {trucks.map((tr) => { const sel = selectedUnit === 'Unit ' + tr.unit; return (
+        <Hover key={tr.unit} onClick={() => pick(tr)} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 14px', borderTop: `1px solid ${T.hair}`, cursor: 'pointer', background: sel ? 'rgba(0,122,255,0.05)' : '#fff' }} hover={{ background: sel ? 'rgba(0,122,255,0.07)' : T.hover }}>
+          <span style={{ width: 18, height: 18, flex: 'none', borderRadius: 999, border: `1.5px solid ${sel ? '#007AFF' : 'rgba(0,0,0,0.25)'}`, background: sel ? '#007AFF' : '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>{sel && <Icon name="check" size={12} />}</span>
+          <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13.5, fontWeight: 650 }}>Unit #{tr.unit}</div><div style={{ fontSize: 11.5, color: T.faint, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tr.driver === '—' ? 'Unassigned' : tr.driver}</div></div>
+          <TruckStatusChip status={tr.status} />
+        </Hover>); })}
+    </div>
+  </div>;
+}
 
 function Row({ icon, label, children }: any) {
   return <div style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 38 }}>
@@ -82,6 +187,10 @@ export function TaskDetail({ task, onClose }: any) {
           <Row icon="user" label="Created by"><span style={{ color: T.muted }}>{task.createdBy} · {fmtDate(task.createdDate)}</span></Row>
         </div>
 
+        {/* truck assignment */}
+        <SectionTitle>Truck Assignment</SectionTitle>
+        <TruckAssign task={task} />
+
         {/* description */}
         <SectionTitle>Description</SectionTitle>
         <textarea value={desc} onChange={(e) => setDesc(e.target.value)} onBlur={() => desc !== task.description && update({ description: desc })} placeholder="Add a description…" style={{ width: '100%', minHeight: 70, resize: 'vertical', border: `1px solid ${T.border}`, borderRadius: 12, padding: '11px 13px', fontSize: 13.5, lineHeight: 1.5, fontFamily: 'inherit', outline: 'none', color: T.text, background: '#fff', marginBottom: 22 }} />
@@ -130,25 +239,24 @@ export function TaskDetail({ task, onClose }: any) {
           </div>)}
         </div>
 
-        {/* comments */}
-        <SectionTitle>Comments</SectionTitle>
-        <div style={{ marginBottom: 12 }}>
-          {task.comments.map((c: any) => <div key={c.id} style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
-            <Avatar name={c.author} size={28} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ fontSize: 13, fontWeight: 600 }}>{c.author}</span><span style={{ fontSize: 11.5, color: T.faint }}>{fmtDate(c.time)}</span></div>
-              <div style={{ fontSize: 13.5, color: '#3a3a3c', marginTop: 2, lineHeight: 1.45 }}>{c.text}</div>
-            </div>
-          </div>)}
+        {/* activity (comments + replies + mentions) */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '4px 0 12px' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: T.faint }}>Activity</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <span style={{ width: 26, height: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: T.faint }}><Icon name="search" size={14} /></span>
+            <span style={{ width: 26, height: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: T.faint }}><Icon name="bell" size={14} /></span>
+            <span style={{ width: 26, height: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: T.faint }}><Icon name="filter" size={14} /></span>
+          </div>
         </div>
-        <form onSubmit={(e) => { e.preventDefault(); if (!comment.trim()) return; ctx.addComment(task.id, comment.trim()); setComment(''); }} style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
-          <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Write a comment…" style={{ flex: 1, resize: 'none', height: 42, maxHeight: 120, padding: '11px 13px', fontFamily: 'inherit', fontSize: 13.5, background: '#fff', border: `1px solid ${T.border}`, borderRadius: 12, outline: 'none' }} />
-          <button type="submit" style={{ width: 42, height: 42, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#007AFF', border: 'none', borderRadius: 12, color: '#fff', cursor: 'pointer' }}><Icon name="send" size={17} /></button>
-        </form>
+        {task.comments.length === 0 && <div style={{ color: T.faint, fontSize: 12.5, marginBottom: 12 }}>No messages yet. Leave a comment to start the thread.</div>}
+        {task.comments.map((c: any) => <CommentCard key={c.id} comment={c} onReply={(cid: string, text: string, mentions: string[]) => ctx.addReply(task.id, cid, text, mentions)} />)}
+        <div style={{ marginTop: 4 }}>
+          <CommentComposer placeholder="Write a message…  use @ to mention" onSubmit={(text: string, mentions: string[]) => ctx.addComment(task.id, text, mentions)} />
+        </div>
 
-        {/* activity */}
+        {/* history (change log) */}
         <div style={{ marginTop: 24 }}>
-          <SectionTitle>Activity</SectionTitle>
+          <SectionTitle>History</SectionTitle>
           {task.activity.map((a: any) => <div key={a.id} style={{ display: 'flex', gap: 11, padding: '8px 0' }}>
             <span style={{ width: 7, height: 7, borderRadius: 999, background: '#C7C7CC', marginTop: 6, flex: 'none' }} />
             <div style={{ fontSize: 12.5, color: '#3a3a3c' }}><span style={{ fontWeight: 600 }}>{a.who}</span> {a.text} <span style={{ color: T.faint }}>· {fmtDate(a.time)}</span></div>

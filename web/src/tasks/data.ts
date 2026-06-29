@@ -14,6 +14,37 @@ export const nameOf = (i: string) => (PEOPLE.find((p) => p.initials === i) || { 
 
 export const CARRIERS = ['Grand One LLC', 'DT National Transportation', 'Premier Trucking Group', 'RMR Transport'];
 
+export const CARRIER_MC: Record<string, string> = {
+  'Grand One LLC': 'MC-123456',
+  'DT National Transportation': 'MC-234567',
+  'Premier Trucking Group': 'MC-345678',
+  'RMR Transport': 'MC-456789',
+  'Midwest Freight Lines': 'MC-998812',
+};
+
+// Fleet keyed by carrier (MC). Enough units per carrier that the picker scrolls.
+export const TRUCKS = [
+  { unit: '101', carrier: 'Grand One LLC', driver: 'James Wilson', status: 'Assigned' },
+  { unit: '102', carrier: 'Grand One LLC', driver: 'Maria Garcia', status: 'Assigned' },
+  { unit: '103', carrier: 'Grand One LLC', driver: '—', status: 'Available' },
+  { unit: '104', carrier: 'Grand One LLC', driver: '—', status: 'Shop' },
+  { unit: '105', carrier: 'Grand One LLC', driver: '—', status: 'Available' },
+  { unit: '106', carrier: 'Grand One LLC', driver: 'Angela White', status: 'In-Transit' },
+  { unit: '107', carrier: 'Grand One LLC', driver: '—', status: 'Available' },
+  { unit: '108', carrier: 'Grand One LLC', driver: '—', status: 'Out of Service' },
+  { unit: '201', carrier: 'DT National Transportation', driver: 'Carlos Mendez', status: 'In-Transit' },
+  { unit: '202', carrier: 'DT National Transportation', driver: '—', status: 'Available' },
+  { unit: '203', carrier: 'DT National Transportation', driver: '—', status: 'Available' },
+  { unit: '204', carrier: 'DT National Transportation', driver: 'Tony Russo', status: 'Assigned' },
+  { unit: '205', carrier: 'DT National Transportation', driver: '—', status: 'Shop' },
+  { unit: '301', carrier: 'Premier Trucking Group', driver: '—', status: 'Available' },
+  { unit: '302', carrier: 'Premier Trucking Group', driver: 'Edd Roy', status: 'Assigned' },
+  { unit: '303', carrier: 'Premier Trucking Group', driver: '—', status: 'Available' },
+  { unit: '304', carrier: 'Premier Trucking Group', driver: '—', status: 'Out of Service' },
+  { unit: '401', carrier: 'RMR Transport', driver: '—', status: 'Available' },
+  { unit: '402', carrier: 'RMR Transport', driver: '—', status: 'Available' },
+];
+
 export const TAGS = ['Compliance', 'DocuSign', 'Follow-up', 'Urgent', 'Carrier Setup', 'Onboarding', 'PEV', 'Documents', 'Message', 'Truck'];
 
 const now = new Date();
@@ -37,7 +68,12 @@ function task(t: any) {
 export const SEED_TASKS = [
   task({ title: 'Verify CDL for Robert Johnson', description: 'Confirm CDL Class A and endorsements with the TX DMV before advancing to background check.', status: 'review', priority: 'urgent', due: D(-2), start: D(-3), relatedType: 'candidate', related: 'Robert Johnson', carrier: 'Grand One LLC', source: 'compliance', tags: ['Compliance', 'Documents'],
     checklist: [{ id: 'c1', text: 'Pull CDL record from TX DMV', done: true }, { id: 'c2', text: 'Confirm endorsements (H, N)', done: true }, { id: 'c3', text: 'Attach to candidate file', done: false }],
-    comments: [{ id: 'm1', author: 'Dana Reed', text: 'DMV record shows endorsements match the application.', time: D(-2) }, { id: 'm2', author: 'Nina Patel', text: 'Thanks — just need it attached to the file.', time: D(-1) }] }),
+    comments: [
+      { id: 'm1', author: 'Dana Reed', text: 'DMV record shows endorsements match the application.', time: D(-2), mentions: [], replies: [
+        { id: 'r1', author: 'Nina Patel', text: 'Great, thanks @Dana Reed — attaching it to the file now.', time: D(-1), mentions: ['Dana Reed'] },
+      ] },
+      { id: 'm2', author: 'Nina Patel', text: '@Mark Hill can you confirm the CDL class before we advance him?', time: D(-1), mentions: ['Mark Hill'], replies: [] },
+    ] }),
   task({ title: 'Order MVR — Derek Hill', description: 'Pull the motor vehicle record from the state DMV.', status: 'inprogress', priority: 'high', due: D(0), assignee: 'DR', relatedType: 'candidate', related: 'Derek Hill', carrier: 'Grand One LLC', source: 'automation', tags: ['Compliance'],
     subtasks: [{ id: 's1', title: 'Submit MVR request', assignee: 'DR', due: D(0), done: true }, { id: 's2', title: 'Log results in file', assignee: 'DR', due: D(1), done: false }] }),
   task({ title: 'Review drug test results — Sarah Chen', description: '5-panel DOT pre-employment results returned. Verify negative and attach.', status: 'review', priority: 'urgent', due: D(0), assignee: 'DR', relatedType: 'candidate', related: 'Sarah Chen', carrier: 'Grand One LLC', source: 'compliance', tags: ['Compliance'], watching: true }),

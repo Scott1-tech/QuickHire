@@ -128,7 +128,25 @@ const ICONS: Record<string, string> = {
   mapPin: '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
   layout: '<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',
   inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  atSign: '<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94"/>',
+  smile: '<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/>',
+  thumbsUp: '<path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/>',
+  cornerDownRight: '<polyline points="15 10 20 15 15 20"/><path d="M4 4v7a4 4 0 0 0 4 4h12"/>',
+  image: '<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
 };
+
+/* ============================ Truck status ============================ */
+export const TRUCK_STATUS: Record<string, any> = {
+  Available: { label: 'Available', bg: 'rgba(52,199,89,0.12)', text: '#248A3D', dot: '#34C759' },
+  Assigned: { label: 'Assigned', bg: 'rgba(0,122,255,0.12)', text: '#0066CC', dot: '#007AFF' },
+  'In-Transit': { label: 'In-Transit', bg: 'rgba(0,122,255,0.12)', text: '#0066CC', dot: '#007AFF' },
+  Shop: { label: 'In Shop', bg: 'rgba(255,159,10,0.14)', text: '#A05A00', dot: '#FF9F0A' },
+  'Out of Service': { label: 'Out of Service', bg: 'rgba(255,59,48,0.12)', text: '#C62820', dot: '#FF3B30' },
+};
+export function TruckStatusChip({ status }: { status: string }) {
+  const s = TRUCK_STATUS[status] || TRUCK_STATUS.Available;
+  return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 22, padding: '0 9px', borderRadius: 999, background: s.bg, color: s.text, fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap' }}><span style={{ width: 6, height: 6, borderRadius: 999, background: s.dot, flex: 'none' }} />{s.label}</span>;
+}
 
 export function Icon({ name, size = 18, style }: { name: string; size?: number; style?: React.CSSProperties }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={style} dangerouslySetInnerHTML={{ __html: ICONS[name] || '' }} />;
