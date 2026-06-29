@@ -1,6 +1,7 @@
 import React from 'react';
 import { css, Hover as H } from './lib/dc';
 import { QuickHireLogic } from './logic';
+import TasksWorkspace from './tasks/TasksWorkspace';
 
 /**
  * QuickHire — recruiter command center. Faithful React port of the QuickHire.dc
@@ -98,6 +99,7 @@ export default class QuickHire extends QuickHireLogic {
             {v.isCarriers && this.renderCarriers(v)}
             {v.isReports && this.renderReports(v)}
             {v.isIntegrations && this.renderIntegrationsPage(v)}
+            {v.isTasks && <TasksWorkspace />}
           </main>
         </div>
 
