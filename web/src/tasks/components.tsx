@@ -90,10 +90,27 @@ function CommentCard({ comment, onReply }: any) {
 /* ---- carrier → truck picker ---- */
 function TruckAssign({ task }: any) {
   const ctx = useTasksCtx();
-  const [carrier, setCarrier] = React.useState(task.carrier && CARRIER_MC[task.carrier] ? task.carrier : CARRIERS[0]);
-  const trucks = TRUCKS.filter((t) => t.carrier === carrier);
   const selectedUnit = task.relatedType === 'truck' ? task.related : null;
-  const pick = (tr: any) => { ctx.updateTask(task.id, { carrier, relatedType: 'truck', related: 'Unit ' + tr.unit }); ctx.toast(`Assigned Unit ${tr.unit} · ${carrier}`, 'success'); };
+  const [carrier, setCarrier] = React.useState(task.carrier && CARRIER_MC[task.carrier] ? task.carrier : CARRIERS[0]);
+  const [picking, setPicking] = React.useState(!selectedUnit);
+  React.useEffect(() => { setPicking(!(task.relatedType === 'truck' && task.related)); setCarrier(task.carrier && CARRIER_MC[task.carrier] ? task.carrier : CARRIERS[0]); }, [task.id]);
+  const trucks = TRUCKS.filter((t) => t.carrier === carrier);
+  const pick = (tr: any) => { ctx.updateTask(task.id, { carrier, relatedType: 'truck', related: 'Unit ' + tr.unit }); ctx.toast(`Assigned Unit ${tr.unit} · ${carrier}`, 'success'); setPicking(false); };
+
+  // collapsed: a truck is assigned and we're not actively re-picking
+  if (!picking && selectedUnit) {
+    const sel = TRUCKS.find((t) => 'Unit ' + t.unit === selectedUnit && t.carrier === (task.carrier || carrier)) || TRUCKS.find((t) => 'Unit ' + t.unit === selectedUnit);
+    return <div style={{ border: `1px solid ${T.border}`, borderRadius: 14, overflow: 'hidden', marginBottom: 22 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '12px 14px' }}>
+        <span style={{ width: 32, height: 32, flex: 'none', borderRadius: 9, background: 'rgba(0,122,255,0.10)', color: '#007AFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="truck" size={17} /></span>
+        <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13.5, fontWeight: 650 }}>{selectedUnit}{sel && sel.driver !== '—' ? ` · ${sel.driver}` : ''}</div><div style={{ fontSize: 11.5, color: T.faint }}>{task.carrier || carrier} · {CARRIER_MC[task.carrier || carrier] || ''}</div></div>
+        {sel && <TruckStatusChip status={sel.status} />}
+        <Hover as="button" onClick={() => setPicking(true)} style={{ height: 30, padding: '0 12px', fontSize: 12.5, fontWeight: 600, background: '#fff', border: '1px solid rgba(0,0,0,0.12)', borderRadius: 9, cursor: 'pointer', flex: 'none' }} hover={{ background: 'rgba(0,0,0,0.04)' }}>Change</Hover>
+      </div>
+    </div>;
+  }
+
+  // assigning: pick a carrier (MC), then a truck from the scrollable list
   return <div style={{ border: `1px solid ${T.border}`, borderRadius: 14, overflow: 'hidden', marginBottom: 22 }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderBottom: `1px solid ${T.hair}` }}>
       <span style={{ width: 32, height: 32, flex: 'none', borderRadius: 9, background: 'rgba(0,122,255,0.10)', color: '#007AFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="truck" size={17} /></span>
@@ -101,6 +118,7 @@ function TruckAssign({ task }: any) {
       <Menu align="right" width={240} trigger={<Hover as="div" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 32, padding: '0 11px', borderRadius: 9, border: '1px solid rgba(0,0,0,0.10)', background: '#fff', color: '#3a3a3c', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', maxWidth: 200 }} hover={{ borderColor: 'rgba(0,0,0,0.18)' }}><Icon name="building" size={14} /><span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{carrier}</span><Icon name="chevronDown" size={14} /></Hover>}>
         {(close: any) => CARRIERS.map((c) => <MenuItem key={c} label={c} onClick={() => { setCarrier(c); close(); }} trailing={c === carrier ? <Icon name="check" size={14} style={{ color: '#007AFF' }} /> : null} />)}
       </Menu>
+      {selectedUnit && <Hover as="button" onClick={() => setPicking(false)} style={{ width: 30, height: 30, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', borderRadius: 8, color: T.faint, cursor: 'pointer' }} hover={{ background: 'rgba(0,0,0,0.06)' }}><Icon name="x" size={15} /></Hover>}
     </div>
     <div style={{ maxHeight: 224, overflowY: 'auto' }}>
       {trucks.map((tr) => { const sel = selectedUnit === 'Unit ' + tr.unit; return (
@@ -293,8 +311,8 @@ export function TaskDetail({ task, onClose }: any) {
 }
 
 /* ============================ NEW TASK MODAL ============================ */
-export function NewTaskModal({ onClose, onCreate }: any) {
-  const [f, setF] = React.useState<any>({ title: '', description: '', relatedType: '', related: '', carrier: '', assignee: 'NP', status: 'todo', priority: 'normal', due: null, tags: [], checklist: [] as any[] });
+export function NewTaskModal({ onClose, onCreate, initial }: any) {
+  const [f, setF] = React.useState<any>({ title: '', description: '', relatedType: '', related: '', carrier: '', assignee: 'NP', status: (initial && initial.status) || 'todo', priority: 'normal', due: null, tags: [], checklist: [] as any[] });
   const [check, setCheck] = React.useState('');
   const set = (patch: any) => setF((s: any) => ({ ...s, ...patch }));
   const dueOpts = [{ value: null, label: 'No date' }, { value: iso(addDays(new Date(), 0)), label: 'Today' }, { value: iso(addDays(new Date(), 1)), label: 'Tomorrow' }, { value: iso(addDays(new Date(), 3)), label: 'In 3 days' }, { value: iso(addDays(new Date(), 7)), label: 'Next week' }];

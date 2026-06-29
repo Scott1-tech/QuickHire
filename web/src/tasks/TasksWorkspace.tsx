@@ -3,7 +3,7 @@ import { Hover } from '../lib/dc';
 import {
   T, Icon, Btn, SegTabs, FilterSelect, Menu, MenuItem, TagChip, Avatar,
   STATUS, STATUS_ORDER, PRIORITY, PRIORITY_ORDER, SOURCE, dueInfo, iso, addDays,
-  TasksCtx, useToasts, ToastHost,
+  TasksCtx, useToasts, ToastHost, setStatusRegistry, setColumnsRegistry, deriveMeta,
 } from './lib';
 import { SEED_TASKS, SEED_AUTOMATIONS, TEMPLATES, PEOPLE, CARRIERS, TAGS, ME, nameOf } from './data';
 import { ListView, BoardView, CalendarView, TimelineView, MyWorkView, AutomationsView } from './views';
@@ -43,8 +43,30 @@ export default function TasksWorkspace() {
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [detailId, setDetailId] = React.useState<string | null>(null);
   const [newOpen, setNewOpen] = React.useState(false);
+  const [newInit, setNewInit] = React.useState<any>(null);
   const [tplOpen, setTplOpen] = React.useState(false);
+  const [columns, setColumns] = React.useState<any[]>(STATUS_ORDER.map((k) => ({ key: k, label: STATUS[k].label, color: STATUS[k].dot })));
   const { toasts, toast } = useToasts();
+
+  // configurable columns drive status labels/colors everywhere
+  const statusMeta = React.useCallback((key: string) => {
+    const c = columns.find((x) => x.key === key);
+    if (STATUS[key]) { if (c && c.color !== STATUS[key].dot) return deriveMeta(key, c.label || STATUS[key].label, c.color); return { key, ...STATUS[key], label: c ? c.label : STATUS[key].label }; }
+    return deriveMeta(key, c ? c.label : key, c ? c.color : '#8E8E93');
+  }, [columns]);
+  setStatusRegistry(statusMeta);
+  setColumnsRegistry(columns);
+  const openNew = (init: any = null) => { setNewInit(init); setNewOpen(true); };
+  const addColumn = () => setColumns((cs) => [...cs, { key: 'col' + Date.now(), label: 'New Status', color: '#5856D6' }]);
+  const renameColumn = (key: string, label: string) => setColumns((cs) => cs.map((c) => c.key === key ? { ...c, label } : c));
+  const recolorColumn = (key: string, color: string) => setColumns((cs) => cs.map((c) => c.key === key ? { ...c, color } : c));
+  const removeColumn = (key: string) => setColumns((cs) => {
+    if (cs.length <= 1) return cs;
+    const idx = cs.findIndex((c) => c.key === key); const fallback = cs[idx === 0 ? 1 : idx - 1].key;
+    setTasks((ts) => ts.map((t) => t.status === key ? { ...t, status: fallback } : t));
+    toast('Column removed', 'warning');
+    return cs.filter((c) => c.key !== key);
+  });
 
   const setF = (patch: any) => setFilters((s: any) => ({ ...s, ...patch }));
   const mkAct = (text: string) => ({ id: 'a' + Date.now() + Math.random(), who: ME.name, text, time: iso(new Date()) });
@@ -57,7 +79,7 @@ export default function TasksWorkspace() {
     updateTask: (id: string, patch: any) => setTasks((ts) => ts.map((t) => {
       if (t.id !== id) return t;
       const act: any[] = [];
-      if (patch.status && patch.status !== t.status) act.push(mkAct('set status to ' + STATUS[patch.status].label));
+      if (patch.status && patch.status !== t.status) act.push(mkAct('set status to ' + statusMeta(patch.status).label));
       if (patch.priority && patch.priority !== t.priority) act.push(mkAct('set priority to ' + PRIORITY[patch.priority].label));
       if ('due' in patch && patch.due !== t.due) act.push(mkAct('changed the due date'));
       if (patch.assignee && patch.assignee !== t.assignee) act.push(mkAct('reassigned to ' + nameOf(patch.assignee)));
@@ -74,7 +96,7 @@ export default function TasksWorkspace() {
       setTasks((ts) => ts.map((t) => t.id === taskId ? { ...t, comments: t.comments.map((c: any) => c.id === commentId ? { ...c, replies: [...(c.replies || []), { id: 'r' + Date.now(), author: ME.name, text, time: iso(new Date()), mentions }] } : c), activity: [...t.activity, mkAct('replied to a comment')] } : t));
       if (mentions.length) toast('Notified ' + mentions.join(', '), 'info');
     },
-  }), [toast]);
+  }), [toast, statusMeta]);
 
   const filtered = React.useMemo(() => applyFilters(tasks, filters, savedView, ME), [tasks, filters, savedView]);
   const detailTask = detailId ? tasks.find((t) => t.id === detailId) : null;
@@ -84,7 +106,7 @@ export default function TasksWorkspace() {
     const h = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || (el as any).isContentEditable)) return;
-      if ((e.key === 'n' || e.key === 'N') && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); setNewOpen(true); }
+      if ((e.key === 'n' || e.key === 'N') && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); openNew(); }
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
@@ -134,7 +156,7 @@ export default function TasksWorkspace() {
       <span style={{ width: 56, height: 56, borderRadius: 16, background: '#F2F2F7', color: T.faint, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}><Icon name={icon} size={26} /></span>
       <div style={{ fontSize: 17, fontWeight: 650, marginBottom: 6 }}>{title}</div>
       <div style={{ fontSize: 13.5, color: T.muted, maxWidth: 360, marginBottom: 18 }}>{text}</div>
-      <Btn variant="primary" icon="plus" onClick={() => setNewOpen(true)}>New Task</Btn>
+      <Btn variant="primary" icon="plus" onClick={() => openNew()}>New Task</Btn>
     </div>
   );
 
@@ -143,7 +165,7 @@ export default function TasksWorkspace() {
   else if (view === 'mywork') content = <MyWorkView tasks={filtered} me={ME} />;
   else if (filtered.length === 0) content = <div style={{ background: '#fff', border: `1px solid ${T.border}`, borderRadius: 14 }}><EmptyState icon="listChecks" title="No tasks here." text="Create a task or use a template to start tracking work." /></div>;
   else if (view === 'list') content = <ListView tasks={filtered} grouping={grouping} selected={selected} onToggle={toggleSel} onToggleMany={toggleMany} />;
-  else if (view === 'board') content = <BoardView tasks={filtered} />;
+  else if (view === 'board') content = <BoardView tasks={filtered} columns={columns} onAdd={addColumn} onRename={renameColumn} onRecolor={recolorColumn} onRemove={removeColumn} onAddTask={(status: string) => openNew({ status })} />;
   else if (view === 'calendar') content = <CalendarView tasks={filtered} />;
   else if (view === 'timeline') content = <TimelineView tasks={filtered} />;
 
@@ -157,7 +179,7 @@ export default function TasksWorkspace() {
             <p style={{ margin: '6px 0 0', fontSize: 14.5, color: T.muted }}>Manage recruiting, compliance, carrier setup, and follow-up work.</p>
           </div>
           <div style={{ display: 'flex', gap: 8, flex: 'none' }}>
-            <Btn variant="primary" icon="plus" onClick={() => setNewOpen(true)}>New Task</Btn>
+            <Btn variant="primary" icon="plus" onClick={() => openNew()}>New Task</Btn>
             <Btn variant="secondary" icon="listChecks" onClick={() => setTplOpen(true)}>Templates</Btn>
             <Btn variant="secondary" icon="zap" onClick={() => setView('automations')}>Automations</Btn>
             <Btn variant="secondary" icon="download" onClick={() => toast('Export started · tasks.csv', 'success')}>Export</Btn>
@@ -195,7 +217,7 @@ export default function TasksWorkspace() {
             <input value={filters.search} onChange={(e) => setF({ search: e.target.value })} placeholder="Search tasks" style={{ flex: 1, border: 'none', outline: 'none', fontSize: 13, fontFamily: 'inherit', background: 'transparent' }} />
           </div>
           <FilterSelect icon="user" label="Assignee" value={filters.assignee} onChange={(v: string) => setF({ assignee: v })} options={[{ value: '', label: 'Anyone' }, ...PEOPLE.map((p) => ({ value: p.initials, label: p.name }))]} />
-          <FilterSelect icon="circle" label="Status" value={filters.status} onChange={(v: string) => setF({ status: v })} options={[{ value: '', label: 'Any status' }, ...STATUS_ORDER.map((k) => ({ value: k, label: STATUS[k].label }))]} />
+          <FilterSelect icon="circle" label="Status" value={filters.status} onChange={(v: string) => setF({ status: v })} options={[{ value: '', label: 'Any status' }, ...columns.map((c) => ({ value: c.key, label: c.label }))]} />
           <FilterSelect icon="flag" label="Priority" value={filters.priority} onChange={(v: string) => setF({ priority: v })} options={[{ value: '', label: 'Any priority' }, ...PRIORITY_ORDER.map((k) => ({ value: k, label: PRIORITY[k].label }))]} />
           <FilterSelect icon="calendar" label="Due" value={filters.due} onChange={(v: string) => setF({ due: v })} options={[{ value: '', label: 'Any due' }, { value: 'overdue', label: 'Overdue' }, { value: 'today', label: 'Today' }, { value: 'tomorrow', label: 'Tomorrow' }, { value: 'week', label: 'This Week' }, { value: 'later', label: 'Later' }, { value: 'none', label: 'No Due Date' }]} />
           <FilterSelect icon="building" label="Carrier" value={filters.carrier} onChange={(v: string) => setF({ carrier: v })} options={[{ value: '', label: 'Any carrier' }, ...CARRIERS.map((c) => ({ value: c, label: c }))]} />
@@ -217,7 +239,7 @@ export default function TasksWorkspace() {
             ['Complete', () => bulk({ status: 'complete' }, `${selected.size} tasks completed`)],
           ].map(([l, fn]: any) => <button key={l} onClick={fn} style={{ height: 30, padding: '0 12px', fontSize: 12.5, fontWeight: 600, color: '#1D1D1F', background: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer' }}>{l}</button>)}
           <Menu align="right" width={180} trigger={<button style={{ height: 30, padding: '0 12px', fontSize: 12.5, fontWeight: 600, color: '#fff', background: 'rgba(255,255,255,0.14)', border: 'none', borderRadius: 8, cursor: 'pointer' }}>Status</button>}>
-            {(close: any) => STATUS_ORDER.map((k) => <MenuItem key={k} label={STATUS[k].label} onClick={() => { bulk({ status: k }, `Status changed for ${selected.size} tasks`); close(); }} />)}
+            {(close: any) => columns.map((c) => <MenuItem key={c.key} label={c.label} onClick={() => { bulk({ status: c.key }, `Status changed for ${selected.size} tasks`); close(); }} />)}
           </Menu>
           <Menu align="right" width={200} trigger={<button style={{ height: 30, padding: '0 12px', fontSize: 12.5, fontWeight: 600, color: '#fff', background: 'rgba(255,255,255,0.14)', border: 'none', borderRadius: 8, cursor: 'pointer' }}>Assign</button>}>
             {(close: any) => PEOPLE.map((p) => <Hover key={p.initials} as="button" onClick={() => { bulk({ assignee: p.initials }, `Assigned ${selected.size} tasks to ${p.name}`); close(); }} style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', height: 34, padding: '0 10px', border: 'none', background: 'transparent', borderRadius: 8, cursor: 'pointer', fontSize: 13 }} hover={{ background: 'rgba(0,0,0,0.05)' }}><Avatar name={p.name} size={22} />{p.name}</Hover>)}
@@ -238,7 +260,7 @@ export default function TasksWorkspace() {
     </div>
 
     {detailTask && <TaskDetail task={detailTask} onClose={() => setDetailId(null)} />}
-    {newOpen && <NewTaskModal onClose={() => setNewOpen(false)} onCreate={createTask} />}
+    {newOpen && <NewTaskModal initial={newInit} columns={columns} onClose={() => { setNewOpen(false); setNewInit(null); }} onCreate={createTask} />}
     {tplOpen && <TemplatesDrawer templates={TEMPLATES} onClose={() => setTplOpen(false)} onUse={useTemplate} />}
     <ToastHost toasts={toasts} />
   </TasksCtx.Provider>;
