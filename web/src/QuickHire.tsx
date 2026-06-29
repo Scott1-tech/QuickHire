@@ -3,6 +3,9 @@ import { css, Hover as H } from './lib/dc';
 import { QuickHireLogic } from './logic';
 import TasksWorkspace from './tasks/TasksWorkspace';
 import MessagesWorkspace from './comms/MessagesWorkspace';
+import { IntegrationSettings } from './comms/settings';
+import { CarrierFmcsaPanel } from './comms/fmcsa';
+import { CARRIER_LIST } from './data';
 
 /**
  * QuickHire — recruiter command center. Faithful React port of the QuickHire.dc
@@ -564,6 +567,8 @@ export default class QuickHire extends QuickHireLogic {
 
   // ===================== SETTINGS =====================
   renderSettings(v: any) {
+    const sec = this.state.settingsSection;
+    const intg = ['ringcentral', 'email', 'fmcsa'].includes(sec);
     return (
       <div style={css('display:flex; height:100%;')}>
         <div style={css('width:240px; flex:none; border-right:1px solid rgba(0,0,0,0.08); background:#fff; overflow-y:auto; padding:22px 12px;')}>
@@ -571,6 +576,7 @@ export default class QuickHire extends QuickHireLogic {
           {v.settingsNav.map((s: any, i: number) => (<button key={i} onClick={s.onClick} style={s.style}>{s.label}</button>))}
         </div>
         <div style={css('flex:1; min-width:0; overflow-y:auto; padding:28px 32px;')}>
+          {intg ? <IntegrationSettings section={sec} /> : (<>
           {v.setIntegrations && (
             <>
               <h1 style={css('margin:0 0 4px; font-size:24px; font-weight:700; letter-spacing:-0.02em;')}>Integrations</h1>
@@ -607,6 +613,7 @@ export default class QuickHire extends QuickHireLogic {
               <H as="button" onClick={v.saveSettings} style={css('margin-top:18px; height:38px; padding:0 18px; background:#007AFF; border:none; border-radius:10px; color:#fff; font-size:13.5px; font-weight:600; cursor:pointer;')} hover={css('background:#0066D6;')}>Save Changes</H>
             </>
           )}
+          </>)}
         </div>
       </div>
     );
@@ -747,6 +754,7 @@ export default class QuickHire extends QuickHireLogic {
                 </div>
               </div>
             </div>
+            {(() => { const carrier = CARRIER_LIST.find((c: any) => c.id === this.state.carrierProfileId); return carrier ? <div style={{ marginTop: 16 }}><CarrierFmcsaPanel carrier={carrier} onChange={() => this.forceUpdate()} /></div> : null; })()}
           </div>
         )}
       </>
