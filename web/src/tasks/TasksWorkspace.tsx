@@ -8,6 +8,7 @@ import {
 import { SEED_TASKS, SEED_AUTOMATIONS, TEMPLATES, PEOPLE, CARRIERS, TAGS, ME, nameOf } from './data';
 import { ListView, BoardView, CalendarView, TimelineView, MyWorkView, AutomationsView } from './views';
 import { TaskDetail, NewTaskModal, TemplatesDrawer } from './components';
+import { subscribeTasks } from './bus';
 
 const EMPTY_FILTERS = { search: '', assignee: '', status: '', priority: '', due: '', carrier: '', related: '', source: '', tags: [] as string[] };
 
@@ -111,6 +112,9 @@ export default function TasksWorkspace() {
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, []);
+
+  // tasks pushed by integrations (RingCentral / Email / FMCSA)
+  React.useEffect(() => subscribeTasks((t: any) => { setTasks((ts) => (ts.some((x) => x.id === t.id) ? ts : [t, ...ts])); }), []);
 
   const createTask = (data: any) => {
     const t = { id: 'tk' + Date.now(), title: data.title, description: data.description || '', status: data.status || 'todo', assignee: data.assignee || 'NP', priority: data.priority || 'normal', due: data.due || null, start: null, relatedType: data.relatedType || null, related: data.related || null, carrier: data.carrier || null, source: 'manual', tags: data.tags || [], checklist: data.checklist || [], subtasks: [], comments: [], attachments: [], watching: false, createdBy: ME.name, createdDate: iso(new Date()), activity: [mkAct('created this task')] };
