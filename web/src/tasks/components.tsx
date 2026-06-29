@@ -133,27 +133,39 @@ export function TaskDetail({ task, onClose }: any) {
   const ctx = useTasksCtx();
   const [title, setTitle] = React.useState(task.title);
   const [desc, setDesc] = React.useState(task.description || '');
-  const [comment, setComment] = React.useState('');
   const [newCheck, setNewCheck] = React.useState('');
   const [newSub, setNewSub] = React.useState('');
+  const [showHistory, setShowHistory] = React.useState(false);
+  const [narrow, setNarrow] = React.useState(typeof window !== 'undefined' && window.innerWidth < 880);
   React.useEffect(() => { setTitle(task.title); setDesc(task.description || ''); }, [task.id]);
+  React.useEffect(() => { const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, [onClose]);
+  React.useEffect(() => { const h = () => setNarrow(window.innerWidth < 880); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, []);
 
   const update = (patch: any) => ctx.updateTask(task.id, patch);
   const checkDone = task.checklist.filter((c: any) => c.done).length;
   const info = dueInfo(task);
-
   const dueOpts = [['Today', 0], ['Tomorrow', 1], ['In 3 days', 3], ['Next week', 7], ['No date', null]] as any[];
+  const commentCount = task.comments.reduce((n: number, c: any) => n + 1 + (c.replies ? c.replies.length : 0), 0);
+  const DueField = (
+    <Menu width={180} trigger={<Hover as="span" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 28, padding: '0 8px', borderRadius: 8, cursor: 'pointer', color: info.label ? info.color : T.faint, fontWeight: 600 }} hover={{ background: 'rgba(0,0,0,0.04)' }}><Icon name="calendar" size={13} />{info.label || 'Set date'}</Hover>}>
+      {(close: any) => dueOpts.map(([l, n]: any) => <MenuItem key={l} label={l} onClick={() => { update({ due: n === null ? null : iso(addDays(new Date(), n)) }); close(); }} />)}
+    </Menu>
+  );
 
-  return <>
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 120, background: 'rgba(0,0,0,0.22)', backdropFilter: 'blur(3px)', animation: 'qhFade .18s ease' }} />
-    <aside onClick={(e) => e.stopPropagation()} style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 560, maxWidth: '100vw', zIndex: 121, background: '#fff', borderLeft: `1px solid ${T.border}`, boxShadow: '-12px 0 40px rgba(0,0,0,0.12)', display: 'flex', flexDirection: 'column', animation: 'qhSheetIn .22s ease' }}>
-      {/* header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderBottom: `1px solid ${T.hair}`, flex: 'none' }}>
+  return <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 120, background: 'rgba(0,0,0,0.28)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: narrow ? 0 : '3vh 2vw', animation: 'qhFade .16s ease' }}>
+    <div onClick={(e) => e.stopPropagation()} style={{ width: narrow ? '100vw' : 'min(1180px, 96vw)', height: narrow ? '100vh' : 'min(880px, 94vh)', background: '#fff', borderRadius: narrow ? 0 : 16, boxShadow: '0 40px 100px rgba(0,0,0,0.35)', display: 'flex', flexDirection: 'column', overflow: 'hidden', animation: 'qhScaleIn .18s ease' }}>
+
+      {/* top bar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, height: 52, flex: 'none', padding: '0 14px', borderBottom: `1px solid ${T.hair}` }}>
         <CheckCircle done={task.status === 'complete'} onClick={() => ctx.toggleComplete(task.id)} size={20} />
-        <StatusSelect value={task.status} onChange={(v: string) => update({ status: v })} />
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 28, padding: '0 10px', borderRadius: 8, border: `1px solid ${T.border}`, fontSize: 12.5, fontWeight: 600, color: T.muted }}><Icon name="listChecks" size={14} />Task</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: T.faint, fontSize: 12.5 }}><Icon name="message" size={14} />{commentCount}</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: T.faint, fontSize: 12.5 }}><Icon name="paperclip" size={14} />{task.attachments.length}</span>
         <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 12.5, color: T.faint }}>Created {fmtDate(task.createdDate)}</span>
         <Menu align="right" width={200} trigger={<Hover as="button" style={{ width: 34, height: 34, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', borderRadius: 9, color: T.muted, cursor: 'pointer' }} hover={{ background: 'rgba(0,0,0,0.05)' }}><Icon name="more" size={18} /></Hover>}>
           {(close: any) => <>
+            <MenuItem icon="checkCircle" label={task.status === 'complete' ? 'Reopen' : 'Mark complete'} onClick={() => { ctx.toggleComplete(task.id); close(); }} />
             <MenuItem icon="copy" label="Duplicate" onClick={() => { ctx.duplicateTask(task.id); close(); }} />
             <MenuItem icon="user" label="Open related" onClick={() => { ctx.toast('Opening ' + (task.related || 'record'), 'info'); close(); }} />
             <MenuItem icon="snooze" label="Snooze 1 day" onClick={() => { update({ due: iso(addDays(task.due ? new Date(task.due) : new Date(), 1)) }); ctx.toast('Snoozed 1 day', 'info'); close(); }} />
@@ -164,28 +176,32 @@ export function TaskDetail({ task, onClose }: any) {
         <Hover as="button" onClick={onClose} style={{ width: 34, height: 34, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', borderRadius: 9, color: T.muted, cursor: 'pointer' }} hover={{ background: 'rgba(0,0,0,0.05)' }}><Icon name="x" size={18} /></Hover>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 22px 28px' }}>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={() => title !== task.title && update({ title })} style={{ width: '100%', border: 'none', outline: 'none', fontSize: 22, fontWeight: 700, letterSpacing: '-0.01em', color: T.text, fontFamily: 'inherit', marginBottom: 16 }} />
+      {/* body: two panes */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: narrow ? 'column' : 'row', minHeight: 0, overflowY: narrow ? 'auto' : 'visible' }}>
+        {/* LEFT — task content */}
+        <div style={{ flex: 1, minWidth: 0, overflowY: narrow ? 'visible' : 'auto', padding: '24px 30px 40px' }}>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={() => title !== task.title && update({ title })} style={{ width: '100%', border: 'none', outline: 'none', fontSize: 26, fontWeight: 700, letterSpacing: '-0.02em', color: T.text, fontFamily: 'inherit', marginBottom: 14 }} />
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 18 }}>
-          <Row icon="user" label="Assignee"><AssigneeSelect value={task.assignee} people={PEOPLE} onChange={(v: string) => update({ assignee: v })} size={24} /></Row>
-          <Row icon="flag" label="Priority"><PrioritySelect value={task.priority} onChange={(v: string) => update({ priority: v })} /></Row>
-          <Row icon="calendar" label="Due date">
-            <Menu width={180} trigger={<Hover as="span" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 28, padding: '0 8px', borderRadius: 8, cursor: 'pointer', color: info.label ? info.color : T.faint, fontWeight: 600 }} hover={{ background: 'rgba(0,0,0,0.04)' }}>{info.label || 'Set date'}</Hover>}>
-              {(close: any) => dueOpts.map(([l, n]: any) => <MenuItem key={l} label={l} onClick={() => { update({ due: n === null ? null : iso(addDays(new Date(), n)) }); close(); }} />)}
-            </Menu>
-          </Row>
-          <Row icon={task.relatedType ? RELATED_ICON[task.relatedType] : 'link'} label="Related to">{task.related ? <span style={{ fontWeight: 600 }}>{task.related}</span> : <span style={{ color: T.faint }}>—</span>}</Row>
-          <Row icon="building" label="Carrier">{task.carrier || <span style={{ color: T.faint }}>—</span>}</Row>
-          <Row icon="zap" label="Source"><SourceChip source={task.source} /></Row>
-          <Row icon="tag" label="Tags">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              {task.tags.map((tg: string) => <TagChip key={tg} label={tg} />)}
-              <TagPicker value={task.tags} onChange={(v: string[]) => update({ tags: v })} trigger={<Hover as="button" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, height: 22, padding: '0 8px', borderRadius: 999, border: `1px dashed rgba(0,0,0,0.18)`, background: 'transparent', color: T.muted, fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }} hover={{ background: 'rgba(0,0,0,0.03)' }}><Icon name="plus" size={11} />Tag</Hover>} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '10px 12px', background: '#F7F7F9', borderRadius: 10, color: T.muted, fontSize: 13, marginBottom: 20 }}><Icon name="sparkles" size={15} style={{ color: '#5856D6' }} />Ask AI to draft an update, summary, or reply.</div>
+
+          <div style={{ display: 'flex', gap: 30, marginBottom: 22, flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 240, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Row icon="circle" label="Status"><StatusSelect value={task.status} onChange={(v: string) => update({ status: v })} /></Row>
+              <Row icon="calendar" label="Dates"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><span style={{ color: T.faint }}>Start</span><Icon name="arrowRight" size={13} style={{ color: T.faint }} />{DueField}</span></Row>
+              <Row icon="clock" label="Time estimate"><span style={{ color: T.faint }}>Empty</span></Row>
+              <Row icon="tag" label="Tags"><div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>{task.tags.map((tg: string) => <TagChip key={tg} label={tg} />)}<TagPicker value={task.tags} onChange={(v: string[]) => update({ tags: v })} trigger={<Hover as="button" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, height: 22, padding: '0 8px', borderRadius: 999, border: `1px dashed rgba(0,0,0,0.18)`, background: 'transparent', color: T.muted, fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }} hover={{ background: 'rgba(0,0,0,0.03)' }}><Icon name="plus" size={11} />Tag</Hover>} /></div></Row>
+              <Row icon="building" label="Carrier">{task.carrier || <span style={{ color: T.faint }}>—</span>}</Row>
             </div>
-          </Row>
-          <Row icon="user" label="Created by"><span style={{ color: T.muted }}>{task.createdBy} · {fmtDate(task.createdDate)}</span></Row>
-        </div>
+            <div style={{ flex: 1, minWidth: 240, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Row icon="user" label="Assignee"><AssigneeSelect value={task.assignee} people={PEOPLE} onChange={(v: string) => update({ assignee: v })} size={24} /></Row>
+              <Row icon="flag" label="Priority"><PrioritySelect value={task.priority} onChange={(v: string) => update({ priority: v })} /></Row>
+              <Row icon="clock" label="Track time"><Hover as="button" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 26, padding: '0 9px', borderRadius: 8, border: 'none', background: 'transparent', color: T.muted, fontSize: 13, fontWeight: 600, cursor: 'pointer' }} hover={{ background: 'rgba(0,0,0,0.04)' }}><Icon name="clock" size={14} />Start</Hover></Row>
+              <Row icon={task.relatedType ? RELATED_ICON[task.relatedType] : 'link'} label="Related to">{task.related ? <span style={{ fontWeight: 600 }}>{task.related}</span> : <span style={{ color: T.faint }}>—</span>}</Row>
+              <Row icon="zap" label="Source"><SourceChip source={task.source} /></Row>
+            </div>
+          </div>
+
+          <div style={{ height: 1, background: T.hair, marginBottom: 22 }} />
 
         {/* truck assignment */}
         <SectionTitle>Truck Assignment</SectionTitle>
@@ -231,51 +247,49 @@ export function TaskDetail({ task, onClose }: any) {
             {[['Upload file', 'fileText'], ['Link document', 'link'], ['Link signed PDF', 'sign'], ['Link CDL / medical card', 'fileText']].map(([l, ic]: any) => <MenuItem key={l} icon={ic} label={l} onClick={() => { update({ attachments: [...task.attachments, { id: 'at' + Date.now(), name: l.replace('Link ', '').replace('Upload ', '') + '.pdf', type: ic }] }); ctx.toast('Attachment added', 'success'); close(); }} />)}
           </>}
         </Menu>}>Attachments</SectionTitle>
-        <div style={{ marginBottom: 22 }}>
-          {task.attachments.length === 0 ? <div style={{ color: T.faint, fontSize: 12.5 }}>No attachments.</div> : task.attachments.map((a: any) => <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 6 }}>
-            <span style={{ color: '#007AFF' }}><Icon name={a.type || 'fileText'} size={16} /></span>
-            <span style={{ flex: 1, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.name}</span>
-            <Hover as="button" onClick={() => update({ attachments: task.attachments.filter((x: any) => x.id !== a.id) })} style={{ width: 26, height: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', borderRadius: 7, color: T.faint, cursor: 'pointer' }} hover={{ background: 'rgba(0,0,0,0.06)' }}><Icon name="x" size={14} /></Hover>
+        <Menu width={210} trigger={<Hover style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '16px', border: `1.5px dashed rgba(0,0,0,0.16)`, borderRadius: 12, color: T.muted, fontSize: 13, cursor: 'pointer', marginBottom: 12 }} hover={{ background: 'rgba(0,0,0,0.02)', borderColor: 'rgba(0,122,255,0.4)' }}><Icon name="upload" size={16} />Drop your files here to <span style={{ color: '#007AFF', fontWeight: 600 }}>upload</span></Hover>}>
+          {(close: any) => <>
+            {[['Upload file', 'fileText'], ['Link document', 'link'], ['Link signed PDF', 'sign'], ['Link CDL / medical card', 'fileText']].map(([l, ic]: any) => <MenuItem key={l} icon={ic} label={l} onClick={() => { update({ attachments: [...task.attachments, { id: 'at' + Date.now(), name: l.replace('Link ', '').replace('Upload ', '') + '.pdf', type: ic }] }); ctx.toast('Attachment added', 'success'); close(); }} />)}
+          </>}
+        </Menu>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10, marginBottom: 22 }}>
+          {task.attachments.map((a: any) => <div key={a.id} style={{ position: 'relative', border: `1px solid ${T.border}`, borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
+            <div style={{ height: 92, background: '#F7F7F9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8E8E93' }}>{a.image ? <img src={a.image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Icon name={a.type || 'fileText'} size={28} />}</div>
+            <div style={{ padding: '8px 10px', fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.name}</div>
+            <Hover as="button" onClick={() => update({ attachments: task.attachments.filter((x: any) => x.id !== a.id) })} style={{ position: 'absolute', top: 6, right: 6, width: 24, height: 24, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'rgba(255,255,255,0.9)', borderRadius: 7, color: T.muted, cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }} hover={{ background: '#fff', color: '#C62820' }}><Icon name="x" size={13} /></Hover>
           </div>)}
         </div>
 
-        {/* activity (comments + replies + mentions) */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '4px 0 12px' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: T.faint }}>Activity</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <span style={{ width: 26, height: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: T.faint }}><Icon name="search" size={14} /></span>
-            <span style={{ width: 26, height: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: T.faint }}><Icon name="bell" size={14} /></span>
-            <span style={{ width: 26, height: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: T.faint }}><Icon name="filter" size={14} /></span>
+        </div>
+
+        {/* RIGHT — activity */}
+        <div style={{ width: narrow ? 'auto' : 400, flex: 'none', borderLeft: narrow ? 'none' : `1px solid ${T.hair}`, borderTop: narrow ? `1px solid ${T.hair}` : 'none', background: '#FCFCFD', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px 10px', flex: 'none' }}>
+            <div style={{ fontSize: 15, fontWeight: 650 }}>Activity</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <span style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: T.faint }}><Icon name="search" size={15} /></span>
+              <span style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: T.faint }}><Icon name="bell" size={15} /></span>
+              <span style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: T.faint }}><Icon name="filter" size={15} /></span>
+            </div>
+          </div>
+          <div style={{ flex: 1, overflowY: narrow ? 'visible' : 'auto', padding: '6px 18px 14px', minHeight: narrow ? 220 : 0 }}>
+            {task.comments.length === 0 && <div style={{ color: T.faint, fontSize: 12.5, padding: '8px 0' }}>No messages yet. Leave a comment to start the thread.</div>}
+            {task.comments.map((c: any) => <CommentCard key={c.id} comment={c} onReply={(cid: string, text: string, mentions: string[]) => ctx.addReply(task.id, cid, text, mentions)} />)}
+            <Hover as="button" onClick={() => setShowHistory((s) => !s)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 30, padding: '0 4px', border: 'none', background: 'transparent', color: T.muted, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginTop: 4 }} hover={{ color: T.text }}><Icon name={showHistory ? 'chevronDown' : 'chevronRight'} size={14} />{showHistory ? 'Hide activity log' : 'Show more'}</Hover>
+            {showHistory && <div style={{ marginTop: 6, paddingTop: 8, borderTop: `1px solid ${T.hair}` }}>
+              {task.activity.map((a: any) => <div key={a.id} style={{ display: 'flex', gap: 10, padding: '6px 0' }}>
+                <span style={{ width: 6, height: 6, borderRadius: 999, background: '#C7C7CC', marginTop: 6, flex: 'none' }} />
+                <div style={{ fontSize: 12, color: '#6E6E73' }}><span style={{ fontWeight: 600, color: '#3a3a3c' }}>{a.who}</span> {a.text} <span style={{ color: T.faint }}>· {fmtDate(a.time)}</span></div>
+              </div>)}
+            </div>}
+          </div>
+          <div style={{ flex: 'none', padding: '12px 16px', borderTop: `1px solid ${T.hair}`, background: '#fff' }}>
+            <CommentComposer placeholder="Write a message…  use @ to mention" onSubmit={(text: string, mentions: string[]) => ctx.addComment(task.id, text, mentions)} />
           </div>
         </div>
-        {task.comments.length === 0 && <div style={{ color: T.faint, fontSize: 12.5, marginBottom: 12 }}>No messages yet. Leave a comment to start the thread.</div>}
-        {task.comments.map((c: any) => <CommentCard key={c.id} comment={c} onReply={(cid: string, text: string, mentions: string[]) => ctx.addReply(task.id, cid, text, mentions)} />)}
-        <div style={{ marginTop: 4 }}>
-          <CommentComposer placeholder="Write a message…  use @ to mention" onSubmit={(text: string, mentions: string[]) => ctx.addComment(task.id, text, mentions)} />
-        </div>
-
-        {/* history (change log) */}
-        <div style={{ marginTop: 24 }}>
-          <SectionTitle>History</SectionTitle>
-          {task.activity.map((a: any) => <div key={a.id} style={{ display: 'flex', gap: 11, padding: '8px 0' }}>
-            <span style={{ width: 7, height: 7, borderRadius: 999, background: '#C7C7CC', marginTop: 6, flex: 'none' }} />
-            <div style={{ fontSize: 12.5, color: '#3a3a3c' }}><span style={{ fontWeight: 600 }}>{a.who}</span> {a.text} <span style={{ color: T.faint }}>· {fmtDate(a.time)}</span></div>
-          </div>)}
-        </div>
       </div>
-
-      {/* footer actions */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', borderTop: `1px solid ${T.hair}`, flex: 'none', flexWrap: 'wrap' }}>
-        <Btn variant={task.status === 'complete' ? 'secondary' : 'primary'} icon="check" style={{ background: task.status === 'complete' ? '#fff' : '#34C759', color: task.status === 'complete' ? T.text : '#fff', border: task.status === 'complete' ? '1px solid rgba(0,0,0,0.12)' : 'none' }} onClick={() => ctx.toggleComplete(task.id)}>{task.status === 'complete' ? 'Reopen' : 'Complete'}</Btn>
-        <Menu width={210} trigger={<Btn variant="secondary" icon="userPlus">Reassign</Btn>}>
-          {(close: any) => PEOPLE.map((p) => <Hover key={p.initials} as="button" onClick={() => { update({ assignee: p.initials }); ctx.toast('Reassigned to ' + p.name, 'success'); close(); }} style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', height: 34, padding: '0 10px', border: 'none', background: 'transparent', borderRadius: 8, cursor: 'pointer', fontSize: 13 }} hover={{ background: 'rgba(0,0,0,0.05)' }}><Avatar name={p.name} size={22} />{p.name}</Hover>)}
-        </Menu>
-        <Btn variant="ghost" icon="copy" onClick={() => ctx.duplicateTask(task.id)}>Duplicate</Btn>
-        <div style={{ flex: 1 }} />
-        <Btn variant="danger" icon="trash" onClick={() => ctx.deleteTask(task.id)}>Delete</Btn>
-      </div>
-    </aside>
-  </>;
+    </div>
+  </div>;
 }
 
 /* ============================ NEW TASK MODAL ============================ */
