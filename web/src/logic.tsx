@@ -193,7 +193,7 @@ export class QuickHireLogic extends React.Component<any, any> {
       const badge = badges[key];
       return {
         key, label, icon: this.ic(icon, 19),
-        onClick: () => key === 'tasks' ? this.setState({ taskDrawerOpen: true }) : this.go(key),
+        onClick: () => this.go(key),
         style: { ...base, background: bg, color },
         indicator: active ? '#007AFF' : 'transparent',
         weight: active ? 650 : 500,
@@ -218,6 +218,7 @@ export class QuickHireLogic extends React.Component<any, any> {
     const isCarriers = S.page === 'carriers';
     const isReports = S.page === 'reports';
     const isIntegrations = S.page === 'integrations';
+    const isTasks = S.page === 'tasks';
     const titles: Record<string, string> = { dashboard: 'Dashboard', pipeline: 'Hiring Pipeline', profile: 'Candidate Profile', drivers: 'Drivers', carriers: 'Carriers', compliance: 'Compliance', docusign: 'DocuSign', messages: 'Messages', tasks: 'Tasks', reports: 'Reports', settings: 'Settings' };
 
     const out: any = {
@@ -228,7 +229,7 @@ export class QuickHireLogic extends React.Component<any, any> {
       toggleCollapse: () => this.setState((s: any) => ({ collapsed: !s.collapsed })),
       pageTitle: titles[S.page] || 'QuickHire',
       isDashboard, isPipeline, isProfile, isDocusign, isCompliance, isMessages, isSettings,
-      isDrivers, isCarriers, isReports, isIntegrations,
+      isDrivers, isCarriers, isReports, isIntegrations, isTasks,
       icChevDown: this.ic('chevD', 15), icChevRight: this.ic('chevR', 15), icCollapse: this.ic('collapse', 18),
       icTaskTop: this.ic('list', 18), icRefresh: this.ic('refresh', 15), icCarrier: this.ic('carriers', 18), icCarrierLg: this.ic('carriers', 26), icBolt: this.ic('bolt', 11),
       openTasks: () => this.setState({ taskDrawerOpen: true }),
