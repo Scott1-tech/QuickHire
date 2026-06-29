@@ -1,10 +1,10 @@
 import React from 'react';
 import { Hover } from '../lib/dc';
 import {
-  T, Icon, Avatar, StatusChip, PriorityFlag, SourceChip, TagChip, CheckCircle, Toggle,
+  T, Icon, Avatar, StatusChip, StatusRing, PriorityFlag, SourceChip, TagChip, CheckCircle, Toggle,
   StatusSelect, PrioritySelect, AssigneeSelect, Menu, MenuItem, SegTabs, Btn,
-  STATUS, STATUS_ORDER, PRIORITY, SOURCE, RELATED_ICON, dueInfo, fmtDate, iso, addDays, startOfDay,
-  useTasksCtx,
+  STATUS, STATUS_ORDER, PRIORITY, SOURCE, RELATED_ICON, PALETTE, dueInfo, fmtDate, iso, addDays, startOfDay,
+  metaOf, columnKeys, useTasksCtx,
 } from './lib';
 import { PEOPLE, nameOf } from './data';
 
@@ -55,7 +55,7 @@ const COLS = '34px minmax(230px,2.2fr) 158px 60px 116px 124px 168px 150px 132px 
 const HEAD = ['', 'Task Name', 'Status', 'Assignee', 'Priority', 'Due Date', 'Related To', 'Carrier', 'Source', 'Tags', 'Last Activity', ''];
 
 function groupTasks(tasks: any[], grouping: string) {
-  if (grouping === 'status') return STATUS_ORDER.map((k) => ({ key: k, label: STATUS[k].label, dot: STATUS[k].dot, items: tasks.filter((t) => t.status === k) })).filter((g) => g.items.length);
+  if (grouping === 'status') return columnKeys().map((k) => { const m = metaOf(k); return { key: k, label: m.label, dot: m.dot, items: tasks.filter((t: any) => t.status === k) }; }).filter((g) => g.items.length);
   if (grouping === 'assignee') { const map: any = {}; tasks.forEach((t) => { (map[t.assignee] ||= []).push(t); }); return Object.keys(map).map((k) => ({ key: k, label: nameOf(k), items: map[k] })); }
   if (grouping === 'carrier') { const map: any = {}; tasks.forEach((t) => { const k = t.carrier || 'No carrier'; (map[k] ||= []).push(t); }); return Object.keys(map).map((k) => ({ key: k, label: k, items: map[k] })); }
   if (grouping === 'none') return [{ key: 'all', label: 'All Tasks', items: tasks }];
@@ -118,46 +118,67 @@ export function ListView({ tasks, grouping, selected, onToggle, onToggleMany }: 
 }
 
 /* ============================ BOARD VIEW ============================ */
-export function BoardView({ tasks }: any) {
+function ColumnMenu({ col, onRename, onRecolor, onRemove }: any) {
+  return <Menu align="right" width={240} trigger={<Hover as="span" style={{ display: 'inline-flex', width: 26, height: 26, alignItems: 'center', justifyContent: 'center', borderRadius: 7, color: T.faint, cursor: 'pointer' }} hover={{ background: 'rgba(0,0,0,0.06)' }}><Icon name="more" size={15} /></Hover>}>
+    {(close: any) => <div onClick={(e: any) => e.stopPropagation()} style={{ padding: '2px 4px' }}>
+      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.03em', textTransform: 'uppercase', color: T.faint, padding: '4px 6px' }}>Column name</div>
+      <input defaultValue={col.label} onChange={(e) => onRename(col.key, e.target.value)} style={{ width: '100%', height: 32, border: `1px solid ${T.border}`, borderRadius: 8, padding: '0 10px', fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.03em', textTransform: 'uppercase', color: T.faint, padding: '10px 6px 4px' }}>Color</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, padding: '2px 6px 8px' }}>
+        {PALETTE.map((c) => <button key={c} onClick={() => onRecolor(col.key, c)} style={{ width: 22, height: 22, borderRadius: 999, background: c, border: col.color === c ? '2px solid #1D1D1F' : '2px solid transparent', cursor: 'pointer', padding: 0 }} />)}
+      </div>
+      <div style={{ height: 1, background: T.hair, margin: '4px 4px' }} />
+      <MenuItem icon="trash" label="Delete column" danger onClick={() => { onRemove(col.key); close(); }} />
+    </div>}
+  </Menu>;
+}
+
+export function BoardView({ tasks, columns, onAdd, onRename, onRecolor, onRemove, onAddTask }: any) {
   const ctx = useTasksCtx();
   const onDrop = (e: any, status: string) => { e.preventDefault(); const id = e.dataTransfer.getData('text'); if (id) ctx.updateTask(id, { status }); };
+  const total = columns.length;
   return <div style={{ overflowX: 'auto', paddingBottom: 12 }}>
     <div style={{ display: 'flex', gap: 14, minWidth: 'max-content', alignItems: 'flex-start' }}>
-      {STATUS_ORDER.map((k) => {
-        const s = STATUS[k];
-        const items = tasks.filter((t: any) => t.status === k);
-        return <div key={k} onDragOver={(e) => e.preventDefault()} onDrop={(e) => onDrop(e, k)} style={{ width: 300, flex: 'none', background: '#F9FAFB', border: `1px solid ${T.hair}`, borderRadius: 14, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '13px 14px 10px' }}>
-            <span style={{ width: 8, height: 8, borderRadius: 999, background: s.dot }} />
-            <span style={{ fontSize: 13, fontWeight: 650 }}>{s.label}</span>
+      {columns.map((col: any, idx: number) => {
+        const items = tasks.filter((t: any) => t.status === col.key);
+        const fill = total > 1 ? idx / (total - 1) : 1;
+        return <div key={col.key} onDragOver={(e) => e.preventDefault()} onDrop={(e) => onDrop(e, col.key)} style={{ width: 300, flex: 'none', background: '#F9FAFB', border: `1px solid ${T.hair}`, borderRadius: 14, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 12px 10px' }}>
+            <StatusRing fill={fill} color={col.color} size={16} />
+            <span style={{ fontSize: 13, fontWeight: 650, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{col.label}</span>
             <span style={{ fontSize: 11.5, fontWeight: 600, color: T.muted, background: '#fff', border: `1px solid ${T.border}`, borderRadius: 999, padding: '1px 8px' }}>{items.length}</span>
+            <ColumnMenu col={col} onRename={onRename} onRecolor={onRecolor} onRemove={onRemove} />
           </div>
-          <div style={{ padding: '4px 10px 12px', display: 'flex', flexDirection: 'column', gap: 9, minHeight: 80 }}>
+          <div style={{ padding: '4px 10px 12px', display: 'flex', flexDirection: 'column', gap: 9, minHeight: 60 }}>
             {items.map((t: any) => {
-              const done = t.subtasks.filter((x: any) => x.done).length, total = t.subtasks.length;
-              return <Hover key={t.id} draggable onDragStart={(e: any) => e.dataTransfer.setData('text', t.id)} onClick={() => ctx.openTask(t.id)} style={{ background: '#fff', border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, cursor: 'pointer', transition: 'box-shadow .16s, transform .16s' }} hover={{ boxShadow: '0 6px 18px rgba(0,0,0,0.08)', transform: 'translateY(-1px)' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 650, lineHeight: 1.3 }}>{t.title}</span>
+              const done = t.subtasks.filter((x: any) => x.done).length, totalS = t.subtasks.length;
+              return <Hover key={t.id} draggable onDragStart={(e: any) => e.dataTransfer.setData('text', t.id)} onClick={() => ctx.openTask(t.id)} style={{ position: 'relative', background: '#fff', border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, cursor: 'pointer', transition: 'box-shadow .16s, transform .16s', overflow: 'hidden' }} hover={{ boxShadow: '0 6px 18px rgba(0,0,0,0.08)', transform: 'translateY(-1px)' }}>
+                <span style={{ position: 'absolute', top: 0, left: 0, width: 4, height: '100%', background: col.color }} />
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
+                  <span style={{ marginTop: 1 }}><StatusRing fill={fill} color={col.color} size={18} /></span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 650, lineHeight: 1.3 }}>{t.title}</span>
                   <PriorityFlag priority={t.priority} />
                 </div>
-                {t.related && <div style={{ marginTop: 7 }}><RelatedCell task={t} /></div>}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 9, flexWrap: 'wrap' }}>
+                {t.related && <div style={{ marginTop: 7, paddingLeft: 27 }}><RelatedCell task={t} /></div>}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 9, flexWrap: 'wrap', paddingLeft: 27 }}>
                   <SourceChip source={t.source} />
                   {t.tags.filter((tg: string) => SOURCE[t.source]?.label !== tg).slice(0, 1).map((tg: string) => <TagChip key={tg} label={tg} />)}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 11, paddingTop: 10, borderTop: `1px solid ${T.hair}` }}>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: T.faint, fontSize: 11.5 }}>
                     {t.due && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: dueInfo(t).color, fontWeight: 600 }}><Icon name="calendar" size={12} />{dueInfo(t).label}</span>}
-                    {total > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Icon name="listChecks" size={12} />{done}/{total}</span>}
+                    {totalS > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Icon name="listChecks" size={12} />{done}/{totalS}</span>}
                     {t.comments.length > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Icon name="message" size={12} />{t.comments.length}</span>}
                   </span>
                   <Avatar name={nameOf(t.assignee)} size={22} />
                 </div>
               </Hover>;
             })}
+            <Hover as="button" onClick={() => onAddTask(col.key)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 9, fontSize: 12.5, fontWeight: 600, color: T.muted, background: 'transparent', border: '1px dashed rgba(0,0,0,0.14)', borderRadius: 10, cursor: 'pointer' }} hover={{ background: 'rgba(0,0,0,0.03)', color: T.text }}><Icon name="plus" size={14} />Add task</Hover>
           </div>
         </div>;
       })}
+      <Hover as="button" onClick={onAdd} style={{ width: 168, flex: 'none', alignSelf: 'flex-start', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, height: 46, fontSize: 13, fontWeight: 600, color: T.muted, background: '#F9FAFB', border: `1px dashed rgba(0,0,0,0.16)`, borderRadius: 14, cursor: 'pointer' }} hover={{ background: 'rgba(0,0,0,0.03)', color: T.text }}><Icon name="plus" size={15} />Add status</Hover>
     </div>
   </div>;
 }
@@ -180,7 +201,7 @@ export function CalendarView({ tasks }: any) {
 
   const Pill = ({ t }: any) => <div onClick={(e) => { e.stopPropagation(); ctx.openTask(t.id); }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '2px 6px', borderRadius: 6, background: 'rgba(0,0,0,0.03)', cursor: 'pointer', fontSize: 11.5, marginBottom: 3 }}>
     <span style={{ width: 6, height: 6, borderRadius: 999, background: PRIORITY[t.priority].color, flex: 'none' }} />
-    <span style={{ width: 6, height: 6, borderRadius: 999, background: STATUS[t.status].dot, flex: 'none' }} />
+    <span style={{ width: 6, height: 6, borderRadius: 999, background: metaOf(t.status).dot, flex: 'none' }} />
     <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.title}</span>
   </div>;
 
@@ -214,7 +235,7 @@ export function CalendarView({ tasks }: any) {
     const items = byDay[iso(anchor)] || [];
     body = <div style={{ padding: 18 }}>{items.length === 0 ? <div style={{ color: T.faint, fontSize: 13, padding: 20, textAlign: 'center' }}>No tasks due this day.</div> : items.map((t: any) => (
       <Hover key={t.id} onClick={() => ctx.openTask(t.id)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderBottom: `1px solid ${T.hair}`, cursor: 'pointer' }} hover={{ background: T.hover }}>
-        <span style={{ width: 8, height: 8, borderRadius: 999, background: STATUS[t.status].dot }} />
+        <span style={{ width: 8, height: 8, borderRadius: 999, background: metaOf(t.status).dot }} />
         <span style={{ flex: 1, fontWeight: 600 }}>{t.title}</span>
         <RelatedCell task={t} /><PriorityFlag priority={t.priority} /><Avatar name={nameOf(t.assignee)} size={24} />
       </Hover>))}</div>;
@@ -272,7 +293,7 @@ export function TimelineView({ tasks }: any) {
             const left = Math.max(0, daysBetween(winStart, r.start)) * DAYW;
             const span = Math.max(1, daysBetween(r.start, r.due) + 1);
             const width = Math.min(span * DAYW, WEEKS * COLW - left);
-            const s = STATUS[r.t.status];
+            const s = metaOf(r.t.status);
             return <div key={r.t.id} style={{ height: 48, borderBottom: `1px solid ${T.hair}`, position: 'relative' }}>
               <Hover onClick={() => ctx.openTask(r.t.id)} style={{ position: 'absolute', top: 11, left: left + 4, width: Math.max(width - 8, 20), height: 26, borderRadius: 8, background: s.bg, border: `1px solid ${s.dot}33`, display: 'flex', alignItems: 'center', gap: 6, padding: '0 9px', cursor: 'pointer', overflow: 'hidden' }} hover={{ filter: 'brightness(0.97)' }}>
                 <span style={{ width: 6, height: 6, borderRadius: 999, background: s.dot, flex: 'none' }} />

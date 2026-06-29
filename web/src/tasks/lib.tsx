@@ -46,6 +46,21 @@ export const RELATED_ICON: Record<string, string> = {
   candidate: 'user', driver: 'truck', carrier: 'building', truck: 'truck', document: 'fileText', docusign: 'sign',
 };
 
+// Palette for custom column colors.
+export const PALETTE = ['#8E8E93', '#007AFF', '#FF9F0A', '#5856D6', '#34C759', '#FF3B30', '#0FB5AE', '#AF52DE', '#FF2D55', '#A05A00'];
+
+/* ---- status registry: lets the configurable Board columns drive status
+   labels/colors across the whole workspace without prop-threading ---- */
+let _statusReg: ((k: string) => any) | null = null;
+export function setStatusRegistry(fn: (k: string) => any) { _statusReg = fn; }
+let _colsReg: any[] | null = null;
+export function setColumnsRegistry(arr: any[]) { _colsReg = arr; }
+export function columnList(): any[] { return _colsReg || STATUS_ORDER.map((k) => ({ key: k, label: STATUS[k].label, color: STATUS[k].dot })); }
+export function columnKeys(): string[] { return columnList().map((c) => c.key); }
+export function hexToRgba(hex: string, a: number) { const h = hex.replace('#', ''); const f = h.length === 3 ? h.split('').map((c) => c + c).join('') : h; const n = parseInt(f, 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; }
+export function deriveMeta(key: string, label: string, color: string) { return { key, label, dot: color, bg: hexToRgba(color, 0.13), text: color }; }
+export function metaOf(key: string): any { if (_statusReg) { const m = _statusReg(key); if (m) return m; } return STATUS[key] || { key, label: key, bg: '#F2F2F7', text: '#6E6E73', dot: '#8E8E93' }; }
+
 /* ============================ Helpers ============================ */
 const AVATAR_COLORS = ['#007AFF', '#5856D6', '#34C759', '#FF9F0A', '#AF52DE', '#0FB5AE', '#FF2D55'];
 export function avatarColor(name = '') { let h = 0; for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0; return AVATAR_COLORS[h % AVATAR_COLORS.length]; }
@@ -164,8 +179,17 @@ export function IconBtn({ name, size = 34, icon = 16, title, onClick, active }: 
 }
 
 export function StatusChip({ status }: { status: string }) {
-  const s = STATUS[status];
+  const s = metaOf(status);
   return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 24, padding: '0 10px', borderRadius: 999, background: s.bg, color: s.text, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}><span style={{ width: 7, height: 7, borderRadius: 999, background: s.dot, flex: 'none' }} />{s.label}</span>;
+}
+
+// Pie-style status ring: empty → quarter → half → three-quarter → full, by column.
+export function StatusRing({ fill = 0, color = '#8E8E93', size = 18 }: { fill?: number; color?: string; size?: number }) {
+  const r = size / 2, ri = r - 3;
+  let wedge: any = null;
+  if (fill >= 1) wedge = <circle cx={r} cy={r} r={ri} fill={color} />;
+  else if (fill > 0) { const a = fill * 2 * Math.PI; const x = r + ri * Math.sin(a); const y = r - ri * Math.cos(a); const large = fill > 0.5 ? 1 : 0; wedge = <path d={`M ${r} ${r} L ${r} ${r - ri} A ${ri} ${ri} 0 ${large} 1 ${x} ${y} Z`} fill={color} />; }
+  return <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flex: 'none' }}><circle cx={r} cy={r} r={r - 1.25} fill="none" stroke={color} strokeOpacity={0.3} strokeWidth={2} />{wedge}</svg>;
 }
 
 export function PriorityFlag({ priority, withLabel }: { priority: string; withLabel?: boolean }) {
@@ -238,7 +262,7 @@ export function FilterSelect({ icon, label, value, options, onChange, width = 22
 /* ---- inline editors ---- */
 export function StatusSelect({ value, onChange }: any) {
   return <Menu width={184} trigger={<span style={{ cursor: 'pointer' }}><StatusChip status={value} /></span>}>
-    {(close: any) => STATUS_ORDER.map((k) => <MenuItem key={k} label={<StatusChip status={k} />} onClick={() => { onChange(k); close(); }} trailing={k === value ? <Icon name="check" size={14} style={{ color: '#007AFF' }} /> : null} />)}
+    {(close: any) => columnKeys().map((k) => <MenuItem key={k} label={<StatusChip status={k} />} onClick={() => { onChange(k); close(); }} trailing={k === value ? <Icon name="check" size={14} style={{ color: '#007AFF' }} /> : null} />)}
   </Menu>;
 }
 export function PrioritySelect({ value, onChange }: any) {
