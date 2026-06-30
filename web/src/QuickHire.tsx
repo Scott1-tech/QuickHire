@@ -9,6 +9,7 @@ import { EmploymentVerification } from './comms/pev';
 import AnnaWorkspace from './anna/AnnaWorkspace';
 import { AnnaSettings } from './anna/settings';
 import EsignWorkspace from './esign/EsignWorkspace';
+import { TopBar } from './shell/TopBar';
 import { CARRIER_LIST, CANDS } from './data';
 
 /**
@@ -82,16 +83,7 @@ export default class QuickHire extends QuickHireLogic {
               <span style={css('font-size:13.5px; font-weight:600; color:#1D1D1F; white-space:nowrap;')}>{v.pageTitle}</span>
             </div>
             <div style={css('flex:1;')}></div>
-            <H as="button" onClick={v.openPalette} style={css('display:flex; align-items:center; gap:9px; width:340px; max-width:38vw; height:38px; padding:0 12px; background:#FFFFFF; border:1px solid rgba(0,0,0,0.08); border-radius:12px; cursor:text; color:#8E8E93;')} hover={css('border-color:rgba(0,0,0,0.16);')}>
-              <span style={css('display:flex;')}>{v.icSearch}</span>
-              <span style={css('flex:1; text-align:left; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;')}>Search drivers, carriers, documents, tasks…</span>
-              <span style={css('font-size:11px; font-weight:600; color:#8E8E93; background:#F2F2F7; border:1px solid rgba(0,0,0,0.06); border-radius:6px; padding:2px 6px;')}>⌘K</span>
-            </H>
-            <div style={css('flex:1;')}></div>
-            <H as="button" onClick={v.primaryCreate} style={css('display:flex; align-items:center; gap:7px; height:38px; padding:0 14px; background:#007AFF; border:none; border-radius:10px; color:#fff; font-size:13.5px; font-weight:600; cursor:pointer;')} hover={css('background:#0066D6;')}>{v.icPlus}<span>Create</span></H>
-            <H as="button" onClick={v.openTasks} title="Tasks" style={css('position:relative; width:36px; height:36px; flex:none; display:flex; align-items:center; justify-content:center; background:#fff; border:1px solid rgba(0,0,0,0.08); border-radius:10px; color:#3a3a3c; cursor:pointer;')} hover={css('background:rgba(0,0,0,0.03);')}>{v.icTaskTop}<span style={css('position:absolute; top:-5px; right:-5px; min-width:17px; height:17px; padding:0 4px; border-radius:999px; background:#007AFF; color:#fff; font-size:10px; font-weight:700; display:flex; align-items:center; justify-content:center; border:1.5px solid #fff;')}>{v.taskCount}</span></H>
-            <H as="button" onClick={v.notify} title="Notifications" style={css('position:relative; width:36px; height:36px; flex:none; display:flex; align-items:center; justify-content:center; background:#fff; border:1px solid rgba(0,0,0,0.08); border-radius:10px; color:#3a3a3c; cursor:pointer;')} hover={css('background:rgba(0,0,0,0.03);')}>{v.icBell}<span style={css('position:absolute; top:7px; right:8px; width:7px; height:7px; border-radius:999px; background:#FF3B30; border:1.5px solid #fff;')}></span></H>
-            <div style={css('width:36px; height:36px; flex:none; border-radius:999px; background:linear-gradient(135deg,#007AFF,#4DA2FF); color:#fff; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:650; cursor:pointer;')}>NP</div>
+            <TopBar go={(p: string) => this.go(p)} openCandidate={(id: string) => this.openCand(id)} openTasks={() => this.setState({ taskDrawerOpen: true })} taskCount={v.taskCount} drivers={CANDS} carriers={CARRIER_LIST} toggleTheme={v.toggleTheme} themeDark={this.effTheme() === 'dark'} />
           </header>
 
           {/* SCROLL CONTENT */}
