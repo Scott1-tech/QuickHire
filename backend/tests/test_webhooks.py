@@ -11,9 +11,11 @@ def _sign(secret: str, body: bytes) -> str:
     return base64.b64encode(hmac.new(secret.encode(), body, hashlib.sha256).digest()).decode()
 
 
-def test_verify_open_when_no_secret_configured(monkeypatch):
+def test_verify_fails_closed_when_no_secret_configured(monkeypatch):
+    # No secret => caller cannot be authenticated => reject.
     monkeypatch.setitem(dconf.config, "webhookSecret", "")
-    assert verify_signature(b"{}", None) is True
+    assert verify_signature(b"{}", None) is False
+    assert verify_signature(b"{}", "anything") is False
 
 
 def test_verify_accepts_valid_signature(monkeypatch):
