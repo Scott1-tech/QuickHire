@@ -1,10 +1,10 @@
 import React from 'react';
 import { Hover } from '../lib/dc';
 import { T, Icon } from '../tasks/lib';
-import { FIELD_DEFS, FieldType, DOC_CATALOG } from './store';
+import { FIELD_DEFS, FieldType, DOC_CATALOG, docName, uploadPages } from './store';
 import { primaryBtn, ghostBtn, Modal } from './ui';
 
-const PAGE_W = 660;
+const PAGE_W = 680;
 
 /* Signer preview — lets the recruiter test the signer experience end-to-end. */
 export function SigningPreview({ env, recipient, onClose, onComplete }: any) {
@@ -61,13 +61,16 @@ export function SigningPreview({ env, recipient, onClose, onComplete }: any) {
     </div> : <>
       {/* doc tabs */}
       {(env.documentKeys || []).length > 1 && <div style={{ flex: 'none', display: 'flex', gap: 6, padding: '8px 16px', background: '#fff', borderBottom: `1px solid ${T.hair}`, overflowX: 'auto' }}>
-        {(env.documentKeys || []).map((k: string, i: number) => <button key={k + i} onClick={() => setActiveDoc(i)} style={{ height: 28, padding: '0 11px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', background: activeDoc === i ? 'rgba(0,122,255,0.1)' : 'transparent', color: activeDoc === i ? '#007AFF' : T.muted }}>{DOC_CATALOG[k]?.name || k}</button>)}
+        {(env.documentKeys || []).map((k: string, i: number) => <button key={k + i} onClick={() => setActiveDoc(i)} style={{ height: 28, padding: '0 11px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', background: activeDoc === i ? 'rgba(0,122,255,0.1)' : 'transparent', color: activeDoc === i ? '#007AFF' : T.muted }}>{docName(env, k)}</button>)}
       </div>}
       <div style={{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center', padding: '26px 0 80px' }}>
-        <div style={{ width: PAGE_W, position: 'relative', background: '#fff', borderRadius: 4, boxShadow: '0 6px 26px rgba(0,0,0,0.12)', padding: '50px 56px', minHeight: 860 }}>
-          <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', textTransform: 'uppercase' }}>{DOC_CATALOG[docKey]?.name || docKey}</div>
-          <div style={{ fontSize: 12, color: T.faint, textAlign: 'center', marginBottom: 24 }}>{env.carrier}</div>
-          {(DOC_CATALOG[docKey]?.body(env.carrier || 'GRAND ONE LLC') || []).map((p: string, i: number) => <p key={i} style={{ fontSize: 12.5, color: '#48484A', lineHeight: 1.9, margin: '0 0 14px' }}>{p}</p>)}
+        <div style={{ width: PAGE_W, position: 'relative', background: '#fff', borderRadius: 4, boxShadow: '0 6px 26px rgba(0,0,0,0.12)', padding: uploadPages(env, docKey) ? 0 : '50px 56px', minHeight: uploadPages(env, docKey) ? undefined : 860, overflow: 'hidden' }}>
+          {uploadPages(env, docKey) ? (uploadPages(env, docKey) || []).map((pg: any, i: number) => <img key={i} src={pg.dataUrl} draggable={false} style={{ display: 'block', width: PAGE_W, height: pg.h, userSelect: 'none' }} />)
+            : <>
+              <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', textTransform: 'uppercase' }}>{docName(env, docKey)}</div>
+              <div style={{ fontSize: 12, color: T.faint, textAlign: 'center', marginBottom: 24 }}>{env.carrier}</div>
+              {(DOC_CATALOG[docKey]?.body(env.carrier || 'GRAND ONE LLC') || []).map((p: string, i: number) => <p key={i} style={{ fontSize: 12.5, color: '#48484A', lineHeight: 1.9, margin: '0 0 14px' }}>{p}</p>)}
+            </>}
           {(env.fields || []).filter((f: any) => f.docKey === docKey).map((f: any) => {
             const mine = f.recipientId === signer?.id && FIELD_DEFS[f.type as FieldType]?.signer && !f.locked;
             const filled = !!values[f.id];

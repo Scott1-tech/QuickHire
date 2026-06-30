@@ -1,7 +1,7 @@
 import React from 'react';
 import { Hover } from '../lib/dc';
 import { T, Icon } from '../tasks/lib';
-import { FIELD_DEFS, FieldType, AUTOFILL_GROUPS, DOC_CATALOG, findOverlaps, uid, validateEnvelope, colorFor } from './store';
+import { FIELD_DEFS, FieldType, AUTOFILL_GROUPS, DOC_CATALOG, findOverlaps, uid, validateEnvelope, colorFor, docName, uploadPages } from './store';
 import { primaryBtn, ghostBtn, Toggle } from './ui';
 
 const PAGE_W = 680;
@@ -28,6 +28,7 @@ type Props = {
 
 export function DocumentEditor({ title, subtitle, value, onChange, onClose, onSave, onSend, onPreview, sendLabel = 'Send' }: Props) {
   const { documentKeys, recipients, fields, carrier = 'GRAND ONE LLC' } = value;
+  const env = value as any;
   const [armed, setArmed] = React.useState<FieldType | ''>('');
   const [armedAutofill, setArmedAutofill] = React.useState<{ key: string; label: string } | null>(null);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
@@ -166,7 +167,7 @@ export function DocumentEditor({ title, subtitle, value, onChange, onClose, onSa
       <div style={{ flex: 1, minWidth: 0, overflow: 'auto', position: 'relative' }} onClick={() => setSelectedId(null)}>
         {/* doc tabs + zoom */}
         <div style={{ position: 'sticky', top: 0, zIndex: 5, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', background: 'rgba(245,246,248,0.9)', backdropFilter: 'blur(8px)', borderBottom: `1px solid ${T.hair}` }} onClick={(e) => e.stopPropagation()}>
-          {documentKeys.map((k, i) => <button key={k + i} onClick={() => setActiveDoc(i)} style={{ height: 28, padding: '0 11px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: activeDoc === i ? '#fff' : 'transparent', color: activeDoc === i ? T.text : T.muted, boxShadow: activeDoc === i ? '0 1px 2px rgba(0,0,0,0.1)' : 'none' }}>{DOC_CATALOG[k]?.name || k}</button>)}
+          {documentKeys.map((k, i) => <button key={k + i} onClick={() => setActiveDoc(i)} style={{ height: 28, padding: '0 11px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: activeDoc === i ? '#fff' : 'transparent', color: activeDoc === i ? T.text : T.muted, boxShadow: activeDoc === i ? '0 1px 2px rgba(0,0,0,0.1)' : 'none' }}>{docName(env, k)}</button>)}
           <div style={{ flex: 1 }} />
           {(armed || armedAutofill) && <span style={{ fontSize: 11.5, color: '#007AFF', fontWeight: 600, marginRight: 8 }}>Click the page to place {armedAutofill?.label || FIELD_DEFS[armed as FieldType]?.label}</span>}
           <Hover as="button" onClick={() => setZoom((z) => Math.max(0.6, +(z - 0.1).toFixed(2)))} style={iconBtn} hover={{ background: 'rgba(0,0,0,0.05)' }}><Icon name="x" size={13} style={{ display: 'none' }} /><span style={{ fontSize: 16, fontWeight: 600 }}>−</span></Hover>
@@ -177,7 +178,7 @@ export function DocumentEditor({ title, subtitle, value, onChange, onClose, onSa
 
         <div style={{ display: 'flex', justifyContent: 'center', padding: '28px 0 80px' }}>
           <div style={{ width: PAGE_W * zoom }}>
-            <DocPage docKey={docKey} carrier={carrier} zoom={zoom}
+            <DocPage docKey={docKey} carrier={carrier} zoom={zoom} pages={uploadPages(env, docKey)}
               armed={!!(armed || armedAutofill)}
               onPlace={(x: number, y: number, el: HTMLElement) => placeAt(x, y, el)}
               fields={docFields} recipients={recipients} selectedId={selectedId} overlapSet={overlapSet}
@@ -218,14 +219,18 @@ export function DocumentEditor({ title, subtitle, value, onChange, onClose, onSa
 function PanelLabel({ children }: any) { return <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: T.faint, marginBottom: 10 }}>{children}</div>; }
 const iconBtn: React.CSSProperties = { width: 32, height: 32, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: 'none', background: 'transparent', color: T.muted, cursor: 'pointer' };
 
-function DocPage({ docKey, carrier, zoom, armed, onPlace, fields, recipients, selectedId, overlapSet, onSelect, onStartMove, onStartResize }: any) {
+function DocPage({ docKey, carrier, zoom, armed, onPlace, fields, recipients, selectedId, overlapSet, onSelect, onStartMove, onStartResize, pages }: any) {
   const def = DOC_CATALOG[docKey];
   const ref = React.useRef<HTMLDivElement>(null);
+  const isUpload = !!(pages && pages.length);
   return <div ref={ref} onClick={(e) => { if (armed && ref.current) { e.stopPropagation(); onPlace(e.clientX, e.clientY, ref.current); } }}
-    style={{ width: PAGE_W, transform: `scale(${zoom})`, transformOrigin: 'top center', position: 'relative', background: '#fff', borderRadius: 4, boxShadow: '0 6px 26px rgba(0,0,0,0.12)', padding: '54px 60px', minHeight: 880, cursor: armed ? 'crosshair' : 'default' }}>
-    <div style={{ fontSize: 19, fontWeight: 700, textAlign: 'center', textTransform: 'uppercase' }}>{def?.name || docKey}</div>
-    <div style={{ fontSize: 12, color: T.faint, textAlign: 'center', marginBottom: 26 }}>{carrier}</div>
-    {(def?.body(carrier) || []).map((p: string, i: number) => <p key={i} style={{ fontSize: 12.5, color: '#48484A', lineHeight: 1.9, margin: '0 0 14px' }}>{p}</p>)}
+    style={{ width: PAGE_W, transform: `scale(${zoom})`, transformOrigin: 'top center', position: 'relative', background: '#fff', borderRadius: 4, boxShadow: '0 6px 26px rgba(0,0,0,0.12)', padding: isUpload ? 0 : '54px 60px', minHeight: isUpload ? undefined : 880, overflow: 'hidden', cursor: armed ? 'crosshair' : 'default' }}>
+    {isUpload ? pages.map((pg: any, i: number) => <img key={i} src={pg.dataUrl} draggable={false} style={{ display: 'block', width: PAGE_W, height: pg.h, borderBottom: i < pages.length - 1 ? '1px solid rgba(0,0,0,0.08)' : 'none', userSelect: 'none' }} />)
+      : <>
+        <div style={{ fontSize: 19, fontWeight: 700, textAlign: 'center', textTransform: 'uppercase' }}>{def?.name || docKey}</div>
+        <div style={{ fontSize: 12, color: T.faint, textAlign: 'center', marginBottom: 26 }}>{carrier}</div>
+        {(def?.body(carrier) || []).map((p: string, i: number) => <p key={i} style={{ fontSize: 12.5, color: '#48484A', lineHeight: 1.9, margin: '0 0 14px' }}>{p}</p>)}
+      </>}
     {/* placed fields */}
     {fields.map((f: any) => {
       const sel = f.id === selectedId; const bad = overlapSet.has(f.id);

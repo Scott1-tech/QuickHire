@@ -271,7 +271,7 @@ export const svc = {
       subject: partial.subject || '', message: partial.message || '', reminderEveryDays: store.settings.reminders.everyDays,
       maxReminders: store.settings.reminders.maxCount, remindersSent: 0, expiresAt: daysFromNow(store.settings.expiration.days),
       createdAt: nowIso(), updatedAt: nowIso(), lastActivity: nowIso(), driverName: partial.driverName || '', carrier: partial.carrier || '',
-      audit: [], certificate: null,
+      audit: [], certificate: null, uploads: partial.uploads || {},
     };
     audit(env, 'created', 'Envelope created');
     store.envelopes.unshift(env); emit();
@@ -279,6 +279,18 @@ export const svc = {
     return env;
   },
   updateEnvelope(id: string, patch: any) { const e = this.envelope(id); if (!e) return; Object.assign(e, patch); e.updatedAt = nowIso(); emit(); },
+
+  /** Register an uploaded+rendered PDF onto an envelope; returns its doc key. */
+  addUpload(id: string, rendered: any) {
+    const e = this.envelope(id); if (!e) return null;
+    const key = uid('upload');
+    e.uploads = { ...(e.uploads || {}), [key]: rendered };
+    e.documentKeys = [...(e.documentKeys || []), key];
+    if (e.title === 'Untitled envelope') e.title = rendered.name || 'Uploaded document';
+    audit(e, 'created', `Uploaded "${rendered.name}" (${(rendered.pages || []).length} page${(rendered.pages || []).length === 1 ? '' : 's'})`);
+    emit();
+    return key;
+  },
   saveDraft(id: string) { const e = this.envelope(id); if (!e) return; if (e.status === 'draft') audit(e, 'draft_saved', 'Draft saved'); emit(); bg(esignApi.saveDraft(id, e)); },
 
   send(id: string) {
@@ -397,3 +409,14 @@ export function fmtAgo(iso: string) {
 }
 export function fmtDate(iso: string) { if (!iso) return '—'; return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }); }
 export function daysUntil(iso: string) { if (!iso) return null; return Math.ceil((+new Date(iso) - Date.now()) / 864e5); }
+
+/** Display name for a document key, resolving uploaded PDFs from the envelope. */
+export function docName(env: any, key: string) {
+  if (key && key.startsWith('upload_')) return env?.uploads?.[key]?.name || 'Uploaded document';
+  return DOC_CATALOG[key]?.name || key;
+}
+/** Rendered pages for an uploaded doc, or null for catalog documents. */
+export function uploadPages(env: any, key: string) {
+  if (key && key.startsWith('upload_')) return env?.uploads?.[key]?.pages || [];
+  return null;
+}

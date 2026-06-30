@@ -5,6 +5,7 @@ import { store, svc, DOC_CATALOG, DOC_KEYS, defaultFieldsFor, uid, colorFor, val
 import { Modal, Field, Input, Textarea, Select, primaryBtn, ghostBtn, StatusPill } from './ui';
 import { DocumentEditor } from './editor';
 import { SigningPreview } from './signing';
+import { renderPdf } from './pdf';
 
 const STEPS = ['Documents', 'Recipients', 'Prepare', 'Review & Send'];
 
@@ -64,6 +65,8 @@ export function EnvelopeBuilder({ envId, onClose, onSent, toast }: any) {
 
 function DocumentsStep({ env, patch, toast }: any) {
   const keys: string[] = env.documentKeys || [];
+  const [uploading, setUploading] = React.useState(false);
+  const fileRef = React.useRef<HTMLInputElement>(null);
   const toggle = (k: string) => {
     const next = keys.includes(k) ? keys.filter((x) => x !== k) : [...keys, k];
     const signer = (env.recipients || []).find((r: any) => r.role === 'signer')?.id || (env.recipients[0] || {}).id || 'r1';
@@ -73,13 +76,39 @@ function DocumentsStep({ env, patch, toast }: any) {
     added.forEach((k2) => { fields = [...fields, ...defaultFieldsFor(k2, signer)]; });
     patch({ documentKeys: next, fields, title: env.title === 'Untitled envelope' && next.length ? DOC_CATALOG[next[0]].name : env.title });
   };
+  const onFile = async (file?: File) => {
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) { toast?.('Please choose a PDF file', 'error'); return; }
+    setUploading(true);
+    try {
+      const rendered = await renderPdf(file);
+      svc.addUpload(env.id, rendered);
+      patch({}); // re-render the builder
+      toast?.(`Uploaded ${rendered.name} (${rendered.pages.length} page${rendered.pages.length === 1 ? '' : 's'})`, 'success');
+    } catch (e: any) {
+      toast?.('Could not read that PDF', 'error');
+    } finally { setUploading(false); if (fileRef.current) fileRef.current.value = ''; }
+  };
+  const uploadKeys = keys.filter((k) => k.startsWith('upload_'));
   return <>
-    <SectionTitle title="Choose documents" desc="Pick from QuickHire's onboarding library, a template, or a package. Uploading a PDF is simulated in preview mode." />
+    <SectionTitle title="Choose documents" desc="Upload your own PDF, or pick from QuickHire's onboarding library, a template, or a package." />
+    <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }} onChange={(e) => onFile(e.target.files?.[0])} />
     <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-      <Hover as="button" onClick={() => toast?.('PDF upload is simulated in preview mode', 'info')} style={ghostBtn} hover={{ background: 'rgba(0,0,0,0.04)' }}><Icon name="upload" size={15} />Upload PDF</Hover>
+      <Hover as="button" onClick={() => fileRef.current?.click()} style={{ ...ghostBtn, opacity: uploading ? 0.6 : 1 }} hover={{ background: 'rgba(0,0,0,0.04)' }}><Icon name={uploading ? 'refresh' : 'upload'} size={15} />{uploading ? 'Rendering PDF…' : 'Upload PDF'}</Hover>
       <SmallMenu label="Use template" icon="copy" items={store.templates.map((t: any) => ({ label: t.name, onClick: () => { const fields = defaultFieldsFor(t.documentKey, (env.recipients[0] || {}).id || 'r1'); patch({ documentKeys: [...new Set([...keys, t.documentKey])], fields: [...env.fields.filter((f: any) => f.docKey !== t.documentKey), ...fields], title: t.name }); } }))} />
       <SmallMenu label="Use package" icon="briefcase" items={store.packages.map((p: any) => ({ label: p.name, onClick: () => { const signer = (env.recipients[0] || {}).id || 'r1'; let fields: any[] = []; p.documentKeys.forEach((k: string) => fields.push(...defaultFieldsFor(k, signer))); patch({ documentKeys: [...p.documentKeys], fields, title: p.name }); } }))} />
     </div>
+    {uploadKeys.length > 0 && <div style={{ marginBottom: 16 }}>
+      <div style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: '0.02em', textTransform: 'uppercase', color: T.faint, marginBottom: 8 }}>Uploaded</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {uploadKeys.map((k) => { const up = env.uploads?.[k]; return <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: 12, borderRadius: 12, border: '1.5px solid #34C759', background: 'rgba(52,199,89,0.05)' }}>
+          <span style={{ width: 34, height: 34, flex: 'none', borderRadius: 9, background: '#34C759', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="fileText" size={16} /></span>
+          <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{up?.name || 'Uploaded PDF'}</div><div style={{ fontSize: 11.5, color: T.faint }}>{(up?.pages || []).length} page{(up?.pages || []).length === 1 ? '' : 's'} · your document</div></div>
+          <Hover as="button" onClick={() => { const next = keys.filter((x) => x !== k); const ups = { ...(env.uploads || {}) }; delete ups[k]; patch({ documentKeys: next, fields: (env.fields || []).filter((f: any) => f.docKey !== k), uploads: ups }); }} style={{ width: 30, height: 30, borderRadius: 8, border: 'none', background: 'transparent', color: '#C62820', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} hover={{ background: 'rgba(255,59,48,0.08)' }}><Icon name="trash" size={15} /></Hover>
+        </div>; })}
+      </div>
+    </div>}
+    <div style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: '0.02em', textTransform: 'uppercase', color: T.faint, marginBottom: 8 }}>Document library</div>
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
       {DOC_KEYS.map((k) => { const on = keys.includes(k); const d = DOC_CATALOG[k]; return <Hover key={k} as="button" onClick={() => toggle(k)} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: 12, borderRadius: 12, border: `1.5px solid ${on ? '#007AFF' : T.border}`, background: on ? 'rgba(0,122,255,0.04)' : '#fff', cursor: 'pointer', textAlign: 'left' }} hover={{ background: on ? 'rgba(0,122,255,0.06)' : 'rgba(0,0,0,0.02)' }}>
         <span style={{ width: 34, height: 34, flex: 'none', borderRadius: 9, background: on ? '#007AFF' : '#F2F2F7', color: on ? '#fff' : T.muted, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="fileText" size={16} /></span>
