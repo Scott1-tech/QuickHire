@@ -1,7 +1,8 @@
 import React from 'react';
 import { Hover } from '../lib/dc';
 import { T, Icon, SegTabs, useToasts, ToastHost } from '../tasks/lib';
-import { useEsign, svc, STATUS_META, ACTION_STATUSES, DOC_CATALOG, fmtAgo, fmtDate, daysUntil, validateEnvelope } from './store';
+import { useEsign, svc, STATUS_META, ACTION_STATUSES, DOC_CATALOG, fmtAgo, fmtDate, daysUntil, validateEnvelope, docName } from './store';
+import { renderPdf } from './pdf';
 import { BG, Card, StatusPill, Modal, Confirm, EmptyState, primaryBtn, ghostBtn, Toggle, Input, Textarea, Select, SettingRow, Field } from './ui';
 import { EnvelopeBuilder, PackageModal, SendPackageModal } from './builder';
 import { SigningPreview } from './signing';
@@ -22,9 +23,24 @@ export default function EsignWorkspace({ drivers = [], go }: { drivers?: any[]; 
   const [sendPkg, setSendPkg] = React.useState<any>(null);
   const [confirm, setConfirm] = React.useState<any>(null);
 
+  const [uploading, setUploading] = React.useState(false);
+  const fileRef = React.useRef<HTMLInputElement>(null);
   const counts = svc.counts();
   const startEnvelope = () => { const env = svc.createEnvelope({}); setBuilderId(env.id); };
   const openAgreementsWith = (f: string) => { setFilter(f); setTab('agreements'); };
+  const onUploadFile = async (file?: File) => {
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) { toast('Please choose a PDF file', 'error'); return; }
+    setUploading(true);
+    try {
+      const rendered = await renderPdf(file);
+      const env = svc.createEnvelope({});
+      svc.addUpload(env.id, rendered);
+      setBuilderId(env.id);
+      toast(`Uploaded ${rendered.name} (${rendered.pages.length} page${rendered.pages.length === 1 ? '' : 's'})`, 'success');
+    } catch { toast('Could not read that PDF', 'error'); }
+    finally { setUploading(false); if (fileRef.current) fileRef.current.value = ''; }
+  };
 
   const tabs = [
     { key: 'home', label: 'Home', icon: 'layout' },
@@ -36,6 +52,7 @@ export default function EsignWorkspace({ drivers = [], go }: { drivers?: any[]; 
 
   return <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: BG }}>
     <ToastHost toasts={toasts} />
+    <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }} onChange={(e) => onUploadFile(e.target.files?.[0])} />
     <div style={{ flex: 'none', padding: '22px 28px 0' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
         <span style={{ width: 44, height: 44, flex: 'none', borderRadius: 12, background: '#007AFF', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="sign" size={22} /></span>
@@ -53,7 +70,7 @@ export default function EsignWorkspace({ drivers = [], go }: { drivers?: any[]; 
 
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '18px 28px 28px' }}>
       {tab === 'home' && <Home counts={counts} store={store} onCard={openAgreementsWith} onOpen={setOpenId} onStart={startEnvelope}
-        onUpload={() => { toast('PDF upload is simulated — starting a new envelope', 'info'); startEnvelope(); }}
+        uploading={uploading} onUpload={() => fileRef.current?.click()}
         onSendPackage={() => setSendPkg({})} onUseTemplate={() => setTab('templates')} />}
       {tab === 'agreements' && <Agreements store={store} filter={filter} setFilter={setFilter} onOpen={setOpenId} onAction={handleRowAction} />}
       {tab === 'templates' && <Templates store={store} toast={toast} onUse={(t: any) => setSendPkg({ template: t })} onEdit={(t: any) => setEditTemplate(t)} setConfirm={setConfirm} />}
@@ -101,7 +118,7 @@ function CorrectEditor({ envId, onClose, toast }: any) {
 }
 
 /* ───────────────────────── HOME ───────────────────────── */
-function Home({ counts, store, onCard, onOpen, onStart, onUpload, onSendPackage, onUseTemplate }: any) {
+function Home({ counts, store, onCard, onOpen, onStart, onUpload, onSendPackage, onUseTemplate, uploading }: any) {
   const cards = [
     { key: 'action', label: 'Action Required', desc: 'Drafts, missing fields & failed sends', icon: 'alert', color: '#FF9500', count: counts.action, filter: 'action' },
     { key: 'waiting', label: 'Waiting for Others', desc: 'Sent and awaiting signature', icon: 'clock', color: '#007AFF', count: counts.waiting, filter: 'waiting' },
@@ -111,7 +128,7 @@ function Home({ counts, store, onCard, onOpen, onStart, onUpload, onSendPackage,
   const quick = [
     { label: 'Start Envelope', icon: 'plus', onClick: onStart },
     { label: 'Send Offer Package', icon: 'briefcase', onClick: onSendPackage },
-    { label: 'Upload PDF', icon: 'upload', onClick: onUpload },
+    { label: uploading ? 'Rendering PDF…' : 'Upload PDF', icon: uploading ? 'refresh' : 'upload', onClick: onUpload },
     { label: 'Use Template', icon: 'copy', onClick: onUseTemplate },
   ];
   const recent = [...store.envelopes].sort((a: any, b: any) => +new Date(b.lastActivity) - +new Date(a.lastActivity)).slice(0, 6);
@@ -278,7 +295,7 @@ function DetailDrawer({ id, onClose, onAction, toast }: any) {
 
         <Box>
           <Label icon="fileText">Documents ({(e.documentKeys || []).length})</Label>
-          {(e.documentKeys || []).map((k: string) => <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', fontSize: 13 }}><Icon name="fileText" size={14} style={{ color: T.faint }} />{DOC_CATALOG[k]?.name || k}</div>)}
+          {(e.documentKeys || []).map((k: string) => <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', fontSize: 13 }}><Icon name="fileText" size={14} style={{ color: T.faint }} />{docName(e, k)}</div>)}
           <div style={{ fontSize: 11.5, color: T.faint, marginTop: 6 }}>{signed}/{(e.recipients || []).filter((r: any) => r.role === 'signer').length} signers complete · {fieldTotal} fields placed</div>
         </Box>
 
