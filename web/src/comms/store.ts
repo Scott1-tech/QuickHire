@@ -1,5 +1,6 @@
 import React from 'react';
 import { addExternalTask } from '../tasks/bus';
+import { api, bg } from './api';
 
 /* ============================================================================
    QuickHire unified communications + FMCSA store
@@ -143,15 +144,15 @@ export const svc = {
   // GET /api/ringcentral/numbers
   numbers() { return store.rcNumbers; },
   // PATCH /api/ringcentral/numbers/:id/settings
-  patchNumber(id: string, patch: any) { const n = rcNumber(id); if (n) Object.assign(n, patch); emit(); return n; },
+  patchNumber(id: string, patch: any) { const n = rcNumber(id); if (n) Object.assign(n, patch); bg(api.patchNumber(id, patch)); emit(); return n; },
   syncNumbers() { const a = store.accounts.find((x) => x.type === 'ringcentral'); if (a) a.lastSyncAt = new Date().toISOString(); emit(); return store.rcNumbers; },
   // POST /api/ringcentral/test-sms
-  testSms(numberId: string) { emit(); return { ok: true, number: rcNumber(numberId)?.phoneNumber }; },
+  testSms(numberId: string) { bg(api.testSms(rcNumber(numberId)?.phoneNumber || '')); emit(); return { ok: true, number: rcNumber(numberId)?.phoneNumber }; },
 
   // GET /api/email/inboxes  + PATCH settings
   inboxes() { return store.emailInboxes; },
-  patchInbox(id: string, patch: any) { const n = inbox(id); if (n) Object.assign(n, patch); emit(); return n; },
-  testEmail(inboxId: string) { emit(); return { ok: true, inbox: inbox(inboxId)?.emailAddress }; },
+  patchInbox(id: string, patch: any) { const n = inbox(id); if (n) Object.assign(n, patch); bg(api.patchInbox(id, patch)); emit(); return n; },
+  testEmail(inboxId: string) { bg(api.testEmail(inbox(inboxId)?.emailAddress || '')); emit(); return { ok: true, inbox: inbox(inboxId)?.emailAddress }; },
 
   // GET /api/drivers/:id/messages
   messagesFor(contactId: string) { return store.messages.filter((m) => m.contactId === contactId).sort((a, b) => +new Date(a.time) - +new Date(b.time)); },
@@ -164,6 +165,7 @@ export const svc = {
     const fail = opts.simulateFail || /\bFAILTEST\b/.test(body);
     const m = { id: uid('sms'), contactId, channel: 'sms', direction: 'outbound', from: n?.phoneNumber || '', to: c?.phone || '', via: fromNumberId, recruiter: opts.recruiter || 'Nina Patel', body, status: fail ? 'failed' : 'sent', time: new Date().toISOString(), read: true, needsReply: false, attachments: [] };
     store.messages.push(m);
+    bg(api.driverSms(contactId, { to: c?.phone, body, from: fromNumberId }));
     if (!fail) setTimeout(() => { m.status = 'delivered'; emit(); }, 900);
     if (fail) this._task({ title: `Failed SMS — ${c?.name}`, contactId, priority: 'high', tags: ['Message', 'Follow-up'], related: c?.name, alert: true });
     if (opts.followUp) this._task({ title: `Follow up — ${c?.name}`, contactId, related: c?.name, tags: ['Follow-up'] });
@@ -175,6 +177,7 @@ export const svc = {
     const c = contact(contactId); const n = rcNumber(fromNumberId);
     const m = { id: uid('call'), contactId, channel: outcome === 'left_voicemail' ? 'voicemail' : 'call', direction: 'outbound', from: n?.phoneNumber || '', to: c?.phone || '', via: fromNumberId, recruiter: opts.recruiter || 'Nina Patel', body: note || CALL_OUTCOMES.find((o) => o.key === outcome)?.label || 'Call', callOutcome: outcome, durationSec: opts.durationSec || 0, status: 'completed', time: new Date().toISOString(), read: true, needsReply: false };
     store.messages.push(m);
+    bg(api.driverCall(contactId, { to: c?.phone, outcome, notes: note, from: fromNumberId }));
     if (outcome === 'no_answer' || outcome === 'follow_up' || outcome === 'left_voicemail') this._task({ title: `Call driver back — ${c?.name}`, contactId, related: c?.name, tags: ['Follow-up'] });
     if (outcome === 'bad_number') this._task({ title: `Bad number — verify contact for ${c?.name}`, contactId, related: c?.name, priority: 'high', tags: ['Follow-up'], alert: true });
     emit(); return m;
@@ -186,6 +189,7 @@ export const svc = {
     const fail = opts.simulateFail;
     const m = { id: uid('em'), contactId, channel: 'email', direction: 'outbound', from: i?.emailAddress || '', to: c?.email || '', via: fromInboxId, recruiter: opts.recruiter || 'Nina Patel', subject, body, status: fail ? 'failed' : 'sent', time: new Date().toISOString(), read: true, needsReply: false, attachments: opts.attachments || [] };
     store.messages.push(m);
+    bg(api.driverSms(contactId, { to: c?.phone, body, from: fromNumberId }));
     if (!fail) setTimeout(() => { m.status = 'delivered'; emit(); }, 900);
     if (fail) this._task({ title: `Failed email — ${c?.name}`, contactId, priority: 'high', tags: ['Follow-up'], related: c?.name, alert: true });
     if (opts.followUp) this._task({ title: `Follow up — ${c?.name}`, contactId, related: c?.name, tags: ['Follow-up'] });
@@ -255,8 +259,8 @@ export const svc = {
 
   // GET/POST/DELETE /api/fmcsa/watchlist
   watchlist() { return store.watchlist; },
-  addWatch(snap: any) { if (store.watchlist.some((w) => w.dotNumber === snap.dotNumber)) return; store.watchlist.push({ id: uid('w'), dotNumber: snap.dotNumber, mcNumber: snap.mcNumber, name: snap.legalName, authorityStatus: snap.authorityStatus, safetyRating: snap.safetyRating, powerUnits: snap.powerUnits, drivers: snap.drivers, addedAt: new Date().toISOString(), lastChecked: new Date().toISOString(), change: null }); emit(); },
-  removeWatch(id: string) { store.watchlist = store.watchlist.filter((w) => w.id !== id); emit(); },
+  addWatch(snap: any) { if (store.watchlist.some((w) => w.dotNumber === snap.dotNumber)) return; bg(api.addWatch(snap)); store.watchlist.push({ id: uid('w'), dotNumber: snap.dotNumber, mcNumber: snap.mcNumber, name: snap.legalName, authorityStatus: snap.authorityStatus, safetyRating: snap.safetyRating, powerUnits: snap.powerUnits, drivers: snap.drivers, addedAt: new Date().toISOString(), lastChecked: new Date().toISOString(), change: null }); emit(); },
+  removeWatch(id: string) { bg(api.removeWatch(id)); store.watchlist = store.watchlist.filter((w) => w.id !== id); emit(); },
   // simulate a watchlist check that surfaces a change → notif + task
   checkWatch(id: string) {
     const w = store.watchlist.find((x) => x.id === id); if (!w) return;

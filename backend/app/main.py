@@ -20,6 +20,7 @@ from .routers import candidates as candidates_router
 from .routers import carriers as carriers_router
 from .routers import config as config_router
 from .routers import docusign as docusign_router
+from .routers import integrations as integrations_router
 from .routers import misc as misc_router
 
 
@@ -90,6 +91,7 @@ app.include_router(carriers_router.router)
 app.include_router(misc_router.router)
 app.include_router(anna_router.router)
 app.include_router(docusign_router.router)
+app.include_router(integrations_router.router)
 
 
 # ── Page redirects (parity with server.js) ───────────────────────────────────
