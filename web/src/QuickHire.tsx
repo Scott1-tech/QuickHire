@@ -6,6 +6,8 @@ import MessagesWorkspace from './comms/MessagesWorkspace';
 import { IntegrationSettings } from './comms/settings';
 import { CarrierFmcsaPanel } from './comms/fmcsa';
 import { EmploymentVerification } from './comms/pev';
+import AnnaWorkspace from './anna/AnnaWorkspace';
+import { AnnaSettings } from './anna/settings';
 import { CARRIER_LIST, CANDS } from './data';
 
 /**
@@ -105,6 +107,7 @@ export default class QuickHire extends QuickHireLogic {
             {v.isReports && this.renderReports(v)}
             {v.isIntegrations && this.renderIntegrationsPage(v)}
             {v.isTasks && <TasksWorkspace />}
+            {v.isAnna && <AnnaWorkspace go={(page: string, payload?: any) => this.annaGo(page, payload)} />}
           </main>
         </div>
 
@@ -117,6 +120,20 @@ export default class QuickHire extends QuickHireLogic {
         {this.renderToasts(v)}
       </div>
     );
+  }
+
+  /** Navigation bridge for Anna's chat actions (navigate / open record / settings). */
+  annaGo(page: string, payload?: any) {
+    const map: Record<string, string> = { hiring: 'pipeline', inbox: 'messages', notifications: 'dashboard', trucks: 'drivers' };
+    const target = map[page] || page;
+    if (target === 'settings') { this.setState({ page: 'settings', settingsSection: payload?.section || 'company', paletteOpen: false }); return; }
+    if (target === 'profile' && payload?.name) {
+      const q = String(payload.name).toLowerCase();
+      const hit = CANDS.find((c: any) => c.name.toLowerCase().includes(q));
+      if (hit) { this.openCand(hit.id); return; }
+      this.go('pipeline'); this.toast('No match', 'Could not find “' + payload.name + '” in the pipeline', 'warning'); return;
+    }
+    this.go(target);
   }
 
   // ===================== DASHBOARD =====================
@@ -577,6 +594,7 @@ export default class QuickHire extends QuickHireLogic {
   renderSettings(v: any) {
     const sec = this.state.settingsSection;
     const intg = ['ringcentral', 'email', 'fmcsa'].includes(sec);
+    const isAnnaAi = sec === 'annaai';
     return (
       <div style={css('display:flex; height:100%;')}>
         <div style={css('width:240px; flex:none; border-right:1px solid rgba(0,0,0,0.08); background:#fff; overflow-y:auto; padding:22px 12px;')}>
@@ -584,7 +602,7 @@ export default class QuickHire extends QuickHireLogic {
           {v.settingsNav.map((s: any, i: number) => (<button key={i} onClick={s.onClick} style={s.style}>{s.label}</button>))}
         </div>
         <div style={css('flex:1; min-width:0; overflow-y:auto; padding:28px 32px;')}>
-          {intg ? <IntegrationSettings section={sec} /> : (<>
+          {isAnnaAi ? <AnnaSettings /> : intg ? <IntegrationSettings section={sec} /> : (<>
           {v.setIntegrations && (
             <>
               <h1 style={css('margin:0 0 4px; font-size:24px; font-weight:700; letter-spacing:-0.02em;')}>Integrations</h1>

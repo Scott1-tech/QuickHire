@@ -173,8 +173,14 @@ function SendVerificationModal({ entry, contact, onClose, onSent }: any) {
   const [text, setText] = React.useState(body);
   const [attach, setAttach] = React.useState(emp.verifiedFromFmcsa);
   const sms = `QuickHire Compliance: employment verification request for ${contact.name} (per FMCSA §391.23). Please reply or call (214) 555-1010 to confirm dates & safety history.`;
+  const recipient = channel === 'email'
+    ? { value: to || 'Add an email', ok: !!to, icon: 'mail' }
+    : channel === 'sms'
+      ? { value: emp.phone || 'No phone on FMCSA record', ok: !!emp.phone, icon: 'message' }
+      : { value: 'Tenstreet network', ok: true, icon: 'externalLink' };
 
   const doSend = () => {
+    if (!recipient.ok) return;
     svc.sendVerification(entry.id, channel, { to: channel === 'sms' ? emp.phone : channel === 'email' ? to : undefined, body: channel === 'sms' ? sms : text, attach });
     onSent(channel === 'tenstreet' ? 'Tenstreet' : channel.toUpperCase()); onClose();
   };
@@ -183,6 +189,18 @@ function SendVerificationModal({ entry, contact, onClose, onSent }: any) {
     <div onClick={(e) => e.stopPropagation()} style={{ ...sheet, width: 'min(640px, 95vw)' }}>
       <Head title="Send Employment Verification" sub={`${emp.legalName} · ${emp.dotNumber ? 'DOT ' + emp.dotNumber : ''}`} onClose={onClose} />
       <div style={{ padding: '16px 22px', maxHeight: '72vh', overflowY: 'auto' }}>
+        {/* who this verification is being sent to — always visible on every channel */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', border: `1px solid ${T.border}`, borderRadius: 12, background: '#FBFBFD', marginBottom: 14 }}>
+          <span style={{ width: 38, height: 38, flex: 'none', borderRadius: 10, background: 'rgba(0,122,255,0.10)', color: PRI, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="building" size={19} /></span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}><span style={{ fontSize: 14.5, fontWeight: 700 }}>{emp.legalName}</span>{emp.verifiedFromFmcsa && <VerifiedBadge />}</div>
+            <div style={{ fontSize: 12, color: T.faint, marginTop: 1 }}>{emp.dotNumber ? `DOT ${emp.dotNumber}` : ''}{emp.mcNumber ? ` · ${emp.mcNumber}` : ''}{emp.physicalAddress ? ` · ${emp.physicalAddress}` : ''}</div>
+          </div>
+          <div style={{ textAlign: 'right', flex: 'none', maxWidth: 230 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em', color: T.faint }}>Sending to</div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12.5, fontWeight: 650, color: recipient.ok ? '#1D1D1F' : ERR, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 230 }}><Icon name={recipient.icon} size={13} style={{ color: recipient.ok ? PRI : ERR }} />{recipient.value}</div>
+          </div>
+        </div>
         <div style={{ marginBottom: 14 }}><SegTabs value={channel} onChange={(v: any) => setChannel(v)} tabs={[{ key: 'email', label: 'Email', icon: 'mail' }, { key: 'sms', label: 'SMS', icon: 'message' }, { key: 'tenstreet', label: 'Tenstreet', icon: 'externalLink' }]} /></div>
 
         {channel === 'email' && <>

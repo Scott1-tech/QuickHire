@@ -145,7 +145,48 @@ export const svc = {
   numbers() { return store.rcNumbers; },
   // PATCH /api/ringcentral/numbers/:id/settings
   patchNumber(id: string, patch: any) { const n = rcNumber(id); if (n) Object.assign(n, patch); bg(api.patchNumber(id, patch)); emit(); return n; },
-  syncNumbers() { const a = store.accounts.find((x) => x.type === 'ringcentral'); if (a) a.lastSyncAt = new Date().toISOString(); emit(); return store.rcNumbers; },
+  syncNumbers() {
+    const a = store.accounts.find((x) => x.type === 'ringcentral');
+    if (a) a.lastSyncAt = new Date().toISOString();
+    emit();
+    // Pull the live provisioned numbers from RingCentral (when the backend is
+    // connected). Falls back silently to the local list in the static preview.
+    api.rcSync().then((res: any) => {
+      if (res && res.simulated === false && Array.isArray(res.numbers) && res.numbers.length) {
+        store.rcNumbers = res.numbers;
+      }
+      if (a) a.lastSyncAt = new Date().toISOString();
+      emit();
+    }).catch(() => {});
+    return store.rcNumbers;
+  },
+
+  /* Pull live connection status + provisioned numbers/inboxes from the backend
+     when a real deployment is serving the SPA. No-ops in the static preview. */
+  async hydrate() {
+    const set = (type: 'ringcentral' | 'email' | 'fmcsa', patch: any) => {
+      const a = store.accounts.find((x) => x.type === type); if (a && patch) Object.assign(a, patch);
+    };
+    try {
+      const [rc, em, fm] = await Promise.all([
+        api.rcStatus().catch(() => null),
+        api.emailStatus().catch(() => null),
+        api.fmcsaStatus().catch(() => null),
+      ]);
+      if (rc) set('ringcentral', rc);
+      if (em) set('email', em);
+      if (fm) set('fmcsa', fm);
+      if (rc && rc.connected) {
+        const nums = await api.rcNumbers().catch(() => null);
+        if (Array.isArray(nums) && nums.length) store.rcNumbers = nums;
+      }
+      if (em && em.connected) {
+        const ibs = await api.inboxes().catch(() => null);
+        if (Array.isArray(ibs) && ibs.length) store.emailInboxes = ibs;
+      }
+      emit();
+    } catch { /* offline / static preview */ }
+  },
   // POST /api/ringcentral/test-sms
   testSms(numberId: string) { bg(api.testSms(rcNumber(numberId)?.phoneNumber || '')); emit(); return { ok: true, number: rcNumber(numberId)?.phoneNumber }; },
 
