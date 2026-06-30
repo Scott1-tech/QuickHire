@@ -1,5 +1,6 @@
 import React from 'react';
 import { addExternalTask } from '../tasks/bus';
+import { api, bg } from './api';
 
 /* ============================================================================
    QuickHire unified communications + FMCSA store
@@ -37,6 +38,7 @@ const store = {
     { id: 'acc_rc', type: 'ringcentral', label: 'RingCentral', provider: 'RingCentral', status: 'connected', accountId: 'RC-8842019', extensionId: 'EXT-101', webhookStatus: 'active', connectedAt: nowMinus(60 * 24 * 30), lastSyncAt: nowMinus(4) },
     { id: 'acc_email', type: 'email', label: 'Email', provider: 'Gmail', status: 'connected', connectedAt: nowMinus(60 * 24 * 20), lastSyncAt: nowMinus(12) },
     { id: 'acc_fmcsa', type: 'fmcsa', label: 'FMCSA', provider: 'FMCSA SAFER', status: 'demo', dataMode: 'demo', webKey: '', cacheHours: 24, autoFill: true, mismatchTasks: true, watchlistChecks: true, connectedAt: nowMinus(60 * 24 * 10), lastSyncAt: nowMinus(20) },
+    { id: 'acc_tenstreet', type: 'tenstreet', label: 'Tenstreet', provider: 'Tenstreet', status: 'demo', connectedAt: nowMinus(60 * 24 * 5), lastSyncAt: nowMinus(35) },
   ] as any[],
 
   rcNumbers: [
@@ -95,7 +97,11 @@ const store = {
   mismatches: [] as any[],
   watchlist: [] as any[],
   recentSearches: [] as any[],
+  employment: [] as any[],
 };
+
+/* seed one previous-employer entry on Robert Johnson so the section isn't empty */
+store.employment = [] as any[];
 
 /* seed a few realistic messages across channels */
 function seed() {
@@ -138,15 +144,15 @@ export const svc = {
   // GET /api/ringcentral/numbers
   numbers() { return store.rcNumbers; },
   // PATCH /api/ringcentral/numbers/:id/settings
-  patchNumber(id: string, patch: any) { const n = rcNumber(id); if (n) Object.assign(n, patch); emit(); return n; },
+  patchNumber(id: string, patch: any) { const n = rcNumber(id); if (n) Object.assign(n, patch); bg(api.patchNumber(id, patch)); emit(); return n; },
   syncNumbers() { const a = store.accounts.find((x) => x.type === 'ringcentral'); if (a) a.lastSyncAt = new Date().toISOString(); emit(); return store.rcNumbers; },
   // POST /api/ringcentral/test-sms
-  testSms(numberId: string) { emit(); return { ok: true, number: rcNumber(numberId)?.phoneNumber }; },
+  testSms(numberId: string) { bg(api.testSms(rcNumber(numberId)?.phoneNumber || '')); emit(); return { ok: true, number: rcNumber(numberId)?.phoneNumber }; },
 
   // GET /api/email/inboxes  + PATCH settings
   inboxes() { return store.emailInboxes; },
-  patchInbox(id: string, patch: any) { const n = inbox(id); if (n) Object.assign(n, patch); emit(); return n; },
-  testEmail(inboxId: string) { emit(); return { ok: true, inbox: inbox(inboxId)?.emailAddress }; },
+  patchInbox(id: string, patch: any) { const n = inbox(id); if (n) Object.assign(n, patch); bg(api.patchInbox(id, patch)); emit(); return n; },
+  testEmail(inboxId: string) { bg(api.testEmail(inbox(inboxId)?.emailAddress || '')); emit(); return { ok: true, inbox: inbox(inboxId)?.emailAddress }; },
 
   // GET /api/drivers/:id/messages
   messagesFor(contactId: string) { return store.messages.filter((m) => m.contactId === contactId).sort((a, b) => +new Date(a.time) - +new Date(b.time)); },
@@ -159,6 +165,7 @@ export const svc = {
     const fail = opts.simulateFail || /\bFAILTEST\b/.test(body);
     const m = { id: uid('sms'), contactId, channel: 'sms', direction: 'outbound', from: n?.phoneNumber || '', to: c?.phone || '', via: fromNumberId, recruiter: opts.recruiter || 'Nina Patel', body, status: fail ? 'failed' : 'sent', time: new Date().toISOString(), read: true, needsReply: false, attachments: [] };
     store.messages.push(m);
+    bg(api.driverSms(contactId, { to: c?.phone, body, from: fromNumberId }));
     if (!fail) setTimeout(() => { m.status = 'delivered'; emit(); }, 900);
     if (fail) this._task({ title: `Failed SMS — ${c?.name}`, contactId, priority: 'high', tags: ['Message', 'Follow-up'], related: c?.name, alert: true });
     if (opts.followUp) this._task({ title: `Follow up — ${c?.name}`, contactId, related: c?.name, tags: ['Follow-up'] });
@@ -170,6 +177,7 @@ export const svc = {
     const c = contact(contactId); const n = rcNumber(fromNumberId);
     const m = { id: uid('call'), contactId, channel: outcome === 'left_voicemail' ? 'voicemail' : 'call', direction: 'outbound', from: n?.phoneNumber || '', to: c?.phone || '', via: fromNumberId, recruiter: opts.recruiter || 'Nina Patel', body: note || CALL_OUTCOMES.find((o) => o.key === outcome)?.label || 'Call', callOutcome: outcome, durationSec: opts.durationSec || 0, status: 'completed', time: new Date().toISOString(), read: true, needsReply: false };
     store.messages.push(m);
+    bg(api.driverCall(contactId, { to: c?.phone, outcome, notes: note, from: fromNumberId }));
     if (outcome === 'no_answer' || outcome === 'follow_up' || outcome === 'left_voicemail') this._task({ title: `Call driver back — ${c?.name}`, contactId, related: c?.name, tags: ['Follow-up'] });
     if (outcome === 'bad_number') this._task({ title: `Bad number — verify contact for ${c?.name}`, contactId, related: c?.name, priority: 'high', tags: ['Follow-up'], alert: true });
     emit(); return m;
@@ -181,6 +189,7 @@ export const svc = {
     const fail = opts.simulateFail;
     const m = { id: uid('em'), contactId, channel: 'email', direction: 'outbound', from: i?.emailAddress || '', to: c?.email || '', via: fromInboxId, recruiter: opts.recruiter || 'Nina Patel', subject, body, status: fail ? 'failed' : 'sent', time: new Date().toISOString(), read: true, needsReply: false, attachments: opts.attachments || [] };
     store.messages.push(m);
+    bg(api.driverEmail(contactId, { to: c?.email, subject, body, from: fromInboxId }));
     if (!fail) setTimeout(() => { m.status = 'delivered'; emit(); }, 900);
     if (fail) this._task({ title: `Failed email — ${c?.name}`, contactId, priority: 'high', tags: ['Follow-up'], related: c?.name, alert: true });
     if (opts.followUp) this._task({ title: `Follow up — ${c?.name}`, contactId, related: c?.name, tags: ['Follow-up'] });
@@ -250,8 +259,8 @@ export const svc = {
 
   // GET/POST/DELETE /api/fmcsa/watchlist
   watchlist() { return store.watchlist; },
-  addWatch(snap: any) { if (store.watchlist.some((w) => w.dotNumber === snap.dotNumber)) return; store.watchlist.push({ id: uid('w'), dotNumber: snap.dotNumber, mcNumber: snap.mcNumber, name: snap.legalName, authorityStatus: snap.authorityStatus, safetyRating: snap.safetyRating, powerUnits: snap.powerUnits, drivers: snap.drivers, addedAt: new Date().toISOString(), lastChecked: new Date().toISOString(), change: null }); emit(); },
-  removeWatch(id: string) { store.watchlist = store.watchlist.filter((w) => w.id !== id); emit(); },
+  addWatch(snap: any) { if (store.watchlist.some((w) => w.dotNumber === snap.dotNumber)) return; bg(api.addWatch(snap)); store.watchlist.push({ id: uid('w'), dotNumber: snap.dotNumber, mcNumber: snap.mcNumber, name: snap.legalName, authorityStatus: snap.authorityStatus, safetyRating: snap.safetyRating, powerUnits: snap.powerUnits, drivers: snap.drivers, addedAt: new Date().toISOString(), lastChecked: new Date().toISOString(), change: null }); emit(); },
+  removeWatch(id: string) { bg(api.removeWatch(id)); store.watchlist = store.watchlist.filter((w) => w.id !== id); emit(); },
   // simulate a watchlist check that surfaces a change → notif + task
   checkWatch(id: string) {
     const w = store.watchlist.find((x) => x.id === id); if (!w) return;
@@ -260,6 +269,48 @@ export const svc = {
     w.authorityStatus = after; w.lastChecked = new Date().toISOString();
     this._task({ title: `FMCSA change: authority ${before} → ${after} — ${w.name}`, priority: 'high', related: w.name, relatedType: 'carrier', carrier: w.name, tags: ['Compliance'] });
     emit(); return w.change;
+  },
+
+  /* ---------------- service: Employment Verification (PEV) ---------------- */
+  // multi-result FMCSA search for the "pick the right company" step
+  fmcsaSearch(query: string) {
+    const q = (query || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!q) return [];
+    const src = store.accounts.find((a) => a.type === 'fmcsa')?.dataMode === 'api' ? 'FMCSA API' : 'FMCSA public dataset (demo)';
+    return store.fmcsaDb.filter((r) => {
+      const n = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      return n(r.dotNumber).includes(q) || n(r.mcNumber).includes(q) || n(r.legalName).includes(q) || n(r.dbaName).includes(q);
+    }).slice(0, 6).map((r) => ({ ...r, source: src, fetchedAt: new Date().toISOString() }));
+  },
+  employmentFor(contactId: string) { return store.employment.filter((e) => e.contactId === contactId); },
+  addEmployer(contactId: string, snap: any, details: any) {
+    const e = {
+      id: uid('emp'), contactId,
+      employer: snap ? { legalName: snap.legalName, dotNumber: snap.dotNumber, mcNumber: snap.mcNumber, phone: snap.phone, physicalAddress: snap.physicalAddress, state: snap.state, verifiedFromFmcsa: true, source: snap.source, fetchedAt: snap.fetchedAt }
+        : { legalName: details.manualName || 'Unknown employer', dotNumber: details.manualDot || '', mcNumber: details.manualMc || '', phone: details.manualPhone || '', physicalAddress: '', state: '', verifiedFromFmcsa: false },
+      position: details.position || '', startDate: details.startDate || '', endDate: details.endDate || '', reason: details.reason || '',
+      droveCmv: details.droveCmv !== false, subjectToTesting: details.subjectToTesting !== false,
+      verification: { status: 'not_requested', channel: null, to: null, sentAt: null, returnedAt: null, result: null },
+    };
+    store.employment.push(e); emit(); return e;
+  },
+  removeEmployer(id: string) { store.employment = store.employment.filter((e) => e.id !== id); emit(); },
+  // POST employment verification request via email | sms | tenstreet
+  sendVerification(entryId: string, channel: 'email' | 'sms' | 'tenstreet', opts: any = {}) {
+    const e = store.employment.find((x) => x.id === entryId); if (!e) return;
+    const drv = contact(e.contactId);
+    e.verification = { status: 'requested', channel, to: opts.to || (channel === 'sms' ? e.employer.phone : channel === 'email' ? opts.to : 'Tenstreet network'), sentAt: new Date().toISOString(), returnedAt: null, result: null };
+    // audit message in the driver's communication log
+    if (channel !== 'tenstreet') {
+      store.messages.push({ id: uid('pev'), contactId: e.contactId, channel, direction: 'outbound', from: channel === 'sms' ? store.rcNumbers.find((n) => n.label === 'Compliance Line')?.phoneNumber : 'compliance@quickhire.com', to: e.verification.to, via: channel === 'sms' ? 'rc2' : 'em3', recruiter: 'Dana Reed', subject: channel === 'email' ? `Employment verification — ${drv?.name}` : undefined, body: opts.body || `Employment verification request for ${drv?.name} sent to ${e.employer.legalName}.`, status: 'sent', time: new Date().toISOString(), read: true, needsReply: false, attachments: e.employer.verifiedFromFmcsa ? [{ name: 'FMCSA-snapshot.pdf', type: 'fileText' }] : [] });
+    }
+    this._task({ title: `Employment verification — ${e.employer.legalName} (${drv?.name})`, contactId: e.contactId, related: drv?.name, relatedType: 'candidate', tags: ['PEV', 'Compliance'], priority: 'normal' });
+    emit(); return e;
+  },
+  markVerification(entryId: string, status: 'pending' | 'returned' | 'verified' | 'unable') {
+    const e = store.employment.find((x) => x.id === entryId); if (!e) return;
+    e.verification.status = status; if (status === 'verified' || status === 'returned' || status === 'unable') e.verification.returnedAt = new Date().toISOString();
+    emit(); return e;
   },
 
   // shared task creator → pushes into the Tasks workspace + records an alert
@@ -276,6 +327,15 @@ export const CALL_OUTCOMES = [
   { key: 'bad_number', label: 'Bad number', icon: 'ban', color: '#FF3B30' },
   { key: 'follow_up', label: 'Follow-up needed', icon: 'flag', color: '#007AFF' },
 ];
+
+export const PEV_STATUS: Record<string, { label: string; color: string }> = {
+  not_requested: { label: 'Not requested', color: '#8E8E93' },
+  requested: { label: 'Request sent', color: '#007AFF' },
+  pending: { label: 'Pending', color: '#FF9500' },
+  returned: { label: 'Returned', color: '#5856D6' },
+  verified: { label: 'Verified', color: '#34C759' },
+  unable: { label: 'Unable to verify', color: '#FF3B30' },
+};
 
 export const MSG_STATUS: Record<string, { label: string; color: string }> = {
   sent: { label: 'Sent', color: '#6E6E73' },
