@@ -2,3 +2,7 @@
 __pycache__/
 *.pyc
 .env
+
+# pytest / test artifacts
+.pytest_cache/
+__pycache__/
