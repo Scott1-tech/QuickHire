@@ -179,7 +179,7 @@ export class QuickHireLogic extends React.Component<any, any> {
     const navDefs = [
       ['dashboard', 'Dashboard', 'dashboard'], ['pipeline', 'Hiring', 'hiring'], ['drivers', 'Drivers', 'drivers'],
       ['carriers', 'Carriers', 'carriers'], ['compliance', 'Compliance', 'compliance'], ['docusign', 'DocuSign', 'docusign'],
-      ['messages', 'Messages', 'messages'], ['tasks', 'Tasks', 'tasks'], ['reports', 'Reports', 'reports'],
+      ['messages', 'Messages', 'messages'], ['anna', 'Anna', 'spark'], ['tasks', 'Tasks', 'tasks'], ['reports', 'Reports', 'reports'],
       ['integrations', 'Integrations', 'wand'], ['settings', 'Settings', 'settings'],
     ];
     const pageGroup = (S.page === 'profile') ? 'pipeline' : S.page;
@@ -219,7 +219,8 @@ export class QuickHireLogic extends React.Component<any, any> {
     const isReports = S.page === 'reports';
     const isIntegrations = S.page === 'integrations';
     const isTasks = S.page === 'tasks';
-    const titles: Record<string, string> = { dashboard: 'Dashboard', pipeline: 'Hiring Pipeline', profile: 'Candidate Profile', drivers: 'Drivers', carriers: 'Carriers', compliance: 'Compliance', docusign: 'DocuSign', messages: 'Messages', tasks: 'Tasks', reports: 'Reports', settings: 'Settings' };
+    const isAnna = S.page === 'anna';
+    const titles: Record<string, string> = { dashboard: 'Dashboard', pipeline: 'Hiring Pipeline', profile: 'Candidate Profile', drivers: 'Drivers', carriers: 'Carriers', compliance: 'Compliance', docusign: 'DocuSign', messages: 'Messages', anna: 'Anna', tasks: 'Tasks', reports: 'Reports', settings: 'Settings' };
 
     const out: any = {
       expanded, sidebarStyle, sidebarStrong, sidebarFaint, sidebarBorder, nav, carrierSwitchStyle, themeBtnStyle,
@@ -229,7 +230,7 @@ export class QuickHireLogic extends React.Component<any, any> {
       toggleCollapse: () => this.setState((s: any) => ({ collapsed: !s.collapsed })),
       pageTitle: titles[S.page] || 'QuickHire',
       isDashboard, isPipeline, isProfile, isDocusign, isCompliance, isMessages, isSettings,
-      isDrivers, isCarriers, isReports, isIntegrations, isTasks,
+      isDrivers, isCarriers, isReports, isIntegrations, isTasks, isAnna,
       icChevDown: this.ic('chevD', 15), icChevRight: this.ic('chevR', 15), icCollapse: this.ic('collapse', 18),
       icTaskTop: this.ic('list', 18), icRefresh: this.ic('refresh', 15), icCarrier: this.ic('carriers', 18), icCarrierLg: this.ic('carriers', 26), icBolt: this.ic('bolt', 11),
       openTasks: () => this.setState({ taskDrawerOpen: true }),
