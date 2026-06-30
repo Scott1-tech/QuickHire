@@ -15,6 +15,9 @@ function Field({ label, children }: any) { return <div><div style={{ fontSize: 1
 function ToggleCell({ on, onClick }: any) { return <div onClick={onClick} style={{ display: 'flex', justifyContent: 'center' }}><Toggle on={on} onChange={onClick} /></div>; }
 
 export function IntegrationSettings({ section }: { section: string }) {
+  // Pull live connection status + provisioned numbers/inboxes from the backend
+  // when a real deployment is serving the SPA (no-op in the static preview).
+  React.useEffect(() => { svc.hydrate(); }, []);
   if (section === 'ringcentral') return <RingCentralSettings />;
   if (section === 'email') return <EmailSettings />;
   if (section === 'fmcsa') return <FmcsaSettings />;

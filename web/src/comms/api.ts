@@ -19,6 +19,7 @@ async function req(method: string, path: string, body?: any): Promise<any> {
 export const api = {
   rcStatus: () => req('GET', '/ringcentral/status'),
   rcNumbers: () => req('GET', '/ringcentral/numbers'),
+  rcSync: () => req('POST', '/ringcentral/sync'),
   patchNumber: (id: string, p: any) => req('PATCH', `/ringcentral/numbers/${id}/settings`, p),
   testSms: (to: string) => req('POST', '/ringcentral/test-sms', { to }),
   driverSms: (id: string, b: any) => req('POST', `/drivers/${id}/sms`, b),

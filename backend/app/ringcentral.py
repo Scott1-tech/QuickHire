@@ -94,3 +94,34 @@ async def get_call_history(extension: str = "~", date_from: str = "") -> list:
         return data.get("records") or []
     except Exception:  # noqa: BLE001
         return []
+
+
+async def list_phone_numbers() -> list:
+    """Fetch the account's provisioned phone numbers with SMS/voice features."""
+    if not is_configured():
+        return []
+    try:
+        token = await _get_access_token()
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(
+                f"{SERVER}/restapi/v1.0/account/{ACCOUNT_ID}/phone-number",
+                params={"perPage": 1000},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            r.raise_for_status()
+            data = r.json()
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for rec in data.get("records") or []:
+        feats = rec.get("features") or []
+        ext = rec.get("extension") or {}
+        out.append({
+            "phoneNumber": rec.get("phoneNumber", ""),
+            "label": rec.get("label") or ext.get("name") or (rec.get("usageType") or "Number").replace("Number", " Number"),
+            "extensionId": str(ext.get("id") or ext.get("extensionNumber") or ""),
+            "smsEnabled": "SmsSender" in feats or "A2PSmsSender" in feats,
+            "callsEnabled": "VoiceUser" in feats or rec.get("type") in (None, "VoiceFax", "Voice"),
+            "assignedUser": ext.get("name") or "",
+        })
+    return out

@@ -102,6 +102,35 @@ async def rc_patch(nid: str, request: Request):
     return found
 
 
+@router.post("/api/ringcentral/sync", dependencies=[Depends(require_admin)])
+async def rc_sync():
+    """Pull the account's real phone numbers from RingCentral and merge them into
+    the stored config, preserving per-number routing toggles by phone number."""
+    stored = await _get(K_RC, _RC_DEFAULT)
+    live = await ringcentral.list_phone_numbers()
+    if not live:
+        return {"ok": True, "simulated": True, "numbers": stored, "message": "RingCentral not configured — set RINGCENTRAL_* env vars."}
+    by_phone = {n.get("phoneNumber"): n for n in stored}
+    merged = []
+    for L in live:
+        ex = by_phone.get(L["phoneNumber"])
+        if ex:
+            ex.update({k: L[k] for k in ("label", "extensionId", "smsEnabled", "callsEnabled")})
+            if not ex.get("assignedUser") and L.get("assignedUser"):
+                ex["assignedUser"] = L["assignedUser"]
+            merged.append(ex)
+        else:
+            merged.append({"id": new_uuid(), "phoneNumber": L["phoneNumber"], "label": L["label"], "extensionId": L["extensionId"],
+                           "smsEnabled": L["smsEnabled"], "callsEnabled": L["callsEnabled"], "assignedUser": L.get("assignedUser", ""),
+                           "assignedTeam": "", "receiveSms": L["smsEnabled"], "receiveCalls": L["callsEnabled"],
+                           "sharedInbox": False, "defaultOutbound": False, "active": True})
+    if merged and not any(n.get("defaultOutbound") for n in merged):
+        sms_first = next((n for n in merged if n.get("smsEnabled")), merged[0])
+        sms_first["defaultOutbound"] = True
+    await _set(K_RC, merged)
+    return {"ok": True, "simulated": False, "numbers": merged}
+
+
 @router.post("/api/ringcentral/test-sms", dependencies=[Depends(require_admin)])
 async def rc_test_sms(request: Request):
     body = await request.json()
