@@ -189,7 +189,7 @@ export const svc = {
     const fail = opts.simulateFail;
     const m = { id: uid('em'), contactId, channel: 'email', direction: 'outbound', from: i?.emailAddress || '', to: c?.email || '', via: fromInboxId, recruiter: opts.recruiter || 'Nina Patel', subject, body, status: fail ? 'failed' : 'sent', time: new Date().toISOString(), read: true, needsReply: false, attachments: opts.attachments || [] };
     store.messages.push(m);
-    bg(api.driverSms(contactId, { to: c?.phone, body, from: fromNumberId }));
+    bg(api.driverEmail(contactId, { to: c?.email, subject, body, from: fromInboxId }));
     if (!fail) setTimeout(() => { m.status = 'delivered'; emit(); }, 900);
     if (fail) this._task({ title: `Failed email — ${c?.name}`, contactId, priority: 'high', tags: ['Follow-up'], related: c?.name, alert: true });
     if (opts.followUp) this._task({ title: `Follow up — ${c?.name}`, contactId, related: c?.name, tags: ['Follow-up'] });

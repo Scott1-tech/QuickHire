@@ -259,7 +259,8 @@ async def _fmcsa_fetch(dot: str = "", mc: str = ""):
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(url, headers={"Accept": "application/json"})
         r.raise_for_status()
-        c = (r.json().get("content") or {})
+        content = r.json().get("content") or {}
+    c = content.get("carrier") if isinstance(content.get("carrier"), dict) else content
     return {"legalName": c.get("legalName") or c.get("name") or "", "dbaName": c.get("dbaName") or "",
             "dotNumber": c.get("dotNumber") or dot, "mcNumber": c.get("mcNumber") or mc,
             "operatingStatus": c.get("operatingStatus") or "", "authorityStatus": c.get("allowedToOperate") or "",

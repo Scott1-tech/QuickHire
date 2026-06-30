@@ -233,7 +233,8 @@ async def fmcsa_fill_carrier(cid: str, request: Request):
             r = await client.get(url, headers={"Accept": "application/json"})
             r.raise_for_status()
             data = r.json()
-        carrier_data = data.get("content") or {}
+        _content = data.get("content") or {}
+        carrier_data = _content.get("carrier") if isinstance(_content.get("carrier"), dict) else _content
         reqs = c.get("requirements") or {}
         reqs["dotNumber"] = carrier_data.get("dotNumber") or dot
         reqs["mcNumber"] = carrier_data.get("mcNumber") or mc

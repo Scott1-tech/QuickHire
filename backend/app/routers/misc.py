@@ -118,8 +118,12 @@ async def fmcsa_lookup(dot: str = "", mc: str = ""):
             r.raise_for_status()
             data = r.json()
 
-        carrier = data.get("content") or {}
-        addr = carrier.get("phyStreet", "")
+        # QCMobile nests the record under content.carrier; older shapes put it
+        # directly under content. Field names also vary (phyZipcode/phyZip,
+        # totalPowerUnits/totalTrucks) — read defensively so live data isn't dropped.
+        content = data.get("content") or {}
+        carrier = content.get("carrier") if isinstance(content.get("carrier"), dict) else content
+        op = carrier.get("operatingStatus") or ("AUTHORIZED" if carrier.get("allowedToOperate") == "Y" else ("NOT AUTHORIZED" if carrier.get("allowedToOperate") == "N" else ""))
         return {
             "simulated": False,
             "legalName": carrier.get("legalName") or carrier.get("name") or "",
@@ -130,14 +134,15 @@ async def fmcsa_lookup(dot: str = "", mc: str = ""):
                 "street": carrier.get("phyStreet") or "",
                 "city": carrier.get("phyCity") or "",
                 "state": carrier.get("phyState") or "",
-                "zip": carrier.get("phyZip") or "",
+                "zip": carrier.get("phyZipcode") or carrier.get("phyZip") or "",
                 "country": carrier.get("phyCountry") or "US",
             },
             "phone": carrier.get("telephone") or "",
-            "operatingStatus": carrier.get("operatingStatus") or "",
+            "operatingStatus": op,
             "carrierOperation": carrier.get("carrierOperation") or "",
+            "safetyRating": carrier.get("safetyRating") or "",
             "totalDrivers": carrier.get("totalDrivers"),
-            "totalTrucks": carrier.get("totalTrucks"),
+            "totalTrucks": carrier.get("totalPowerUnits") or carrier.get("totalTrucks"),
         }
     except httpx.HTTPStatusError as e:
         raise error(502, f"FMCSA API error: {e.response.status_code}")
