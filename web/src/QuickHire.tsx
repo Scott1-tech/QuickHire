@@ -8,6 +8,7 @@ import { CarrierFmcsaPanel } from './comms/fmcsa';
 import { EmploymentVerification } from './comms/pev';
 import AnnaWorkspace from './anna/AnnaWorkspace';
 import { AnnaSettings } from './anna/settings';
+import EsignWorkspace from './esign/EsignWorkspace';
 import { CARRIER_LIST, CANDS } from './data';
 
 /**
@@ -427,115 +428,7 @@ export default class QuickHire extends QuickHireLogic {
 
   // ===================== DOCUSIGN =====================
   renderDocusign(v: any) {
-    return (
-      <div style={css('max-width:1180px; margin:0 auto; padding:28px 32px 64px;')}>
-        <div style={css('display:flex; align-items:flex-start; justify-content:space-between; gap:16px;')}>
-          <div>
-            <div style={css('display:flex; align-items:center; gap:10px;')}>
-              <h1 style={css('margin:0; font-size:28px; font-weight:700; letter-spacing:-0.02em;')}>DocuSign</h1>
-              <span style={css('display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:600; color:#A05A00; background:rgba(255,159,10,0.14); border-radius:999px; padding:3px 10px;')}><span style={css('width:6px; height:6px; border-radius:999px; background:#FF9F0A;')}></span>Simulated Mode</span>
-            </div>
-            <p style={css('margin:6px 0 0; font-size:14px; color:#6E6E73;')}>E-signature command center</p>
-          </div>
-          <H as="button" onClick={v.openBuilder} style={css('display:flex; align-items:center; gap:7px; height:38px; padding:0 14px; background:#007AFF; border:none; border-radius:10px; color:#fff; font-size:13.5px; font-weight:600; cursor:pointer;')} hover={css('background:#0066D6;')}>{v.icPlus}<span>Start Envelope</span></H>
-        </div>
-
-        <div style={css('display:flex; gap:2px; margin:18px 0 22px; border-bottom:1px solid rgba(0,0,0,0.08);')}>
-          {v.dsTabs.map((t: any, i: number) => (<button key={i} onClick={t.onClick} style={t.style}>{t.label}</button>))}
-        </div>
-
-        {v.dsHome && (
-          <>
-            <div style={css('display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:22px;')}>
-              {v.dsStats.map((s: any, i: number) => (
-                <div key={i} style={css('background:#fff; border:1px solid rgba(0,0,0,0.08); border-radius:14px; padding:16px 18px;')}>
-                  <div style={{ ...css('font-size:28px; font-weight:700; letter-spacing:-0.02em;'), color: s.color }}>{s.value}</div>
-                  <div style={css('font-size:13px; color:#6E6E73; margin-top:4px;')}>{s.label}</div>
-                </div>
-              ))}
-            </div>
-            <div style={css('display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:24px;')}>
-              {v.dsQuick.map((q: any, i: number) => (
-                <H as="button" key={i} onClick={q.onClick} style={css('display:flex; align-items:center; gap:11px; padding:14px 16px; background:#fff; border:1px solid rgba(0,0,0,0.08); border-radius:14px; cursor:pointer; text-align:left;')} hover={css('box-shadow:0 8px 24px rgba(0,0,0,0.08); transform:translateY(-1px);')}>
-                  <span style={{ ...css('width:36px; height:36px; flex:none; border-radius:10px; display:flex; align-items:center; justify-content:center;'), background: q.bg, color: q.fg }}>{q.icon}</span>
-                  <span style={css('font-size:13px; font-weight:600;')}>{q.label}</span>
-                </H>
-              ))}
-            </div>
-            <section style={css('background:#fff; border:1px solid rgba(0,0,0,0.08); border-radius:14px; overflow:hidden;')}>
-              <div style={css('padding:16px 18px 12px; font-size:16px; font-weight:650;')}>Recent Agreements</div>
-              {v.agreements.map((a: any, i: number) => (
-                <H key={i} style={css('display:flex; align-items:center; gap:13px; padding:12px 18px; border-top:1px solid rgba(0,0,0,0.06);')} hover={css('background:rgba(0,0,0,0.018);')}>
-                  <span style={css('color:#8E8E93; display:flex;')}>{v.icDocSm}</span>
-                  <div style={css('flex:1; min-width:0;')}><div style={css('font-size:13.5px; font-weight:600;')}>{a.doc}</div><div style={css('font-size:12px; color:#6E6E73;')}>{a.candidate} · {a.carrier}</div></div>
-                  <span style={a.chipStyle}><span style={{ ...css('width:6px; height:6px; border-radius:999px;'), background: a.chipDot }}></span>{a.status}</span>
-                  <span style={css('font-size:12px; color:#8E8E93; width:90px; text-align:right;')}>{a.event}</span>
-                </H>
-              ))}
-            </section>
-          </>
-        )}
-
-        {v.dsAgreements && (
-          <div style={css('background:#fff; border:1px solid rgba(0,0,0,0.08); border-radius:14px; overflow:hidden;')}>
-            <div style={css('display:grid; grid-template-columns:1.6fr 1.2fr 1fr 1fr 0.9fr 80px; gap:12px; padding:11px 18px; background:#FAFAFA; border-bottom:1px solid rgba(0,0,0,0.06); font-size:11px; font-weight:600; letter-spacing:0.03em; text-transform:uppercase; color:#8E8E93;')}>
-              <span>Document</span><span>Candidate</span><span>Carrier</span><span>Status</span><span>Last Event</span><span style={css('text-align:right;')}>Actions</span>
-            </div>
-            {v.agreements.map((a: any, i: number) => (
-              <H key={i} style={css('display:grid; grid-template-columns:1.6fr 1.2fr 1fr 1fr 0.9fr 80px; gap:12px; align-items:center; padding:13px 18px; border-top:1px solid rgba(0,0,0,0.06); font-size:13px;')} hover={css('background:rgba(0,0,0,0.022);')}>
-                <span style={css('font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;')}>{a.doc}</span>
-                <span style={css('color:#3a3a3c;')}>{a.candidate}</span>
-                <span style={css('color:#6E6E73; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;')}>{a.carrier}</span>
-                <span><span style={a.chipStyle}><span style={{ ...css('width:6px; height:6px; border-radius:999px;'), background: a.chipDot }}></span>{a.status}</span></span>
-                <span style={css('color:#8E8E93; font-size:12px;')}>{a.event}</span>
-                <span style={css('display:flex; gap:4px; justify-content:flex-end;')}>
-                  <H as="button" onClick={a.onRemind} title="Remind" style={css('width:30px; height:30px; display:flex; align-items:center; justify-content:center; background:transparent; border:none; border-radius:8px; color:#6E6E73; cursor:pointer;')} hover={css('background:rgba(0,0,0,0.06);')}>{v.icBellSm}</H>
-                  <H as="button" onClick={a.onView} title="View" style={css('width:30px; height:30px; display:flex; align-items:center; justify-content:center; background:transparent; border:none; border-radius:8px; color:#6E6E73; cursor:pointer;')} hover={css('background:rgba(0,0,0,0.06);')}>{v.icEye}</H>
-                </span>
-              </H>
-            ))}
-          </div>
-        )}
-
-        {v.dsTemplates && (
-          <div style={css('display:grid; grid-template-columns:repeat(2,1fr); gap:14px;')}>
-            {v.templates.map((t: any, i: number) => (
-              <H key={i} style={css('background:#fff; border:1px solid rgba(0,0,0,0.08); border-radius:14px; padding:16px 18px;')} hover={css('box-shadow:0 8px 24px rgba(0,0,0,0.06);')}>
-                <div style={css('display:flex; align-items:flex-start; justify-content:space-between; gap:10px;')}>
-                  <div style={css('display:flex; align-items:center; gap:11px; min-width:0;')}>
-                    <span style={css('width:36px; height:36px; flex:none; border-radius:10px; background:rgba(0,122,255,0.10); color:#007AFF; display:flex; align-items:center; justify-content:center;')}>{v.icDocSm}</span>
-                    <div style={css('min-width:0;')}><div style={css('font-size:14px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;')}>{t.name}</div><div style={css('font-size:12px; color:#8E8E93;')}>{t.fields} fields · {t.updated}</div></div>
-                  </div>
-                  <span style={t.chipStyle}>{t.status}</span>
-                </div>
-                <div style={css('font-size:12.5px; color:#6E6E73; margin-top:12px;')}>Assigned: {t.carriers}</div>
-                <div style={css('display:flex; gap:6px; margin-top:14px;')}>
-                  <H as="button" onClick={t.onPreview} style={css('flex:1; height:32px; font-size:12.5px; font-weight:600; background:#fff; border:1px solid rgba(0,0,0,0.12); border-radius:9px; cursor:pointer;')} hover={css('background:rgba(0,0,0,0.04);')}>Preview</H>
-                  <H as="button" onClick={t.onEdit} style={css('flex:1; height:32px; font-size:12.5px; font-weight:600; background:#fff; border:1px solid rgba(0,0,0,0.12); border-radius:9px; cursor:pointer;')} hover={css('background:rgba(0,0,0,0.04);')}>Edit Fields</H>
-                </div>
-              </H>
-            ))}
-          </div>
-        )}
-
-        {v.dsPackages && (
-          <div style={css('display:grid; grid-template-columns:repeat(2,1fr); gap:14px;')}>
-            {v.packages.map((p: any, i: number) => (
-              <div key={i} style={css('background:#fff; border:1px solid rgba(0,0,0,0.08); border-radius:14px; padding:18px;')}>
-                <div style={css('font-size:15px; font-weight:650;')}>{p.name}</div>
-                <div style={css('font-size:12.5px; color:#8E8E93; margin-top:3px;')}>{p.count} documents</div>
-                <div style={css('display:flex; flex-direction:column; gap:7px; margin:14px 0;')}>
-                  {p.docs.map((d: any, j: number) => (
-                    <div key={j} style={css('display:flex; align-items:center; gap:9px; font-size:13px; color:#3a3a3c;')}>{v.icCheckTiny}<span>{d.name}</span></div>
-                  ))}
-                </div>
-                <H as="button" onClick={p.onSend} style={css('width:100%; height:38px; background:#007AFF; border:none; border-radius:10px; color:#fff; font-size:13px; font-weight:600; cursor:pointer;')} hover={css('background:#0066D6;')}>Send Package</H>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
+    return <EsignWorkspace drivers={CANDS} go={(p: string) => this.go(p)} />;
   }
 
   // ===================== COMPLIANCE =====================
