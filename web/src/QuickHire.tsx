@@ -9,6 +9,7 @@ import { EmploymentVerification } from './comms/pev';
 import AnnaWorkspace from './anna/AnnaWorkspace';
 import { AnnaSettings } from './anna/settings';
 import EsignWorkspace from './esign/EsignWorkspace';
+import DriverProfile from './hire/DriverProfile';
 import { TopBar } from './shell/TopBar';
 import { CARRIER_LIST, CANDS } from './data';
 
@@ -311,7 +312,11 @@ export default class QuickHire extends QuickHireLogic {
     return { id: c.id, name: c.name, phone: c.phone, email: c.email };
   }
 
-  renderProfile(v: any) {
+  renderProfile(_v: any) {
+    return <DriverProfile driverId={this.state.candidateId} go={(p: string) => this.go(p)} onBack={() => this.go('pipeline')} />;
+  }
+
+  renderProfileLegacy(v: any) {
     const c = v.cand;
     return (
       <div style={css('display:flex; height:100%;')}>
