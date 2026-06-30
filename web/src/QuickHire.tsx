@@ -5,7 +5,8 @@ import TasksWorkspace from './tasks/TasksWorkspace';
 import MessagesWorkspace from './comms/MessagesWorkspace';
 import { IntegrationSettings } from './comms/settings';
 import { CarrierFmcsaPanel } from './comms/fmcsa';
-import { CARRIER_LIST } from './data';
+import { EmploymentVerification } from './comms/pev';
+import { CARRIER_LIST, CANDS } from './data';
 
 /**
  * QuickHire — recruiter command center. Faithful React port of the QuickHire.dc
@@ -295,6 +296,11 @@ export default class QuickHire extends QuickHireLogic {
   }
 
   // ===================== CANDIDATE PROFILE =====================
+  pevContact() {
+    const c = CANDS.find((x: any) => x.id === this.state.candidateId) || CANDS[0];
+    return { id: c.id, name: c.name, phone: c.phone, email: c.email };
+  }
+
   renderProfile(v: any) {
     const c = v.cand;
     return (
@@ -330,6 +336,7 @@ export default class QuickHire extends QuickHireLogic {
             ))}
           </div>
           <div style={css('flex:1; overflow-y:auto; padding:24px;')}>
+            {this.state.profileTab === 'pev' ? <EmploymentVerification contact={this.pevContact()} /> : (<>
             <div style={css('display:grid; grid-template-columns:1fr 1fr; gap:16px;')}>
               <div style={css('background:#fff; border:1px solid rgba(0,0,0,0.08); border-radius:14px; padding:18px;')}>
                 <div style={css('font-size:13px; font-weight:650; margin-bottom:14px;')}>Scorecard</div>
@@ -370,6 +377,7 @@ export default class QuickHire extends QuickHireLogic {
                 </div>
               ))}
             </div>
+            </>)}
           </div>
         </div>
 

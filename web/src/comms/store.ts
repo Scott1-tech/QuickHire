@@ -37,6 +37,7 @@ const store = {
     { id: 'acc_rc', type: 'ringcentral', label: 'RingCentral', provider: 'RingCentral', status: 'connected', accountId: 'RC-8842019', extensionId: 'EXT-101', webhookStatus: 'active', connectedAt: nowMinus(60 * 24 * 30), lastSyncAt: nowMinus(4) },
     { id: 'acc_email', type: 'email', label: 'Email', provider: 'Gmail', status: 'connected', connectedAt: nowMinus(60 * 24 * 20), lastSyncAt: nowMinus(12) },
     { id: 'acc_fmcsa', type: 'fmcsa', label: 'FMCSA', provider: 'FMCSA SAFER', status: 'demo', dataMode: 'demo', webKey: '', cacheHours: 24, autoFill: true, mismatchTasks: true, watchlistChecks: true, connectedAt: nowMinus(60 * 24 * 10), lastSyncAt: nowMinus(20) },
+    { id: 'acc_tenstreet', type: 'tenstreet', label: 'Tenstreet', provider: 'Tenstreet', status: 'demo', connectedAt: nowMinus(60 * 24 * 5), lastSyncAt: nowMinus(35) },
   ] as any[],
 
   rcNumbers: [
@@ -95,7 +96,11 @@ const store = {
   mismatches: [] as any[],
   watchlist: [] as any[],
   recentSearches: [] as any[],
+  employment: [] as any[],
 };
+
+/* seed one previous-employer entry on Robert Johnson so the section isn't empty */
+store.employment = [] as any[];
 
 /* seed a few realistic messages across channels */
 function seed() {
@@ -262,6 +267,48 @@ export const svc = {
     emit(); return w.change;
   },
 
+  /* ---------------- service: Employment Verification (PEV) ---------------- */
+  // multi-result FMCSA search for the "pick the right company" step
+  fmcsaSearch(query: string) {
+    const q = (query || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!q) return [];
+    const src = store.accounts.find((a) => a.type === 'fmcsa')?.dataMode === 'api' ? 'FMCSA API' : 'FMCSA public dataset (demo)';
+    return store.fmcsaDb.filter((r) => {
+      const n = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      return n(r.dotNumber).includes(q) || n(r.mcNumber).includes(q) || n(r.legalName).includes(q) || n(r.dbaName).includes(q);
+    }).slice(0, 6).map((r) => ({ ...r, source: src, fetchedAt: new Date().toISOString() }));
+  },
+  employmentFor(contactId: string) { return store.employment.filter((e) => e.contactId === contactId); },
+  addEmployer(contactId: string, snap: any, details: any) {
+    const e = {
+      id: uid('emp'), contactId,
+      employer: snap ? { legalName: snap.legalName, dotNumber: snap.dotNumber, mcNumber: snap.mcNumber, phone: snap.phone, physicalAddress: snap.physicalAddress, state: snap.state, verifiedFromFmcsa: true, source: snap.source, fetchedAt: snap.fetchedAt }
+        : { legalName: details.manualName || 'Unknown employer', dotNumber: details.manualDot || '', mcNumber: details.manualMc || '', phone: details.manualPhone || '', physicalAddress: '', state: '', verifiedFromFmcsa: false },
+      position: details.position || '', startDate: details.startDate || '', endDate: details.endDate || '', reason: details.reason || '',
+      droveCmv: details.droveCmv !== false, subjectToTesting: details.subjectToTesting !== false,
+      verification: { status: 'not_requested', channel: null, to: null, sentAt: null, returnedAt: null, result: null },
+    };
+    store.employment.push(e); emit(); return e;
+  },
+  removeEmployer(id: string) { store.employment = store.employment.filter((e) => e.id !== id); emit(); },
+  // POST employment verification request via email | sms | tenstreet
+  sendVerification(entryId: string, channel: 'email' | 'sms' | 'tenstreet', opts: any = {}) {
+    const e = store.employment.find((x) => x.id === entryId); if (!e) return;
+    const drv = contact(e.contactId);
+    e.verification = { status: 'requested', channel, to: opts.to || (channel === 'sms' ? e.employer.phone : channel === 'email' ? opts.to : 'Tenstreet network'), sentAt: new Date().toISOString(), returnedAt: null, result: null };
+    // audit message in the driver's communication log
+    if (channel !== 'tenstreet') {
+      store.messages.push({ id: uid('pev'), contactId: e.contactId, channel, direction: 'outbound', from: channel === 'sms' ? store.rcNumbers.find((n) => n.label === 'Compliance Line')?.phoneNumber : 'compliance@quickhire.com', to: e.verification.to, via: channel === 'sms' ? 'rc2' : 'em3', recruiter: 'Dana Reed', subject: channel === 'email' ? `Employment verification — ${drv?.name}` : undefined, body: opts.body || `Employment verification request for ${drv?.name} sent to ${e.employer.legalName}.`, status: 'sent', time: new Date().toISOString(), read: true, needsReply: false, attachments: e.employer.verifiedFromFmcsa ? [{ name: 'FMCSA-snapshot.pdf', type: 'fileText' }] : [] });
+    }
+    this._task({ title: `Employment verification — ${e.employer.legalName} (${drv?.name})`, contactId: e.contactId, related: drv?.name, relatedType: 'candidate', tags: ['PEV', 'Compliance'], priority: 'normal' });
+    emit(); return e;
+  },
+  markVerification(entryId: string, status: 'pending' | 'returned' | 'verified' | 'unable') {
+    const e = store.employment.find((x) => x.id === entryId); if (!e) return;
+    e.verification.status = status; if (status === 'verified' || status === 'returned' || status === 'unable') e.verification.returnedAt = new Date().toISOString();
+    emit(); return e;
+  },
+
   // shared task creator → pushes into the Tasks workspace + records an alert
   _task(p: any) {
     const t = addExternalTask({ title: p.title, status: 'todo', priority: p.priority || 'normal', assignee: 'NP', source: 'automation', related: p.related || (p.contactId ? contact(p.contactId)?.name : null), relatedType: p.relatedType || (p.contactId ? 'candidate' : null), carrier: p.carrier || (p.contactId ? contact(p.contactId)?.carrier : null), tags: p.tags || ['Follow-up'], due: null });
@@ -276,6 +323,15 @@ export const CALL_OUTCOMES = [
   { key: 'bad_number', label: 'Bad number', icon: 'ban', color: '#FF3B30' },
   { key: 'follow_up', label: 'Follow-up needed', icon: 'flag', color: '#007AFF' },
 ];
+
+export const PEV_STATUS: Record<string, { label: string; color: string }> = {
+  not_requested: { label: 'Not requested', color: '#8E8E93' },
+  requested: { label: 'Request sent', color: '#007AFF' },
+  pending: { label: 'Pending', color: '#FF9500' },
+  returned: { label: 'Returned', color: '#5856D6' },
+  verified: { label: 'Verified', color: '#34C759' },
+  unable: { label: 'Unable to verify', color: '#FF3B30' },
+};
 
 export const MSG_STATUS: Record<string, { label: string; color: string }> = {
   sent: { label: 'Sent', color: '#6E6E73' },
