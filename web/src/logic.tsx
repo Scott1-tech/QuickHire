@@ -178,7 +178,7 @@ export class QuickHireLogic extends React.Component<any, any> {
 
     const navDefs = [
       ['dashboard', 'Dashboard', 'dashboard'], ['pipeline', 'Hiring', 'hiring'], ['drivers', 'Drivers', 'drivers'],
-      ['carriers', 'Carriers', 'carriers'], ['compliance', 'Compliance', 'compliance'], ['docusign', 'e-Signature', 'docusign'],
+      ['compliance', 'Compliance', 'compliance'], ['docusign', 'e-Signature', 'docusign'],
       ['messages', 'Messages', 'messages'], ['anna', 'Anna', 'spark'], ['tasks', 'Tasks', 'tasks'], ['reports', 'Reports', 'reports'],
       ['integrations', 'Integrations', 'wand'], ['settings', 'Settings', 'settings'],
     ];
