@@ -1,0 +1,25 @@
+name: backend tests
+
+# Runs the pytest suite (matching engine, spec compiler, normalization, file
+# path-traversal guard, admin auth, DocuSign webhook verification, phone
+# normalization). Complements backend-import-check.yml, which only proves the
+# app imports — this proves it behaves.
+
+on:
+  pull_request:
+  push:
+    branches: [claude/zealous-ritchie-eoqtjc, claude/test-coverage-analysis-8qvwtu]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend + test dependencies
+        run: pip install --no-cache-dir -r backend/requirements-dev.txt
+      - name: Run pytest
+        working-directory: backend
+        run: python -m pytest
