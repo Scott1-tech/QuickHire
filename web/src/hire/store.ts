@@ -10,6 +10,7 @@ const nowIso = () => new Date().toISOString();
 const daysFromNow = (d: number) => new Date(Date.now() + d * 864e5).toISOString();
 
 export const STAGES = ['Lead', 'Screening', 'Background Check', 'Offer', 'Onboarding', 'Hired'];
+export const STAGE_DOT: Record<string, string> = { Lead: '#8E8E93', Screening: '#007AFF', 'Background Check': '#FF9F0A', Offer: '#5856D6', Onboarding: '#34C759', Hired: '#248A3D' };
 
 /* ───────── hiring step + document templates ───────── */
 export const STEP_GROUPS = ['Compliance & Eligibility', 'Risk Screening', 'Health & Safety', 'Employment Setup'];
@@ -118,6 +119,7 @@ function seedDriver(c: any): any {
     psp: { crashes: 0, oos: c.risk === 'High' ? 2 : 0 },
     drugTest: c.stage === 'Lead' ? 'missing' : 'passed', backgroundCheck: c.stage === 'Lead' || c.stage === 'Screening' ? 'pending' : 'clear',
     clearinghouse: (c.missing || '').toLowerCase().includes('clearinghouse') ? 'missing' : c.stage === 'Lead' ? 'pending' : 'clear',
+    stageSince: daysFromNow(-(1 + (c.score % 8))),
     assignedTruckId: null, steps: seedSteps(c.missing || ''), documents: seedDocs(c.missing || ''),
     activities: [{ id: uid('a'), type: 'stage', title: `Entered ${c.stage}`, detail: '', at: daysFromNow(-2), user: c.ownerName }],
     aiReview: null, archived: false, application: { submitted: c.stage !== 'Lead', startDate: '', payRate: '', emergencyContact: '' },
@@ -254,8 +256,18 @@ export const svc = {
   assignTruck(id: string, truckId: string) { const d = this.driver(id); if (!d) return; d.assignedTruckId = truckId; const t = store.trucks.find((x: any) => x.id === truckId); if (t) t.status = 'Assigned'; this.log(id, 'truck', `Assigned truck — Unit ${t?.unit || ''}`); },
   changeCarrier(id: string, carrier: string) { const d = this.driver(id); if (!d) return; d.carrier = carrier; d.assignedTruckId = null; this.log(id, 'carrier', `Hiring carrier changed to ${carrier}`); },
 
-  moveStage(id: string, stage: string) { const d = this.driver(id); if (!d) return; d.stage = stage; this.log(id, 'stage', `Moved to ${stage}`); },
+  moveStage(id: string, stage: string) { const d = this.driver(id); if (!d || d.stage === stage) return; d.stage = stage; d.stageSince = nowIso(); this.log(id, 'stage', `Moved to ${stage}`); },
   archive(id: string, reason: string) { const d = this.driver(id); if (!d) return; d.archived = true; this.log(id, 'archive', 'Candidate archived', reason); },
+  unarchive(id: string) { const d = this.driver(id); if (!d) return; d.archived = false; this.log(id, 'archive', 'Candidate restored'); },
+
+  addDriver(fields: any, stage = 'Lead') {
+    const base = { id: 'p_' + Math.random().toString(36).slice(2, 8), score: 70, risk: 'Medium', missing: '', cdl: `${(fields.cdlState || 'TX')} · Class ${fields.cdlClass || 'A'}`, ownerName: 'Nina Patel', stage, ...fields };
+    const d = seedDriver(base);
+    d.aiReview = computeAIReview(d);
+    store.drivers.unshift(d);
+    this.log(d.id, 'stage', `Candidate created in ${stage}`);
+    return d;
+  },
 
   runAIReview(id: string) { const d = this.driver(id); if (!d) return null; d.aiReview = computeAIReview(d); this.log(id, 'ai', `Anna review — ${AI_STATUS_META[d.aiReview.status].label} (${d.aiReview.score})`, d.aiReview.summary); return d.aiReview; },
   ensureReview(id: string) { const d = this.driver(id); if (d && !d.aiReview) d.aiReview = computeAIReview(d); return d?.aiReview; },

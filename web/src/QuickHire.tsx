@@ -11,6 +11,7 @@ import { AnnaSettings } from './anna/settings';
 import EsignWorkspace from './esign/EsignWorkspace';
 import DriverProfile from './hire/DriverProfile';
 import CarrierFolders from './hire/CarrierFolders';
+import HiringPipeline from './hire/HiringPipeline';
 import { TopBar } from './shell/TopBar';
 import { CARRIER_LIST, CANDS } from './data';
 
@@ -247,7 +248,11 @@ export default class QuickHire extends QuickHireLogic {
   }
 
   // ===================== HIRING PIPELINE =====================
-  renderPipeline(v: any) {
+  renderPipeline(_v: any) {
+    return <HiringPipeline openDriver={(id: string) => this.openCand(id)} />;
+  }
+
+  renderPipelineLegacy(v: any) {
     return (
       <div style={css('padding:28px 28px 0; height:100%; display:flex; flex-direction:column;')}>
         <div style={css('display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex:none;')}>
