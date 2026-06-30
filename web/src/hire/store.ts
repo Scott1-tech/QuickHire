@@ -167,6 +167,12 @@ export function computeAIReview(d: any) {
   if (d.psp.oos > 0) { risks.push(`${d.psp.oos} out-of-service inspection${d.psp.oos > 1 ? 's' : ''} on PSP`); score -= 5 * d.psp.oos; }
   if (d.experienceYears < pol.minExperienceYears) { conflicts.push(`Experience ${d.experienceYears}y below ${pol.minExperienceYears}y minimum`); score -= 16; }
 
+  // carrier insurance must be active for a driver to be cleared under it
+  const activeIns = (carrier?.insurance || []).filter((i: any) => i.active);
+  const expiredIns = activeIns.filter((i: any) => i.expiration && +new Date(i.expiration) < Date.now());
+  if (carrier && activeIns.length === 0) { conflicts.push(`${d.carrier} has no active insurance on file`); score -= 12; }
+  expiredIns.forEach((i: any) => { risks.push(`${d.carrier} ${i.coverageType} insurance expired ${fmtDate(i.expiration)}`); score -= 4; });
+
   // doc completeness
   const missDocs = (d.documents || []).filter((x: any) => x.required && x.status === 'missing');
   missDocs.forEach((x: any) => { if (!missing.includes(x.name)) missing.push(x.name); });
@@ -258,10 +264,35 @@ export const svc = {
   sendOffer(id: string) { this.log(id, 'offer', 'Offer package sent (DocuSign)'); },
   startCompliance(id: string) { const d = this.driver(id); if (!d) return; ['MVR Check', 'PSP Report', 'Clearinghouse Query'].forEach((n) => { const s = d.steps.find((x: any) => x.name === n); if (s && s.status === 'not_started') s.status = 'in_progress'; }); this.log(id, 'compliance', 'Compliance check started (MVR · PSP · Clearinghouse)'); },
 
-  /* carrier folder */
-  addInsurance(carrierId: string, ins: any) { const c = store.carriers.find((x: any) => x.id === carrierId); if (!c) return; c.insurance.unshift({ id: uid('ins'), active: true, ...ins }); emit(); },
-  updateInsurance(carrierId: string, insId: string, patch: any) { const c = store.carriers.find((x: any) => x.id === carrierId); const ins = c?.insurance.find((i: any) => i.id === insId); if (ins) { Object.assign(ins, patch); emit(); } },
+  /* carrier folders */
+  carrier(id: string) { return store.carriers.find((c: any) => c.id === id); },
+  logCarrier(id: string, type: string, title: string, detail = '') { const c = this.carrier(id); if (!c) return; c.activities = c.activities || []; c.activities.unshift({ id: uid('a'), type, title, detail, at: nowIso(), user: 'Nina Patel' }); shellSvc.logActivity(type, `${c.name}: ${title}`, detail, { type: 'carrier', id }); emit(); },
+  addCarrier(fields: any) {
+    const c = { id: uid('car'), name: fields.name, dot: fields.dot || '', mc: fields.mc || '', status: fields.status || 'pending', address: fields.address || '', phone: fields.phone || '', dba: fields.dba || '', contact: fields.contact || '', email: fields.email || '', policy: { maxMovingViolations: 2, maxAccidents: 1, maxDUI: 0, minExperienceYears: 1 }, insurance: [], forms: [], notes: '', activities: [] };
+    store.carriers.unshift(c); this.logCarrier(c.id, 'carrier', 'Carrier folder created'); return c;
+  },
+  updateCarrier(id: string, patch: any) { const c = this.carrier(id); if (c) { Object.assign(c, patch); emit(); } },
+  updatePolicy(id: string, patch: any) { const c = this.carrier(id); if (c) { c.policy = { ...c.policy, ...patch }; this.logCarrier(id, 'policy', 'Hiring policy updated'); } },
+  addForm(id: string, form: any) { const c = this.carrier(id); if (!c) return; c.forms.unshift({ id: uid('frm'), name: form.name, type: form.type || 'Carrier Form', submittedBy: form.submittedBy || c.contact || 'Carrier', status: 'submitted', at: nowIso() }); this.logCarrier(id, 'form', `Form attached — ${form.name}`); },
+  removeForm(id: string, formId: string) { const c = this.carrier(id); if (!c) return; c.forms = c.forms.filter((f: any) => f.id !== formId); emit(); },
+  addInsurance(carrierId: string, ins: any) { const c = this.carrier(carrierId); if (!c) return; c.insurance.unshift({ id: uid('ins'), active: true, ...ins }); this.logCarrier(carrierId, 'insurance', `Insurance added — ${ins.coverageType || 'coverage'}`); },
+  updateInsurance(carrierId: string, insId: string, patch: any) { const c = this.carrier(carrierId); const ins = c?.insurance.find((i: any) => i.id === insId); if (ins) { Object.assign(ins, patch); emit(); } },
+  removeInsurance(carrierId: string, insId: string) { const c = this.carrier(carrierId); if (!c) return; c.insurance = c.insurance.filter((i: any) => i.id !== insId); emit(); },
 };
+
+/* Anna summary for a carrier folder — also surfaces insurance gaps that affect
+   driver eligibility (lapsed/inactive required coverage). */
+export function carrierAISummary(c: any) {
+  const flags: string[] = [];
+  const active = (c.insurance || []).filter((i: any) => i.active);
+  const expired = active.filter((i: any) => i.expiration && +new Date(i.expiration) < Date.now());
+  if (!active.length) flags.push('No active insurance on file — drivers cannot be cleared for this carrier.');
+  expired.forEach((i: any) => flags.push(`${i.coverageType} expired ${fmtDate(i.expiration)} — renew before hiring.`));
+  if (!(c.forms || []).length) flags.push('No carrier forms submitted yet.');
+  const driverCount = store.drivers.filter((d: any) => resolveCarrier(d.carrier)?.id === c.id && !d.archived).length;
+  const text = `${c.name} (DOT ${c.dot || '—'}) is ${c.status}. ${active.length} active insurance ${active.length === 1 ? 'policy' : 'policies'}, ${(c.forms || []).length} form${(c.forms || []).length === 1 ? '' : 's'} on file. Hiring policy: ≤${c.policy?.maxMovingViolations} violations, ≤${c.policy?.maxDUI} DUI, ${c.policy?.minExperienceYears}y experience. ${driverCount} active driver${driverCount === 1 ? '' : 's'} hiring under this carrier.`;
+  return { text, flags };
+}
 
 export function fmtAgo(iso: string) {
   if (!iso) return ''; const m = Math.floor((Date.now() - +new Date(iso)) / 6e4);

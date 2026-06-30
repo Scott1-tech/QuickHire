@@ -10,6 +10,7 @@ import AnnaWorkspace from './anna/AnnaWorkspace';
 import { AnnaSettings } from './anna/settings';
 import EsignWorkspace from './esign/EsignWorkspace';
 import DriverProfile from './hire/DriverProfile';
+import CarrierFolders from './hire/CarrierFolders';
 import { TopBar } from './shell/TopBar';
 import { CARRIER_LIST, CANDS } from './data';
 
@@ -589,7 +590,11 @@ export default class QuickHire extends QuickHireLogic {
   }
 
   // ===================== CARRIERS =====================
-  renderCarriers(v: any) {
+  renderCarriers(_v: any) {
+    return <CarrierFolders go={(p: string) => this.go(p)} />;
+  }
+
+  renderCarriersLegacy(v: any) {
     return (
       <>
         {v.carrierList && (
