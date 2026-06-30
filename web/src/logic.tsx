@@ -178,7 +178,7 @@ export class QuickHireLogic extends React.Component<any, any> {
 
     const navDefs = [
       ['dashboard', 'Dashboard', 'dashboard'], ['pipeline', 'Hiring', 'hiring'], ['drivers', 'Drivers', 'drivers'],
-      ['carriers', 'Carriers', 'carriers'], ['compliance', 'Compliance', 'compliance'], ['docusign', 'DocuSign', 'docusign'],
+      ['carriers', 'Carriers', 'carriers'], ['compliance', 'Compliance', 'compliance'], ['docusign', 'e-Signature', 'docusign'],
       ['messages', 'Messages', 'messages'], ['anna', 'Anna', 'spark'], ['tasks', 'Tasks', 'tasks'], ['reports', 'Reports', 'reports'],
       ['integrations', 'Integrations', 'wand'], ['settings', 'Settings', 'settings'],
     ];
@@ -220,7 +220,7 @@ export class QuickHireLogic extends React.Component<any, any> {
     const isIntegrations = S.page === 'integrations';
     const isTasks = S.page === 'tasks';
     const isAnna = S.page === 'anna';
-    const titles: Record<string, string> = { dashboard: 'Dashboard', pipeline: 'Hiring Pipeline', profile: 'Candidate Profile', drivers: 'Drivers', carriers: 'Carriers', compliance: 'Compliance', docusign: 'DocuSign', messages: 'Messages', anna: 'Anna', tasks: 'Tasks', reports: 'Reports', settings: 'Settings' };
+    const titles: Record<string, string> = { dashboard: 'Dashboard', pipeline: 'Hiring Pipeline', profile: 'Candidate Profile', drivers: 'Drivers', carriers: 'Carriers', compliance: 'Compliance', docusign: 'e-Signature', messages: 'Messages', anna: 'Anna', tasks: 'Tasks', reports: 'Reports', settings: 'Settings' };
 
     const out: any = {
       expanded, sidebarStyle, sidebarStrong, sidebarFaint, sidebarBorder, nav, carrierSwitchStyle, themeBtnStyle,
