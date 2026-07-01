@@ -1,7 +1,8 @@
 import React from 'react';
 import { Hover } from '../lib/dc';
-import { T, Icon, useToasts, ToastHost } from '../tasks/lib';
+import { T, Icon, useToasts, ToastHost, SegTabs } from '../tasks/lib';
 import { Card, Modal, Field, Input, Select, Textarea, primaryBtn, ghostBtn, Toggle, EmptyState } from '../esign/ui';
+import { RecruitDashboard, RecruitReports, RecruitArchive, RecruitAutomations } from './views';
 import {
   useRecruit, svc, USERS, SOURCES, SCORE_META, INTEREST, CLOSE_REASONS, DECISIONS,
   daysInStage, agingLevel, isOverdue, fmtAgo, fmtDate, dueLabel, findDuplicate, stageByName,
@@ -23,6 +24,7 @@ export default function RecruitPipeline({ go }: { go?: (p: string) => void }) {
   const [sort, setSort] = React.useState('score');
   const [openId, setOpenId] = React.useState<string | null>(null);
   const [modal, setModal] = React.useState<any>(null);
+  const [tab, setTab] = React.useState('board');
   const drag = React.useRef<string | null>(null);
   void store;
 
@@ -57,13 +59,22 @@ export default function RecruitPipeline({ go }: { go?: (p: string) => void }) {
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
         <Hover as="button" onClick={() => setModal({ kind: 'anna' })} style={{ ...ghostBtn, gap: 6 }} hover={{ background: 'rgba(0,0,0,0.04)' }}><Icon name="sparkles" size={15} style={{ color: '#007AFF' }} />Anna intake</Hover>
-        <Hover as="button" onClick={() => setModal({ kind: 'settings' })} style={ghostBtn} hover={{ background: 'rgba(0,0,0,0.04)' }}><Icon name="settings" size={15} />Stages</Hover>
+        {tab === 'board' && <Hover as="button" onClick={() => setModal({ kind: 'settings' })} style={ghostBtn} hover={{ background: 'rgba(0,0,0,0.04)' }}><Icon name="settings" size={15} />Stages</Hover>}
         <Hover as="button" onClick={() => setModal({ kind: 'new' })} style={primaryBtn} hover={{ background: '#0066D6' }}><Icon name="plus" size={16} />New Lead</Hover>
       </div>
     </div>
 
+    <div style={{ marginTop: 14, flex: 'none' }}><SegTabs value={tab} onChange={setTab} tabs={[{ key: 'board', label: 'Board', icon: 'columns' }, { key: 'dashboard', label: 'Dashboard', icon: 'layout' }, { key: 'reports', label: 'Reports', icon: 'barChart' }, { key: 'archive', label: 'Archive', icon: 'ban' }, { key: 'automations', label: 'Automations', icon: 'zap' }]} /></div>
+
+    {tab !== 'board' && <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '18px 2px 24px' }}>
+      {tab === 'dashboard' && <RecruitDashboard onOpen={setOpenId} />}
+      {tab === 'reports' && <RecruitReports />}
+      {tab === 'archive' && <RecruitArchive onOpen={setOpenId} toast={toast} />}
+      {tab === 'automations' && <RecruitAutomations toast={toast} />}
+    </div>}
+
     {/* toolbar */}
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '16px 0', flex: 'none', flexWrap: 'wrap' }}>
+    {tab === 'board' && <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '16px 0', flex: 'none', flexWrap: 'wrap' }}>
       <div style={{ position: 'relative', width: 260 }}>
         <span style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: T.faint }}><Icon name="search" size={16} /></span>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, phone, location…" style={{ width: '100%', boxSizing: 'border-box', height: 36, borderRadius: 10, border: `1px solid ${T.border}`, padding: '0 12px 0 34px', fontSize: 13, outline: 'none' }} />
@@ -74,10 +85,10 @@ export default function RecruitPipeline({ go }: { go?: (p: string) => void }) {
       <Hover as="button" onClick={() => setFOverdue((v) => !v)} style={{ height: 36, padding: '0 12px', borderRadius: 10, border: `1px solid ${fOverdue ? '#FF453A' : T.border}`, background: fOverdue ? 'rgba(255,69,58,0.08)' : '#fff', color: fOverdue ? '#C62820' : T.muted, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }} hover={{ background: fOverdue ? 'rgba(255,69,58,0.1)' : T.hover }}><Icon name="clock" size={14} />Overdue</Hover>
       <div style={{ flex: 1 }} />
       <Select value={sort} onChange={setSort} options={[{ value: 'score', label: 'Sort: Score' }, { value: 'date', label: 'Sort: Newest' }, { value: 'overdue', label: 'Sort: Overdue' }, { value: 'name', label: 'Sort: Name' }, { value: 'location', label: 'Sort: Location' }]} style={{ width: 160, height: 36 }} />
-    </div>
+    </div>}
 
     {/* board */}
-    <div style={{ flex: 1, overflowX: 'auto', overflowY: 'hidden', paddingBottom: 22 }}>
+    {tab === 'board' && <div style={{ flex: 1, overflowX: 'auto', overflowY: 'hidden', paddingBottom: 22 }}>
       <div style={{ display: 'flex', gap: 12, height: '100%', minWidth: 'max-content' }}>
         {stages.map((st: any) => {
           const cards = filtered.filter((l: any) => l.stageName === st.name).sort(sortFn);
@@ -95,7 +106,7 @@ export default function RecruitPipeline({ go }: { go?: (p: string) => void }) {
           </div>;
         })}
       </div>
-    </div>
+    </div>}
 
     {openId && <LeadPanel id={openId} onClose={() => setOpenId(null)} toast={toast} setModal={setModal} go={go} />}
     {modal && <RecruitModals modal={modal} onClose={() => setModal(null)} toast={toast} onOpen={(id: string) => { setOpenId(id); }} />}

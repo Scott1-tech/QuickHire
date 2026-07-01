@@ -59,7 +59,14 @@ const DEFAULT_STAGES = [
 /* ── persistence ── */
 const LS = 'qh_recruit_v1';
 function load(): any | null { try { const r = localStorage.getItem(LS); return r ? JSON.parse(r) : null; } catch { return null; } }
-function persist() { try { localStorage.setItem(LS, JSON.stringify({ stages: store.stages, leads: store.leads })); } catch { /* quota */ } }
+function persist() { try { localStorage.setItem(LS, JSON.stringify({ stages: store.stages, leads: store.leads, automations: store.automations })); } catch { /* quota */ } }
+
+const DEFAULT_AUTOMATIONS = [
+  { id: 'sla_flag', name: 'Flag SLA breaches', desc: 'Flag leads past their stage SLA as no-response.', enabled: true },
+  { id: 'escalate_stale', name: 'Escalate stalled leads', desc: 'Escalate leads over 2× their stage SLA to the owner.', enabled: true },
+  { id: 'rescore', name: 'Recompute driver scores', desc: 'Refresh every lead score from the latest activity.', enabled: true },
+  { id: 'autoadvance', name: 'Auto-advance on documents received', desc: 'Move "Documents Received" leads to "Ready for Review".', enabled: false },
+];
 
 /* ── seed ── */
 function mkLead(p: any) {
@@ -92,11 +99,11 @@ function seedLeads() {
   ];
 }
 
-export const store: any = { stages: [], leads: [] };
+export const store: any = { stages: [], leads: [], automations: [] };
 (function init() {
   const s = load();
-  if (s && s.leads) { store.stages = s.stages || DEFAULT_STAGES; store.leads = s.leads; }
-  else { store.stages = DEFAULT_STAGES; store.leads = seedLeads(); persist(); }
+  if (s && s.leads) { store.stages = s.stages || DEFAULT_STAGES; store.leads = s.leads; store.automations = s.automations || DEFAULT_AUTOMATIONS.map((a) => ({ ...a })); }
+  else { store.stages = DEFAULT_STAGES; store.leads = seedLeads(); store.automations = DEFAULT_AUTOMATIONS.map((a) => ({ ...a })); persist(); }
 })();
 
 const listeners = new Set<() => void>();
@@ -235,6 +242,64 @@ export const svc = {
     const ordered = store.stages.slice().sort((a: any, b: any) => a.order - b.order);
     const i = ordered.findIndex((s: any) => s.id === id); const j = i + dir; if (j < 0 || j >= ordered.length) return;
     const a = ordered[i], b = ordered[j]; const t = a.order; a.order = b.order; b.order = t; emit();
+  },
+
+  /* automations */
+  toggleAutomation(id: string) { const a = store.automations.find((x: any) => x.id === id); if (a) { a.enabled = !a.enabled; emit(); } },
+  runAutomations() {
+    const on = (id: string) => store.automations.find((a: any) => a.id === id)?.enabled;
+    const res = { flagged: 0, escalated: 0, rescored: 0, advanced: 0 };
+    for (const l of store.leads) {
+      if (l.archived) continue;
+      const st = stageByName(l.stageName); const d = daysInStage(l);
+      if (on('sla_flag') && st?.maxDays && d > st.maxDays && !(l.flags || []).includes('no_response')) { this.flagNoResponse(l.id); res.flagged++; }
+      if (on('escalate_stale') && st?.maxDays && d > st.maxDays * 2 && !(l.flags || []).includes('escalated')) { this.escalate(l.id, `Stalled ${d}d in ${l.stageName} (2× SLA)`); res.escalated++; }
+      if (on('autoadvance') && l.stageName === 'Documents Received') { this.moveStage(l.id, 'Ready for Review', { detail: 'Auto-advanced by automation' }); res.advanced++; }
+      if (on('rescore')) { const before = l.score; l.score = computeScore(l); l.scoreLabel = scoreLabel(l.score); if (before !== l.score) res.rescored++; }
+    }
+    emit();
+    return res;
+  },
+  /** Advanced Anna recommendations across the funnel. */
+  recommendations(userId = 'NP') {
+    const leads = this.visibleLeads(userId).filter((l: any) => !l.archived);
+    const recs: any[] = [];
+    for (const l of leads) {
+      if (l.consent?.doNotContact) continue;
+      if (l.scoreLabel === 'Hot Lead' && !['Approved', 'Hired', 'Ready for Review'].includes(l.stageName)) recs.push({ leadId: l.id, name: l.name, priority: 'high', text: `${l.name} is a Hot Lead — fast-track: ${l.stageName === 'Documents Received' ? 'move to review' : 'send documents / schedule call'}.` });
+      else if (isOverdue(l)) recs.push({ leadId: l.id, name: l.name, priority: 'high', text: `${l.name} is overdue in ${l.stageName} (${daysInStage(l)}d) — follow up today.` });
+      else if (l.stageName === 'Ready for Review') recs.push({ leadId: l.id, name: l.name, priority: 'normal', text: `${l.name} is ready for a decision.` });
+      else if ((l.flags || []).includes('escalated')) recs.push({ leadId: l.id, name: l.name, priority: 'high', text: `${l.name} was escalated and needs attention.` });
+    }
+    return recs.sort((a, b) => (a.priority === 'high' ? -1 : 1) - (b.priority === 'high' ? -1 : 1)).slice(0, 12);
+  },
+
+  /* management analytics */
+  analytics() {
+    const L = store.leads;
+    const hired = L.filter((l: any) => l.stageName === 'Hired' || l.decision === 'hired');
+    const rejected = L.filter((l: any) => l.stageName === 'Rejected' || l.decision === 'not_acceptable');
+    const refused = L.filter((l: any) => l.stageName === 'Refused / Not Interested' || l.decision === 'refused');
+    const closed = hired.length + rejected.length + refused.length;
+    const hrsBetween = (a: string, b: string) => a && b ? (+new Date(b) - +new Date(a)) / 36e5 : null;
+    const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((s, x) => s + x, 0) / arr.length) : null;
+    const timeToHire = hired.map((l: any) => { const h = (l.activities || []).find((a: any) => a.type === 'stage' && /Hired/.test(a.title))?.at || l.stageSince; return hrsBetween(l.createdAt, h); }).filter((x: any) => x != null) as number[];
+    // avg days in each stage (current occupants)
+    const byStage = this.stages().map((s: any) => { const ls = L.filter((l: any) => l.stageName === s.name && !s.terminal); return { stage: s.name, count: L.filter((l: any) => l.stageName === s.name).length, avgDays: avg(ls.map((l: any) => daysInStage(l))) }; });
+    const perRecruiter = USERS.map((u) => { const own = L.filter((l: any) => l.ownerId === u.id); return { name: u.name, leads: own.length, hired: own.filter((l: any) => l.stageName === 'Hired').length, active: own.filter((l: any) => !l.archived).length, overdue: own.filter((l: any) => !l.archived && isOverdue(l)).length }; });
+    const perSource = SOURCES.map((s) => { const src = L.filter((l: any) => l.source === s.key); return { source: s.label, leads: src.length, hired: src.filter((l: any) => l.stageName === 'Hired').length }; }).filter((x) => x.leads > 0);
+    const lostReasons: Record<string, number> = {};
+    L.filter((l: any) => l.closeReason).forEach((l: any) => { lostReasons[l.closeReason] = (lostReasons[l.closeReason] || 0) + 1; });
+    const topLost = Object.entries(lostReasons).map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count);
+    const anna = L.filter((l: any) => l.source === 'anna');
+    return {
+      totalLeads: L.length, newLeads: L.filter((l: any) => l.stageName === 'New Lead').length,
+      hired: hired.length, rejected: rejected.length, refused: refused.length,
+      conversion: L.length ? Math.round((hired.length / L.length) * 100) : 0,
+      avgHoursToHire: avg(timeToHire), byStage, perRecruiter, perSource, topLost,
+      annaLeads: anna.length, annaHired: anna.filter((l: any) => l.stageName === 'Hired').length,
+      annaConversion: anna.length ? Math.round((anna.filter((l: any) => l.stageName === 'Hired').length / anna.length) * 100) : 0,
+    };
   },
 
   /* permissions scope */
