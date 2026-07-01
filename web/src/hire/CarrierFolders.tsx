@@ -3,6 +3,7 @@ import { Hover } from '../lib/dc';
 import { T, Icon, useToasts, ToastHost } from '../tasks/lib';
 import { Card, Modal, Field, Input, Select, Textarea, primaryBtn, ghostBtn, Toggle, EmptyState } from '../esign/ui';
 import { useHire, svc, carrierAISummary, fmtAgo, fmtDate } from './store';
+import { pickAndSave, openFile } from '../shell/files';
 
 const BG = '#F5F6F8';
 const COVERAGE_TYPES = ['Auto Liability', 'Cargo Insurance', 'General Liability', 'Occupational Accident', 'Physical Damage', 'Trailer Interchange', 'Workers Compensation', 'Certificate of Insurance'];
@@ -99,8 +100,12 @@ function CarrierDetail({ carrier: c, onBack, toast, setModal }: any) {
             <div style={{ fontSize: 11.5, color: T.faint, marginTop: 2 }}>Policy {i.policyNumber || '—'}</div>
             <div style={{ fontSize: 11.5, color: expired ? '#C62820' : T.faint, marginTop: 2 }}>{i.effective ? `${fmtDate(i.effective)} – ` : ''}{i.expiration ? fmtDate(i.expiration) : 'no expiry'}{expired ? ' · EXPIRED' : ''}</div>
             {i.additionalInsured && <span style={{ display: 'inline-block', marginTop: 6, fontSize: 10.5, fontWeight: 600, color: '#0066CC', background: 'rgba(0,122,255,0.1)', borderRadius: 999, padding: '2px 8px' }}>Additional insured</span>}
-            <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-              <SmallBtn icon="upload" label="Policy PDF" onClick={() => toast('Policy PDF uploaded (simulated)', 'success')} />
+            {i.fileName && <div style={{ fontSize: 11, color: T.faint, marginTop: 6, display: 'flex', alignItems: 'center', gap: 5 }}><Icon name="paperclip" size={11} />{i.fileName}</div>}
+            <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+              {i.fileId
+                ? <SmallBtn icon="eye" label="View policy" onClick={() => { if (!openFile(i.fileId)) toast('File unavailable', 'error'); }} />
+                : null}
+              <SmallBtn icon="upload" label={i.fileId ? 'Replace PDF' : 'Policy PDF'} onClick={() => pickAndSave('application/pdf,image/*', (f) => { svc.updateInsurance(c.id, i.id, { fileId: f.id, fileName: f.name }); toast(`Policy uploaded — ${f.name}`, 'success'); }, (m) => toast(m, 'error'))} />
               <SmallBtn icon="pencil" label="Edit" onClick={() => setModal({ kind: 'insurance', ins: i })} />
               <button onClick={() => { svc.removeInsurance(c.id, i.id); toast('Removed', 'info'); }} style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${T.border}`, background: '#fff', color: '#C62820', cursor: 'pointer' }}><Icon name="trash" size={13} /></button>
             </div>
@@ -126,7 +131,8 @@ function CarrierDetail({ carrier: c, onBack, toast, setModal }: any) {
           <span style={{ width: 32, height: 32, flex: 'none', borderRadius: 8, background: 'rgba(52,199,89,0.12)', color: '#248A3D', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="fileText" size={15} /></span>
           <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, fontWeight: 600 }}>{f.name}</div><div style={{ fontSize: 11.5, color: T.faint }}>{f.type} · {f.submittedBy} · {fmtAgo(f.at)}</div></div>
           <span style={{ fontSize: 11, fontWeight: 600, color: '#248A3D', background: 'rgba(52,199,89,0.12)', borderRadius: 999, padding: '2px 9px' }}>Submitted</span>
-          <SmallBtn icon="eye" label="View" onClick={() => toast('Opening form…', 'info')} />
+          <SmallBtn icon="eye" label="View" onClick={() => { if (!openFile(f.fileId)) toast('No file attached to this form', 'info'); }} />
+          <SmallBtn icon="upload" label={f.fileId ? 'Replace' : 'Attach'} onClick={() => pickAndSave('application/pdf,image/*', (file) => { f.fileId = file.id; f.fileName = file.name; svc.logCarrier(c.id, 'form', `File attached to ${f.name}`, file.name); toast(`Attached ${file.name}`, 'success'); }, (m) => toast(m, 'error'))} />
           <button onClick={() => { svc.removeForm(c.id, f.id); toast('Removed', 'info'); }} style={{ width: 30, height: 30, borderRadius: 8, border: 'none', background: 'transparent', color: '#C62820', cursor: 'pointer' }}><Icon name="trash" size={14} /></button>
         </div>)}</Card>}
     </Section>

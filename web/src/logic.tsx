@@ -4,6 +4,7 @@ import {
   STAGE_DOT, THREADS, TEMPLATES, PACKAGES, AGREEMENTS, COMP_ROWS, INTEGRATIONS,
   SETTINGS_NAV, AVATAR_COLORS, ICONS,
 } from './data';
+import { svc as hireSvc, store as hireStore } from './hire/store';
 
 /**
  * Base class holding all QuickHire state, mock data, helpers and the renderVals()
@@ -140,6 +141,13 @@ export class QuickHireLogic extends React.Component<any, any> {
     setTimeout(() => this.setState((s: any) => ({ toasts: s.toasts.filter((x: any) => x.id !== id) })), 3600);
   }
   openCand(id: string) { this.setState({ candidateId: id, page: 'profile', profileTab: 'overview', paletteOpen: false }); }
+  /** Open a driver profile by name, creating the record on demand so every
+      roster/compliance row leads to a real profile. */
+  openDriverByName(name: string, carrier = 'GRAND ONE LLC', stage = 'Hired') {
+    let d = hireStore.drivers.find((x: any) => x.name.toLowerCase() === name.toLowerCase());
+    if (!d) d = hireSvc.addDriver({ name, carrier, phone: '(555) 010-0000', email: name.toLowerCase().replace(/[^a-z]/g, '.') + '@example.com', position: 'Company Driver' }, stage);
+    this.openCand(d.id);
+  }
   moveCand(id: string, stage: string) { const c = this.CANDS.find((x: any) => x.id === id); if (c && c.stage !== stage) { c.stage = stage; this.forceUpdate(); this.toast(c.name + ' moved to ' + this.STAGE_TITLES[stage], '', 'success'); } }
 
   componentDidMount() {
@@ -274,7 +282,7 @@ export class QuickHireLogic extends React.Component<any, any> {
         { doc: 'Offer Letter', who: 'Sarah Chen', age: '2h' },
         { doc: 'Company Driver Agreement', who: 'Mike Okafor', age: '5h' },
         { doc: 'Clearinghouse Consent', who: 'Aisha Bello', age: '2d' },
-      ].map((d: any) => ({ ...d, onClick: () => this.toast('Reminder sent', d.who + ' · ' + d.doc, 'success') }));
+      ].map((d: any) => ({ ...d, onClick: () => this.toast('Reminder sent', d.who + ' · ' + d.doc, 'success'), onOpen: () => this.go('docusign') }));
       out.recentApps = this.CANDS.slice(0, 4).map((c: any) => { const ch = this.stageChip(c.stage); return { name: c.name, carrier: c.carrier, stage: c.stage, initials: this.initials(c.name), avatarBg: this.avatarColor(c.name), chipStyle: { ...ch.style }, onClick: () => this.openCand(c.id) }; });
       out.messagesReply = this.THREADS.slice(0, 3).map((t: any) => ({ name: t.name, channel: t.channel, preview: t.preview, age: t.age, initials: this.initials(t.name), avatarBg: this.avatarColor(t.name), chanStyle: this.channelChip(t.channel), onClick: () => this.setState({ page: 'messages', threadId: t.id }) }));
     }
@@ -392,7 +400,7 @@ export class QuickHireLogic extends React.Component<any, any> {
       out.compRows = rows.map((r: any) => { const c = this.chip(r.status); const sel = !!S.compSelected[r.id]; return { ...r, chipStyle: c.style, chipDot: c.dot, actionLabel: r.action,
         check: sel ? this.ic('check', 13) : null, checkBg: sel ? '#007AFF' : '#fff', checkBorder: sel ? '#007AFF' : 'rgba(0,0,0,0.22)',
         onToggle: () => this.setState((s: any) => ({ compSelected: { ...s.compSelected, [r.id]: !s.compSelected[r.id] } })),
-        onAction: () => this.toast(r.action + ' · ' + r.driver, r.doc, r.action === 'Approve' ? 'success' : 'info') }; });
+        onAction: () => { if (r.action === 'Approve') this.toast('Approved · ' + r.driver, r.doc, 'success'); else if (r.action === 'Request') { this.toast('Requested ' + r.doc, 'Upload link sent to ' + r.driver, 'success'); this.openDriverByName(r.driver, r.carrier, 'Screening'); } else this.openDriverByName(r.driver, r.carrier, 'Screening'); } }; });
       const selCount = Object.values(S.compSelected).filter(Boolean).length;
       out.compHasSelection = selCount > 0; out.compSelCount = selCount;
       out.bulkRequest = () => { this.toast('Upload requested', selCount + ' drivers notified', 'success'); this.setState({ compSelected: {} }); };
@@ -446,10 +454,13 @@ export class QuickHireLogic extends React.Component<any, any> {
       out.showDrivers = v === 'drivers'; out.showTrucks = v === 'trucks';
       out.driverSubtitle = v === 'drivers' ? '5 drivers · 4 active · 1 inactive' : '5 units · 2 assigned · 1 in shop';
       out.addDriverLabel = v === 'drivers' ? 'Add Driver' : 'Add Truck';
-      out.addDriver = () => this.toast(v === 'drivers' ? 'Add driver' : 'Add truck', 'Opening form…', 'info');
+      out.addDriver = () => {
+        if (v === 'drivers') { this.go('pipeline'); this.toast('Add a driver', 'Use “Invite Driver” on the Hiring Pipeline', 'info'); }
+        else { const t = hireSvc.addTruck('GRAND ONE LLC'); this.toast('Truck added', `Unit ${t.unit} · GRAND ONE LLC — visible in the carrier folder and truck pickers`, 'success'); }
+      };
       out.driverSeg = [['drivers', 'Drivers'], ['trucks', 'Trucks']].map(([k, l]: any) => ({ label: l, onClick: () => this.setState({ driverView: k }), style: { height: '30px', padding: '0 16px', fontSize: '13px', fontWeight: 600, borderRadius: '8px', border: 'none', cursor: 'pointer', background: v === k ? '#fff' : 'transparent', color: v === k ? '#1D1D1F' : '#6E6E73', boxShadow: v === k ? '0 1px 2px rgba(0,0,0,0.10)' : 'none' } }));
-      out.driverRows = this.DRIVERS_TBL.map((d: any) => { const sc = this.statusChipFor(d.status); const cc = this.statusChipFor(d.comp); return { ...d, initials: this.initials(d.name), avatarBg: this.avatarColor(d.name), medColor: d.medOk ? '#6E6E73' : '#C62820', statusChip: sc.style, statusDot: sc.dot, compChip: cc.style, compDot: cc.dot, onView: () => this.toast(d.name, 'Opening driver profile…', 'info') }; });
-      out.truckRows = this.TRUCKS_TBL.map((t: any) => { const sc = this.statusChipFor(t.status); return { ...t, statusChip: sc.style, statusDot: sc.dot, regColor: t.regOk ? '#6E6E73' : '#C62820', inspColor: t.inspOk ? '#6E6E73' : '#C62820', insColor: t.insOk ? '#6E6E73' : '#C62820', onView: () => this.toast('Unit #' + t.unit, 'Opening truck record…', 'info') }; });
+      out.driverRows = this.DRIVERS_TBL.map((d: any) => { const sc = this.statusChipFor(d.status); const cc = this.statusChipFor(d.comp); return { ...d, initials: this.initials(d.name), avatarBg: this.avatarColor(d.name), medColor: d.medOk ? '#6E6E73' : '#C62820', statusChip: sc.style, statusDot: sc.dot, compChip: cc.style, compDot: cc.dot, onView: () => this.openDriverByName(d.name, d.carrier, 'Hired') }; });
+      out.truckRows = this.TRUCKS_TBL.map((t: any) => { const sc = this.statusChipFor(t.status); return { ...t, statusChip: sc.style, statusDot: sc.dot, regColor: t.regOk ? '#6E6E73' : '#C62820', inspColor: t.inspOk ? '#6E6E73' : '#C62820', insColor: t.insOk ? '#6E6E73' : '#C62820', onView: () => { this.setState({ page: 'carriers' }); this.toast('Unit #' + t.unit, 'Truck records live in the carrier folder', 'info'); } }; });
     }
 
     if (isCarriers) {
