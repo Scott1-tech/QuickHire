@@ -177,7 +177,7 @@ export class QuickHireLogic extends React.Component<any, any> {
     const sidebarBorder = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)';
 
     const navDefs = [
-      ['dashboard', 'Dashboard', 'dashboard'], ['pipeline', 'Hiring', 'hiring'], ['drivers', 'Drivers', 'drivers'],
+      ['dashboard', 'Dashboard', 'dashboard'], ['recruiting', 'Recruiting', 'funnel'], ['pipeline', 'Hiring', 'hiring'], ['drivers', 'Drivers', 'drivers'],
       ['compliance', 'Compliance', 'compliance'], ['docusign', 'e-Signature', 'docusign'],
       ['messages', 'Messages', 'messages'], ['anna', 'Anna', 'spark'], ['tasks', 'Tasks', 'tasks'], ['reports', 'Reports', 'reports'],
       ['integrations', 'Integrations', 'wand'], ['settings', 'Settings', 'settings'],
@@ -220,7 +220,8 @@ export class QuickHireLogic extends React.Component<any, any> {
     const isIntegrations = S.page === 'integrations';
     const isTasks = S.page === 'tasks';
     const isAnna = S.page === 'anna';
-    const titles: Record<string, string> = { dashboard: 'Dashboard', pipeline: 'Hiring Pipeline', profile: 'Candidate Profile', drivers: 'Drivers', carriers: 'Carriers', compliance: 'Compliance', docusign: 'e-Signature', messages: 'Messages', anna: 'Anna', tasks: 'Tasks', reports: 'Reports', settings: 'Settings' };
+    const isRecruiting = S.page === 'recruiting';
+    const titles: Record<string, string> = { dashboard: 'Dashboard', recruiting: 'Recruiting', pipeline: 'Hiring Pipeline', profile: 'Candidate Profile', drivers: 'Drivers', carriers: 'Carriers', compliance: 'Compliance', docusign: 'e-Signature', messages: 'Messages', anna: 'Anna', tasks: 'Tasks', reports: 'Reports', settings: 'Settings' };
 
     const out: any = {
       expanded, sidebarStyle, sidebarStrong, sidebarFaint, sidebarBorder, nav, carrierSwitchStyle, themeBtnStyle,
@@ -230,7 +231,7 @@ export class QuickHireLogic extends React.Component<any, any> {
       toggleCollapse: () => this.setState((s: any) => ({ collapsed: !s.collapsed })),
       pageTitle: titles[S.page] || 'QuickHire',
       isDashboard, isPipeline, isProfile, isDocusign, isCompliance, isMessages, isSettings,
-      isDrivers, isCarriers, isReports, isIntegrations, isTasks, isAnna,
+      isDrivers, isCarriers, isReports, isIntegrations, isTasks, isAnna, isRecruiting,
       icChevDown: this.ic('chevD', 15), icChevRight: this.ic('chevR', 15), icCollapse: this.ic('collapse', 18),
       icTaskTop: this.ic('list', 18), icRefresh: this.ic('refresh', 15), icCarrier: this.ic('carriers', 18), icCarrierLg: this.ic('carriers', 26), icBolt: this.ic('bolt', 11),
       openTasks: () => this.setState({ taskDrawerOpen: true }),

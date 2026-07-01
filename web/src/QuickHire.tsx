@@ -12,6 +12,7 @@ import EsignWorkspace from './esign/EsignWorkspace';
 import DriverProfile from './hire/DriverProfile';
 import CarrierFolders from './hire/CarrierFolders';
 import HiringPipeline from './hire/HiringPipeline';
+import RecruitPipeline from './recruit/RecruitPipeline';
 import { TopBar } from './shell/TopBar';
 import { CARRIER_LIST, CANDS } from './data';
 
@@ -104,6 +105,7 @@ export default class QuickHire extends QuickHireLogic {
             {v.isIntegrations && this.renderIntegrationsPage(v)}
             {v.isTasks && <TasksWorkspace />}
             {v.isAnna && <AnnaWorkspace go={(page: string, payload?: any) => this.annaGo(page, payload)} />}
+            {v.isRecruiting && <RecruitPipeline go={(p: string) => this.go(p)} />}
           </main>
         </div>
 
