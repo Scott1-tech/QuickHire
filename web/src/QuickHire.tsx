@@ -491,7 +491,7 @@ export default class QuickHire extends QuickHireLogic {
   // ===================== SETTINGS =====================
   renderSettings(v: any) {
     const sec = this.state.settingsSection;
-    const intg = ['ringcentral', 'email', 'fmcsa'].includes(sec);
+    const intg = ['ringcentral', 'email', 'fmcsa', 'leadsources'].includes(sec);
     const isAnnaAi = sec === 'annaai';
     return (
       <div style={css('display:flex; height:100%;')}>
