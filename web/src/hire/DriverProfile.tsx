@@ -4,6 +4,7 @@ import { T, Icon, Avatar, useToasts, ToastHost } from '../tasks/lib';
 import { Card, Modal, Field, Input, Select, Textarea, primaryBtn, ghostBtn, Toggle, EmptyState } from '../esign/ui';
 import { EmploymentVerification } from '../comms/pev';
 import { addExternalTask, makeTask } from '../tasks/bus';
+import { pickAndSave, openFile } from '../shell/files';
 import {
   useHire, svc, AI_STATUS_META, STEP_STATUS_META, STEP_STATUSES, STEP_GROUPS, DOC_STATUS_META,
   completeness, initials, fmtAgo, fmtDate, STAGES,
@@ -230,8 +231,8 @@ function StepRow({ d, s, first, expanded, customize, onToggle, toast }: any) {
     {expanded && !customize && <div style={{ padding: '0 14px 14px 56px', display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <SmallBtn icon="zap" label="Run check" onClick={() => { svc.setStepStatus(d.id, s.id, 'in_progress'); toast(`${s.name} running`, 'info'); }} />
-        <SmallBtn icon="upload" label="Upload" onClick={() => { svc.addDocument(d.id, s.name); toast('Document attached', 'success'); }} />
-        <SmallBtn icon="eye" label="View" onClick={() => toast('Opening document…', 'info')} />
+        <SmallBtn icon="upload" label="Upload" onClick={() => pickAndSave('application/pdf,image/*', (f) => { svc.addDocument(d.id, s.name, 'collected', f.id, f.name); toast(`${f.name} attached to ${s.name}`, 'success'); }, (m) => toast(m, 'error'))} />
+        <SmallBtn icon="eye" label="View" onClick={() => { const doc = d.documents.find((x: any) => x.name === s.name && x.fileId); if (!openFile(doc?.fileId)) toast('No file attached to this step yet', 'info'); }} />
       </div>
       <Textarea rows={2} placeholder="Add notes…" defaultValue={s.notes} onBlur={(e: any) => { s.notes = e.target.value; }} />
     </div>}
@@ -290,10 +291,11 @@ function Documents({ d, toast, setModal }: any) {
           <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 650 }}>{doc.name}</div><div style={{ fontSize: 11, color: T.faint }}>{doc.required ? 'Required' : 'Optional'}{doc.exp ? ` · exp ${fmtDate(doc.exp)}` : ''}</div></div>
         </div>
         <div style={{ marginTop: 10 }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 22, padding: '0 9px', borderRadius: 999, background: m.bg, color: m.color, fontSize: 11.5, fontWeight: 600 }}><span style={{ width: 6, height: 6, borderRadius: 999, background: m.color }} />{m.label}</span></div>
+        {doc.fileName && <div style={{ fontSize: 11, color: T.faint, marginTop: 8, display: 'flex', alignItems: 'center', gap: 5 }}><Icon name="paperclip" size={11} />{doc.fileName}</div>}
         <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
           {doc.status === 'missing'
-            ? <><SmallBtn icon="upload" label="Upload" onClick={() => { svc.setDocStatus(d.id, doc.key, 'collected'); toast(`${doc.name} uploaded`, 'success'); }} /><SmallBtn icon="mail" label="Request" onClick={() => { svc.setDocStatus(d.id, doc.key, 'pending'); svc.log(d.id, 'request', `Requested ${doc.name}`); toast('Requested from driver', 'success'); }} /></>
-            : <><SmallBtn icon="eye" label="View" onClick={() => toast('Opening…', 'info')} /><SmallBtn icon="repeat" label="Replace" onClick={() => { svc.setDocStatus(d.id, doc.key, 'collected'); toast('Replaced', 'success'); }} /></>}
+            ? <><SmallBtn icon="upload" label="Upload" onClick={() => pickAndSave('application/pdf,image/*', (f) => { svc.setDocFile(d.id, doc.key, f.id, f.name); toast(`${doc.name} uploaded — ${f.name}`, 'success'); }, (m) => toast(m, 'error'))} /><SmallBtn icon="mail" label="Request" onClick={() => { svc.setDocStatus(d.id, doc.key, 'pending'); svc.log(d.id, 'request', `Requested ${doc.name}`); toast('Requested from driver', 'success'); }} /></>
+            : <><SmallBtn icon="eye" label="View" onClick={() => { if (!openFile(doc.fileId)) toast('No file attached yet — use Replace to upload one', 'info'); }} /><SmallBtn icon="repeat" label="Replace" onClick={() => pickAndSave('application/pdf,image/*', (f) => { svc.setDocFile(d.id, doc.key, f.id, f.name); toast(`Replaced with ${f.name}`, 'success'); }, (m) => toast(m, 'error'))} /></>}
         </div>
       </Card>; })}
     </div>
@@ -454,9 +456,9 @@ function ProfileModals({ modal, d, go, toast, onClose }: any) {
     return <Modal title="Request documents" subtitle={`Send a request to ${d.name}`} width={460} onClose={onClose} footer={<><Hover as="button" onClick={onClose} style={ghostBtn} hover={{ background: 'rgba(0,0,0,0.04)' }}>Cancel</Hover><Hover as="button" onClick={() => { svc.requestDocs(d.id, [...sel]); toast(`Requested ${sel.size} document${sel.size > 1 ? 's' : ''}`, 'success'); onClose(); }} style={primaryBtn} hover={{ background: '#0066D6' }}>Send request</Hover></>}><Comp /></Modal>;
   }
   if (k === 'upload') {
-    return <Modal title="Upload document" width={440} onClose={onClose}>
+    return <Modal title="Upload document" subtitle="Pick which requirement this file belongs to — the file is stored and viewable." width={440} onClose={onClose}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {d.documents.map((doc: any) => <Hover key={doc.key} as="button" onClick={() => { svc.setDocStatus(d.id, doc.key, 'collected'); toast(`${doc.name} uploaded`, 'success'); onClose(); }} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10, border: `1px solid ${T.border}`, background: '#fff', cursor: 'pointer', fontSize: 13 }} hover={{ background: T.hover }}><Icon name="upload" size={15} style={{ color: T.muted }} />{doc.name}<span style={{ marginLeft: 'auto', fontSize: 11, color: T.faint }}>{DOC_STATUS_META[doc.status].label}</span></Hover>)}
+        {d.documents.map((doc: any) => <Hover key={doc.key} as="button" onClick={() => pickAndSave('application/pdf,image/*', (f) => { svc.setDocFile(d.id, doc.key, f.id, f.name); toast(`${doc.name} uploaded — ${f.name}`, 'success'); onClose(); }, (m) => toast(m, 'error'))} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10, border: `1px solid ${T.border}`, background: '#fff', cursor: 'pointer', fontSize: 13 }} hover={{ background: T.hover }}><Icon name="upload" size={15} style={{ color: T.muted }} />{doc.name}<span style={{ marginLeft: 'auto', fontSize: 11, color: T.faint }}>{doc.fileName || DOC_STATUS_META[doc.status].label}</span></Hover>)}
       </div>
     </Modal>;
   }

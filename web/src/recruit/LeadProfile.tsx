@@ -3,6 +3,7 @@ import { Hover } from '../lib/dc';
 import { T, Icon } from '../tasks/lib';
 import { Card, Field, Input, Select, Textarea, primaryBtn, ghostBtn } from '../esign/ui';
 import { svc as hireSvc } from '../hire/store';
+import { pickAndSave, openFile } from '../shell/files';
 import {
   useRecruit, svc, USERS, SOURCES, SCORE_META, INTEREST,
   isOverdue, daysInStage, stageByName, fmtAgo, fmtDate, dueLabel,
@@ -103,7 +104,11 @@ export function LeadProfile({ id, go, onClose, toast, setModal }: any) {
         </div>
         <div style={{ borderTop: `1px solid ${T.hair}`, paddingTop: 12 }}>
           <Label>Documents</Label>
-          {l.documents.map((d: any) => <RowSel key={d.name} k={d.name} value={d.status} onChange={(v: string) => svc.setDoc(id, d.name, v)} options={[{ value: 'missing', label: 'Missing' }, { value: 'requested', label: 'Requested' }, { value: 'received', label: 'Received' }]} />)}
+          {l.documents.map((d: any) => <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0' }}>
+            <span title={d.fileName || d.name} style={{ fontSize: 12.5, color: T.muted, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-flex', alignItems: 'center', gap: 4 }}>{d.name}{d.fileName && <Icon name="paperclip" size={11} style={{ color: '#007AFF', flex: 'none' }} />}</span>
+            <button title={d.fileId ? 'View file' : 'Upload file'} onClick={() => { if (d.fileId) { if (!openFile(d.fileId)) toast('File unavailable', 'error'); } else pickAndSave('application/pdf,image/*', (f) => { svc.setDocFile(id, d.name, f.id, f.name); toast(`${d.name} uploaded — ${f.name}`, 'success'); }, (m) => toast(m, 'error')); }} style={{ width: 30, height: 30, flex: 'none', borderRadius: 8, border: `1px solid ${T.border}`, background: '#fff', color: d.fileId ? '#007AFF' : T.muted, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={d.fileId ? 'eye' : 'upload'} size={13} /></button>
+            <Select value={d.status} onChange={(v: string) => svc.setDoc(id, d.name, v)} options={[{ value: 'missing', label: 'Missing' }, { value: 'requested', label: 'Requested' }, { value: 'received', label: 'Received' }]} style={{ width: 118, height: 32 }} />
+          </div>)}
         </div>
         <div style={{ borderTop: `1px solid ${T.hair}`, paddingTop: 12 }}>
           <Label>Final decision & archive</Label>

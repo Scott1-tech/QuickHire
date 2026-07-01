@@ -231,6 +231,7 @@ export const svc = {
 
   addTask(id: string, task: any) { const l = this.lead(id); if (!l) return; l.tasks.unshift({ id: uid('t'), status: 'open', at: nowIso(), ...task }); log(l, 'task', `Task: ${task.title}`, task.due ? `Due ${new Date(task.due).toLocaleDateString()}` : ''); emit(); },
   setDoc(id: string, name: string, status: string) { const l = this.lead(id); if (!l) return; const d = l.documents.find((x: any) => x.name === name); if (d) { d.status = status; log(l, 'document', `${name} → ${status}`); emit(); } },
+  setDocFile(id: string, name: string, fileId: string, fileName: string) { const l = this.lead(id); if (!l) return; const d = l.documents.find((x: any) => x.name === name); if (d) { d.fileId = fileId; d.fileName = fileName; d.status = 'received'; log(l, 'document', `${name} uploaded`, fileName); emit(); } },
 
   /* editable pipeline stages */
   addStage(name: string) { store.stages.push({ id: uid('stg'), name, order: store.stages.length, maxDays: 2, disabled: false, terminal: false }); emit(); },

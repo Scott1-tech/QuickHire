@@ -198,12 +198,12 @@ export default class QuickHire extends QuickHireLogic {
                 <h2 style={css('margin:0; font-size:16px; font-weight:650; letter-spacing:-0.01em;')}>DocuSign Waiting</h2>
               </div>
               {v.docusignWaiting.map((d: any, i: number) => (
-                <H key={i} style={css('display:flex; align-items:center; gap:11px; padding:11px 18px; border-top:1px solid rgba(0,0,0,0.06);')} hover={css('background:rgba(0,0,0,0.018);')}>
+                <H key={i} onClick={d.onOpen} style={css('display:flex; align-items:center; gap:11px; padding:11px 18px; border-top:1px solid rgba(0,0,0,0.06); cursor:pointer;')} hover={css('background:rgba(0,0,0,0.018);')}>
                   <div style={css('flex:1; min-width:0;')}>
                     <div style={css('font-size:13.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;')}>{d.doc}</div>
                     <div style={css('font-size:12px; color:#6E6E73;')}>{d.who} · {d.age}</div>
                   </div>
-                  <H as="button" onClick={d.onClick} style={css('height:28px; padding:0 11px; font-size:12px; font-weight:600; color:#0066CC; background:rgba(0,122,255,0.10); border:none; border-radius:8px; cursor:pointer;')} hover={css('background:rgba(0,122,255,0.18);')}>Remind</H>
+                  <H as="button" onClick={(e: any) => { e.stopPropagation(); d.onClick(); }} style={css('height:28px; padding:0 11px; font-size:12px; font-weight:600; color:#0066CC; background:rgba(0,122,255,0.10); border:none; border-radius:8px; cursor:pointer;')} hover={css('background:rgba(0,122,255,0.18);')}>Remind</H>
                 </H>
               ))}
             </section>

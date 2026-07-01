@@ -64,7 +64,7 @@ export const svc = {
     carriers.forEach((c) => { if (has(c.name) || has(c.dot) || has(c.mc) || has(c.dba)) out.push({ group: 'Carriers', icon: 'building', title: c.name, sub: `DOT ${c.dot} · ${c.mc}`, action: { kind: 'page', page: 'carriers' } }); });
     (esignStore.envelopes || []).forEach((e: any) => { if (has(e.title) || has(e.driverName) || has(e.carrier)) out.push({ group: 'Agreements', icon: 'sign', title: e.title, sub: `${e.driverName || '—'} · ${e.status}`, action: { kind: 'page', page: 'docusign' } }); });
     (esignStore.envelopes || []).forEach((e: any) => Object.values(e.uploads || {}).forEach((u: any) => { if (has(u.name)) out.push({ group: 'Documents', icon: 'fileText', title: u.name, sub: `Uploaded · ${e.title}`, action: { kind: 'page', page: 'docusign' } }); }));
-    store.records.forEach((r: any) => { if (has(r.title) || has(r.subtitle)) out.push({ group: RECORD_LABELS[r.type] ? RECORD_LABELS[r.type] + 's' : 'Records', icon: 'tag', title: r.title, sub: r.subtitle || RECORD_LABELS[r.type], action: { kind: 'record', id: r.id } }); });
+    store.records.forEach((r: any) => { if (has(r.title) || has(r.subtitle)) out.push({ group: RECORD_LABELS[r.type] ? RECORD_LABELS[r.type] + 's' : 'Records', icon: r.data?.fileId ? 'fileText' : 'tag', title: r.title, sub: r.subtitle || RECORD_LABELS[r.type], action: r.data?.fileId ? { kind: 'file', fileId: r.data.fileId } : { kind: 'record', id: r.id } }); });
     return out.slice(0, 30);
   },
 };

@@ -249,8 +249,23 @@ export const svc = {
     [d.steps[ia], d.steps[ib]] = [d.steps[ib], d.steps[ia]]; emit();
   },
 
-  addDocument(id: string, name: string, status = 'collected') { const d = this.driver(id); if (!d) return; d.documents.unshift({ key: uid('doc'), name, required: true, status, exp: null, step: null }); this.log(id, 'document', `Document added — ${name}`); },
+  addDocument(id: string, name: string, status = 'collected', fileId: string | null = null, fileName = '') { const d = this.driver(id); if (!d) return; d.documents.unshift({ key: uid('doc'), name, required: true, status, exp: null, step: null, fileId, fileName }); this.log(id, 'document', `Document added — ${name}`, fileName); },
   setDocStatus(id: string, key: string, status: string) { const d = this.driver(id); if (!d) return; const doc = d.documents.find((x: any) => x.key === key); if (doc) { doc.status = status; this.log(id, 'document', `${doc.name} → ${DOC_STATUS_META[status]?.label || status}`); } },
+  /** Attach an uploaded file to a document requirement and mark it collected. */
+  setDocFile(id: string, key: string, fileId: string, fileName: string) {
+    const d = this.driver(id); if (!d) return;
+    const doc = d.documents.find((x: any) => x.key === key); if (!doc) return;
+    doc.fileId = fileId; doc.fileName = fileName; doc.status = 'collected';
+    this.log(id, 'document', `${doc.name} uploaded`, fileName);
+  },
+  addTruck(carrierName: string, fields: any = {}) {
+    const c = this.carrierByName(carrierName) || store.carriers[0];
+    const unit = fields.unit || String(100 + store.trucks.length);
+    const t = { id: uid('trk'), carrierId: c.id, carrier: c.name, unit, vin: fields.vin || `1FUJ${Math.random().toString(36).slice(2, 9).toUpperCase()}`, plate: fields.plate || `TX-${1000 + store.trucks.length}`, trailer: fields.trailer || '', status: 'Available', requirements: fields.requirements || 'Class A · clean MVR' };
+    store.trucks.push(t);
+    this.logCarrier(c.id, 'truck', `Truck added — Unit ${unit}`);
+    return t;
+  },
   requestDocs(id: string, names: string[]) { const d = this.driver(id); if (!d) return; names.forEach((n) => { const doc = d.documents.find((x: any) => x.name === n); if (doc && doc.status === 'missing') doc.status = 'pending'; }); this.log(id, 'request', `Requested ${names.length} document${names.length > 1 ? 's' : ''} from driver`, names.join(', ')); },
 
   assignTruck(id: string, truckId: string) { const d = this.driver(id); if (!d) return; d.assignedTruckId = truckId; const t = store.trucks.find((x: any) => x.id === truckId); if (t) t.status = 'Assigned'; this.log(id, 'truck', `Assigned truck — Unit ${t?.unit || ''}`); },

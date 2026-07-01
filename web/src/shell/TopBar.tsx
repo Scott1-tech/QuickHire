@@ -4,6 +4,7 @@ import { T, Icon, useToasts, ToastHost } from '../tasks/lib';
 import { Modal, Field, Input, Textarea, Select, primaryBtn, ghostBtn } from '../esign/ui';
 import { useShell, svc, fmtAgo } from './store';
 import { addExternalTask, makeTask } from '../tasks/bus';
+import { saveFile, openFile, fmtSize } from './files';
 
 type Props = {
   go: (page: string) => void;
@@ -52,10 +53,13 @@ export function TopBar({ go, openCandidate, openTasks, taskCount, drivers, carri
     setModal(key);
   };
 
-  const onFile = (f?: File) => {
+  const onFile = async (f?: File) => {
     if (!f) return;
-    svc.addRecord('document', { name: f.name, subtitle: `${(f.size / 1024).toFixed(0)} KB · uploaded` });
-    toast(`Uploaded ${f.name}`, 'success');
+    try {
+      const stored = await saveFile(f);
+      svc.addRecord('document', { name: f.name, subtitle: `${fmtSize(f.size)} · uploaded`, fileId: stored.id });
+      toast(`Uploaded ${f.name}${stored.persisted ? '' : ' (too large to persist — kept for this session)'}`, 'success');
+    } catch { toast('Could not read that file', 'error'); }
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -129,6 +133,7 @@ export function TopBar({ go, openCandidate, openTasks, taskCount, drivers, carri
       setSearch(false);
       if (a.kind === 'candidate') openCandidate(a.id);
       else if (a.kind === 'page') go(a.page);
+      else if (a.kind === 'file') { if (!openFile(a.fileId)) toast('File unavailable', 'error'); }
     }} />}
 
     {/* create modals */}
