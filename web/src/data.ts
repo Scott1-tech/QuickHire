@@ -128,7 +128,7 @@ export const INTEGRATIONS = [
   { key: 'slack', name: 'Slack', mark: 'SL', logoBg: '#611f69', sync: '' },
 ];
 
-export const SETTINGS_NAV = ['Company', 'Users & Roles', 'Integrations', 'DocuSign', 'RingCentral', 'Email', 'FMCSA', 'Anna AI', 'Security', 'Data Export'];
+export const SETTINGS_NAV = ['Company', 'Users & Roles', 'Integrations', 'DocuSign', 'RingCentral', 'Email', 'FMCSA', 'Lead Sources', 'Anna AI', 'Security', 'Data Export'];
 
 export const AVATAR_COLORS = ['#007AFF', '#5856D6', '#34C759', '#FF9F0A', '#AF52DE', '#0FB5AE', '#FF2D55'];
 
