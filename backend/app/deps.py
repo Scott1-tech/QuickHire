@@ -1,4 +1,6 @@
 """Shared FastAPI dependencies: admin auth + request base URL."""
+import hmac
+
 from fastapi import Header, HTTPException, Request
 
 from . import config
@@ -8,7 +10,8 @@ async def require_admin(x_admin_token: str | None = Header(default=None)) -> Non
     """Mirror server.js requireAdmin: open when no password set, else match header."""
     if not config.ADMIN_PASSWORD:
         return
-    if x_admin_token == config.ADMIN_PASSWORD:
+    # Constant-time compare to avoid leaking the token via response timing.
+    if x_admin_token is not None and hmac.compare_digest(x_admin_token, config.ADMIN_PASSWORD):
         return
     raise HTTPException(status_code=401, detail="Unauthorized")
 

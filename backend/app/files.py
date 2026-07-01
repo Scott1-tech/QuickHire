@@ -29,8 +29,11 @@ def resolve_file(stored: str | None) -> str | None:
     """Return the absolute path for a stored file, or None if invalid/missing."""
     if not stored:
         return None
-    full = os.path.normpath(os.path.join(config.UPLOAD_DIR, stored))
-    if not full.startswith(os.path.normpath(config.UPLOAD_DIR)):
+    base = os.path.normpath(config.UPLOAD_DIR)
+    full = os.path.normpath(os.path.join(base, stored))
+    # Guard against path traversal: full must be base itself or live *inside* it.
+    # A plain startswith() would also accept a sibling like "<base>-evil".
+    if full != base and not full.startswith(base + os.sep):
         return None
     if not os.path.exists(full):
         return None

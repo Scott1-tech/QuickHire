@@ -67,10 +67,13 @@ async def list_candidates(request: Request):
         lst = [c for c in lst if any(not (c.get("documents") or {}).get(d["id"]) for d in MAIN_DOCS)]
     if filt == "expiring":
         lst = [c for c in lst if len(expiring_docs(c)) > 0]
+    if filt == "new_leads":
+        lst = [c for c in lst if c.get("subStatus") == "new_unreviewed"]
 
     out = [{
         "id": c.get("id"), "token": c.get("token"), "name": c.get("name"), "email": c.get("email"), "phone": c.get("phone"),
         "stage": c.get("stage"), "subStatus": c.get("subStatus"), "recruiter": c.get("recruiter"),
+        "source": c.get("source"),
         "createdAt": c.get("createdAt"), "stageChangedAt": c.get("stageChangedAt"), "lastActivityAt": c.get("lastActivityAt"),
         "submittedAt": c.get("submittedAt"), "linkSentCount": c.get("linkSentCount"),
         "checklistProgress": len([sid for sid in STEP_IDS if ((c.get("checklist") or {}).get(sid) or {}).get("status") == "complete"]),

@@ -3,6 +3,7 @@ import { Hover } from '../lib/dc';
 import { T, Icon, Btn, Toggle, Menu, MenuItem, useToasts, ToastHost } from '../tasks/lib';
 import { useComms, svc, fmtWhen } from './store';
 import { FmcsaResearch } from './fmcsa';
+import { api } from './api';
 
 const OK = '#34C759', WARN = '#FF9500', PRI = '#007AFF';
 
@@ -21,7 +22,115 @@ export function IntegrationSettings({ section }: { section: string }) {
   if (section === 'ringcentral') return <RingCentralSettings />;
   if (section === 'email') return <EmailSettings />;
   if (section === 'fmcsa') return <FmcsaSettings />;
+  if (section === 'leadsources') return <LeadSources />;
   return null;
+}
+
+/* ============================ LEAD SOURCES ============================ */
+const SOURCE_META: Record<string, { mark: string; bg: string; fg: string; blurb: string }> = {
+  generic: { mark: 'ZP', bg: '#FF4A0014', fg: '#FF4A00', blurb: 'Zapier / Make / any webhook. Native connectors for Meta, Indeed, ZipRecruiter, Google & TikTok forms — point their webhook here.' },
+  meta: { mark: 'f', bg: '#1877F214', fg: '#1877F2', blurb: 'Facebook & Instagram Lead Ads. Real-time leadgen webhook; full lead data fetched from the Graph API.' },
+  indeed: { mark: 'in', bg: '#2557A714', fg: '#2557A7', blurb: 'Indeed Apply (approved ATS/partner push). Applicants land straight in the inbox.' },
+};
+
+function LeadSources() {
+  const { toasts, toast } = useToasts();
+  const [status, setStatus] = React.useState<any>(null);
+  const [inbox, setInbox] = React.useState<any[]>([]);
+  const [busy, setBusy] = React.useState<string | null>(null);
+
+  const refresh = React.useCallback(async () => {
+    const [s, ib] = await Promise.all([api.leadsStatus().catch(() => null), api.leadInbox().catch(() => [])]);
+    if (s) setStatus(s);
+    setInbox(Array.isArray(ib) ? ib : []);
+  }, []);
+  React.useEffect(() => { refresh(); }, [refresh]);
+
+  const intakeUrl = (src: string) => (status?.intakeUrlTemplate || '/api/leads/intake/{source}').replace('{source}', src);
+  const copy = (text: string) => { try { navigator.clipboard?.writeText(text); toast('Webhook URL copied', 'success'); } catch { toast('Copy failed', 'warning'); } };
+
+  const sendTest = async (src: string) => {
+    setBusy('test:' + src);
+    try { const r = await api.testLead(src); toast(r.created ? 'Test lead added to inbox' : 'Test lead merged into an existing candidate', 'success'); await refresh(); }
+    catch { toast('Test leads need the live backend', 'warning'); }
+    finally { setBusy(null); }
+  };
+  const convert = async (id: string, name: string) => {
+    setBusy('conv:' + id);
+    try { const r = await api.convertLead(id, {}); toast(r.anySuccess ? `Application link sent to ${name}` : `${name}: no channel delivered — check email/SMS setup`, r.anySuccess ? 'success' : 'warning'); await refresh(); }
+    catch { toast('Convert failed — backend not reachable', 'warning'); }
+    finally { setBusy(null); }
+  };
+  const dismiss = async (id: string, name: string) => {
+    setBusy('dis:' + id);
+    try { await api.dismissLead(id, {}); toast(`Lead dismissed: ${name}`, 'info'); await refresh(); }
+    catch { toast('Dismiss failed — backend not reachable', 'warning'); }
+    finally { setBusy(null); }
+  };
+
+  const sources = status?.sources || [
+    { type: 'generic', label: 'Generic webhook', status: 'demo' },
+    { type: 'meta', label: 'Meta Lead Ads', status: 'demo' },
+    { type: 'indeed', label: 'Indeed Apply', status: 'demo' },
+  ];
+
+  return <div style={{ maxWidth: 980 }}>
+    <ToastHost toasts={toasts} />
+    <h1 style={{ margin: '0 0 4px', fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em' }}>Lead Sources</h1>
+    <p style={{ margin: '0 0 20px', fontSize: 14, color: T.muted }}>
+      Connect Meta, Indeed and any lead app. New leads land in the <strong>Lead Inbox</strong> below for review — they're never
+      auto-contacted, so cold-lead texting stays TCPA-safe. Convert a lead to send the application link.
+    </p>
+
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 24 }}>
+      {sources.map((s: any) => {
+        const m = SOURCE_META[s.type] || { mark: (s.type || '?').slice(0, 2).toUpperCase(), bg: '#8E8E9314', fg: '#8E8E93', blurb: '' };
+        return <Card key={s.type}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ width: 40, height: 40, borderRadius: 10, background: m.bg, color: m.fg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, flex: 'none' }}>{m.mark}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14.5, fontWeight: 650 }}>{s.label}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}><StatusDot status={s.status} /><span style={{ fontSize: 12.5, color: T.faint }}>{s.status === 'connected' ? 'Connected — live' : 'Demo mode'}</span></div>
+            </div>
+            <Btn variant="secondary" onClick={() => sendTest(s.type)}>{busy === 'test:' + s.type ? 'Sending…' : 'Send test lead'}</Btn>
+          </div>
+          {m.blurb && <p style={{ margin: '12px 0 0', fontSize: 12.5, color: T.muted, lineHeight: 1.5 }}>{m.blurb}</p>}
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.hair}` }}>
+            <div style={{ ...labelStyle, marginBottom: 4 }}>Webhook URL</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <code style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: T.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: '#F7F7F8', border: `1px solid ${T.hair}`, borderRadius: 8, padding: '7px 9px' }}>{intakeUrl(s.type)}</code>
+              <Btn variant="secondary" onClick={() => copy(intakeUrl(s.type))}>Copy</Btn>
+            </div>
+            {(s.envKeys && s.envKeys.length > 0) && <div style={{ fontSize: 11.5, color: T.faint, marginTop: 8 }}>Env: {s.envKeys.join(', ')}{s.type === 'generic' ? ' — send as X-QuickHire-Secret header' : ''}</div>}
+          </div>
+        </Card>;
+      })}
+    </div>
+
+    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10 }}>
+      <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, letterSpacing: '-0.01em' }}>Lead Inbox <span style={{ fontSize: 13, fontWeight: 600, color: T.faint }}>· {inbox.length} awaiting review</span></h2>
+      <Btn variant="secondary" onClick={refresh}>Refresh</Btn>
+    </div>
+
+    <Card style={{ padding: 0, overflow: 'hidden' }}>
+      {inbox.length === 0 && <div style={{ padding: '28px 18px', textAlign: 'center', fontSize: 13.5, color: T.faint }}>No leads waiting. Try “Send test lead” above, or point a source's webhook at its URL.</div>}
+      {inbox.map((l: any, i: number) => (
+        <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '13px 18px', borderTop: i ? `1px solid ${T.hair}` : 'none' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 650, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.name || 'Unnamed lead'}</div>
+            <div style={{ fontSize: 12, color: T.faint, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {[l.email, l.phone].filter(Boolean).join(' · ') || 'no contact'}
+            </div>
+          </div>
+          {l.source && <span style={{ fontSize: 11, fontWeight: 600, color: (SOURCE_META[l.source]?.fg) || '#8E8E93', background: (SOURCE_META[l.source]?.bg) || '#8E8E9314', borderRadius: 999, padding: '3px 9px', flex: 'none', textTransform: 'capitalize' }}>{l.source}</span>}
+          {l.campaign && <span style={{ fontSize: 12, color: T.faint, flex: 'none', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.campaign}</span>}
+          <span style={{ fontSize: 12, color: T.faint, flex: 'none' }}>{fmtWhen(l.createdAt)} ago</span>
+          <Btn variant="primary" onClick={() => convert(l.id, l.name)}>{busy === 'conv:' + l.id ? 'Sending…' : 'Convert'}</Btn>
+          <Hover as="button" onClick={() => dismiss(l.id, l.name)} style={{ height: 32, padding: '0 12px', fontSize: 12.5, fontWeight: 600, color: '#C62820', background: 'transparent', border: 'none', borderRadius: 9, cursor: 'pointer' }} hover={{ background: 'rgba(255,59,48,0.08)' }}>Dismiss</Hover>
+        </div>
+      ))}
+    </Card>
+  </div>;
 }
 
 /* ============================ RINGCENTRAL ============================ */

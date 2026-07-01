@@ -7,8 +7,10 @@ from .config import config
 
 
 def verify_signature(raw_body: bytes | str, signature_header: str | None) -> bool:
+    # Fail closed: with no configured secret we cannot authenticate the caller,
+    # so reject rather than trust an unverifiable webhook.
     if not config["webhookSecret"]:
-        return True
+        return False
     if not signature_header:
         return False
     body = raw_body.encode() if isinstance(raw_body, str) else (raw_body or b"")

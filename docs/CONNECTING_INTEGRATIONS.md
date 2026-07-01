@@ -165,6 +165,71 @@ about which employer is being contacted.
 
 ---
 
+## 5. Connect your lead sources (Meta, Indeed, Zapier, CSV…)
+
+QuickHire has **one universal intake** that turns leads from any app into
+candidates in the **Lead Inbox** (stage *Lead*, status *new / unreviewed*).
+Each source posts to the same URL shape:
+
+```
+https://YOUR-DOMAIN/api/leads/intake/<source>      # source = generic | meta | indeed
+```
+
+> **Leads are never auto-contacted.** They land in the inbox for a recruiter to
+> review; the application link is sent only when you **Convert** the lead. This
+> keeps cold-lead SMS on the right side of TCPA. Junk can be **Dismissed**
+> without ever contacting the person. Duplicates (same email/phone/lead-id) are
+> merged into the existing candidate, not created twice.
+
+With no variables set, every source runs in **demo mode** (intake still works so
+you can test end to end). `Settings → Lead Sources → Send test lead` injects a
+sample lead into the inbox.
+
+### Option A — Generic webhook / Zapier / Make (fastest, works with almost anything)
+The catch-all. Zapier and Make have native triggers for Meta Lead Ads, Indeed,
+ZipRecruiter, Google/TikTok lead forms and thousands more — point their "webhook"
+action at `.../api/leads/intake/generic` and every field maps automatically.
+
+| Variable | Value |
+|---|---|
+| `LEAD_WEBHOOK_SECRET` | any strong random string |
+
+Send it as the `X-QuickHire-Secret` header (or `?secret=…`). If unset, the
+endpoint accepts unauthenticated (demo) — set it before going live.
+
+### Option B — Meta (Facebook / Instagram) Lead Ads (native)
+1. Create a **Facebook App**, add **Webhooks**, subscribe the Page to the
+   **`leadgen`** field. Set the callback URL to `.../api/leads/intake/meta` and a
+   **Verify Token** (Meta calls GET with `hub.challenge`; we echo it when the
+   token matches).
+2. Generate a long-lived **Page / System-User token** with `leads_retrieval`
+   (requires App Review for live pages).
+
+| Variable | Value |
+|---|---|
+| `META_APP_SECRET` | App secret — verifies the `X-Hub-Signature-256` on each webhook |
+| `META_VERIFY_TOKEN` | the token you entered when subscribing the webhook |
+| `META_PAGE_TOKEN` | long-lived Page token — lets us fetch full lead data from the Graph API |
+
+Meta sends only a `leadgen_id`; with `META_PAGE_TOKEN` set we fetch the actual
+name/email/phone/custom answers from the Graph API. (Leads relayed through Zapier
+already include the field data and work with just `META_APP_SECRET`.)
+
+### Option C — Indeed Apply (native, partner-gated)
+Once you have Indeed Apply / ATS partner access, point it at
+`.../api/leads/intake/indeed`.
+
+| Variable | Value |
+|---|---|
+| `INDEED_WEBHOOK_SECRET` | shared secret (same `X-QuickHire-Secret` header/query) |
+
+### Option D — CSV / bulk import
+`POST /api/leads/import` with a `csv` string (or a `rows` array). Column headers
+can be named however your export tool named them — the same normalization used by
+the webhooks maps them to name/email/phone and keeps the rest as custom fields.
+
+---
+
 ## Quick reference — what makes each card "Connected"
 
 | Integration | Required variables |
@@ -173,6 +238,9 @@ about which employer is being contacted.
 | Email (Resend) | `RESEND_API_KEY` + `EMAIL_FROM` |
 | Email (SMTP) | `SMTP_HOST` + `SMTP_USER` + `SMTP_PASS` + `SMTP_FROM` |
 | FMCSA | `FMCSA_API_KEY` |
+| Lead intake — generic/Zapier | `LEAD_WEBHOOK_SECRET` |
+| Lead intake — Meta | `META_APP_SECRET` (+ `META_VERIFY_TOKEN`, `META_PAGE_TOKEN`) |
+| Lead intake — Indeed | `INDEED_WEBHOOK_SECRET` |
 
 Set them in your host's environment, redeploy, then open **Settings** to
 confirm the green dots.

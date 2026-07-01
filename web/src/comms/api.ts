@@ -35,6 +35,12 @@ export const api = {
   watchlist: () => req('GET', '/fmcsa/watchlist'),
   addWatch: (s: any) => req('POST', '/fmcsa/watchlist', s),
   removeWatch: (id: string) => req('DELETE', `/fmcsa/watchlist/${id}`),
+  // Lead intake (Meta / Indeed / Zapier-generic / CSV)
+  leadsStatus: () => req('GET', '/leads/status'),
+  leadInbox: () => req('GET', '/leads/inbox'),
+  convertLead: (id: string, b: any = {}) => req('POST', `/leads/${id}/convert`, b),
+  dismissLead: (id: string, b: any = {}) => req('POST', `/leads/${id}/dismiss`, b),
+  testLead: (source: string) => req('POST', '/leads/test', { source }),
 };
 
 /** Probe whether the integrations backend is reachable (cached). */
