@@ -3,6 +3,7 @@ import { Hover } from '../lib/dc';
 import { T, Icon, useToasts, ToastHost, SegTabs } from '../tasks/lib';
 import { Card, Modal, Field, Input, Select, Textarea, primaryBtn, ghostBtn, Toggle, EmptyState } from '../esign/ui';
 import { RecruitDashboard, RecruitReports, RecruitArchive, RecruitAutomations } from './views';
+import { LeadProfile } from './LeadProfile';
 import {
   useRecruit, svc, USERS, SOURCES, SCORE_META, INTEREST, CLOSE_REASONS, DECISIONS,
   daysInStage, agingLevel, isOverdue, fmtAgo, fmtDate, dueLabel, findDuplicate, stageByName,
@@ -27,6 +28,15 @@ export default function RecruitPipeline({ go }: { go?: (p: string) => void }) {
   const [tab, setTab] = React.useState('board');
   const drag = React.useRef<string | null>(null);
   void store;
+
+  // Full-page lead profile (replaces the board while a lead is open).
+  if (openId && svc.lead(openId)) {
+    return <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <ToastHost toasts={toasts} />
+      <LeadProfile id={openId} go={go} onClose={() => setOpenId(null)} toast={toast} setModal={setModal} />
+      {modal && <RecruitModals modal={modal} onClose={() => setModal(null)} toast={toast} onOpen={(x: string) => setOpenId(x)} />}
+    </div>;
+  }
 
   const stages = svc.stages();
   const all = svc.visibleLeads('NP');
@@ -108,7 +118,6 @@ export default function RecruitPipeline({ go }: { go?: (p: string) => void }) {
       </div>
     </div>}
 
-    {openId && <LeadPanel id={openId} onClose={() => setOpenId(null)} toast={toast} setModal={setModal} go={go} />}
     {modal && <RecruitModals modal={modal} onClose={() => setModal(null)} toast={toast} onOpen={(id: string) => { setOpenId(id); }} />}
   </div>;
 }
@@ -314,6 +323,22 @@ function RecruitModals({ modal, onClose, toast, onOpen }: any) {
         <Field label="Source"><Select value={v.source} onChange={(x: string) => set('source', x)} options={SOURCES.map((s) => ({ value: s.key, label: s.label }))} /></Field>
       </div>
       {isAnna && <Field label="Interest level"><Select value={v.interest} onChange={(x: string) => set('interest', x)} options={Object.keys(INTEREST).map((key) => ({ value: key, label: INTEREST[key].label }))} /></Field>}
+    </Modal>;
+  }
+  if (k === 'editLead') {
+    const l = svc.lead(modal.id);
+    // eslint-disable-next-line
+    const [v, setV] = React.useState<any>({ phone: l?.phone || '', email: l?.email || '', location: l?.location || '', licenseType: l?.licenseType || 'Class A', experienceYears: l?.experienceYears ?? 0, availability: l?.availability || 'immediate' });
+    const set = (key: string, val: any) => setV((s: any) => ({ ...s, [key]: val }));
+    return <Modal title="Edit lead" subtitle={l?.name} width={500} onClose={onClose} footer={<><Hover as="button" onClick={onClose} style={ghostBtn} hover={{ background: 'rgba(0,0,0,0.04)' }}>Cancel</Hover><Hover as="button" onClick={() => { svc.update(modal.id, { ...v, experienceYears: +v.experienceYears }); toast('Lead updated', 'success'); onClose(); }} style={primaryBtn} hover={{ background: '#0066D6' }}>Save</Hover></>}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Phone"><Input value={v.phone} onChange={(e: any) => set('phone', e.target.value)} /></Field>
+        <Field label="Email"><Input value={v.email} onChange={(e: any) => set('email', e.target.value)} /></Field>
+        <Field label="Location"><Input value={v.location} onChange={(e: any) => set('location', e.target.value)} /></Field>
+        <Field label="License"><Select value={v.licenseType} onChange={(x: string) => set('licenseType', x)} options={['Class A', 'Class B', 'Class C']} /></Field>
+        <Field label="Experience (yrs)"><Input type="number" value={v.experienceYears} onChange={(e: any) => set('experienceYears', e.target.value)} /></Field>
+        <Field label="Availability"><Select value={v.availability} onChange={(x: string) => set('availability', x)} options={[{ value: 'immediate', label: 'Immediate' }, { value: '2weeks', label: '2 weeks' }, { value: 'flexible', label: 'Flexible' }]} /></Field>
+      </div>
     </Modal>;
   }
   if (k === 'moveStage') {
