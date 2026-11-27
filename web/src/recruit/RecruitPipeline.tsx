@@ -9,6 +9,8 @@ import {
   daysInStage, agingLevel, isOverdue, fmtAgo, fmtDate, dueLabel, findDuplicate, stageByName,
 } from './store';
 import { svc as hireSvc } from '../hire/store';
+import { PhoneLink } from '../phone/PhoneLink';
+import { useLeadOpenRequests } from '../phone/nav';
 
 const BG = '#F5F5F7';
 const owner = (id: string) => USERS.find((u) => u.id === id);
@@ -28,6 +30,7 @@ export default function RecruitPipeline({ go }: { go?: (p: string) => void }) {
   const [tab, setTab] = React.useState('board');
   const drag = React.useRef<string | null>(null);
   void store;
+  useLeadOpenRequests((id) => { setTab('board'); setOpenId(id); }); // phone: "Open profile"
 
   // Full-page lead profile (replaces the board while a lead is open).
   if (openId && svc.lead(openId)) {
@@ -130,7 +133,7 @@ function LeadCard({ l, onOpen, onDrag }: any) {
       <span style={{ fontSize: 15, fontWeight: 650, letterSpacing: '-0.01em' }}>{l.name}</span>
       <span style={{ fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 999, background: sm.bg, color: sm.color, whiteSpace: 'nowrap' }}>{l.scoreLabel}</span>
     </div>
-    <div style={{ fontSize: 12.5, color: T.muted, marginTop: 3 }}>{l.phone}</div>
+    <div style={{ fontSize: 12.5, color: T.muted, marginTop: 3 }}><PhoneLink phone={l.phone} name={l.name} recordId={l.id} kind="lead" /></div>
     <div style={{ fontSize: 12.5, color: T.faint }}>{l.location}</div>
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 9, flexWrap: 'wrap' }}>
       {aging === 'over' && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: '#C62820' }}><span style={{ width: 6, height: 6, borderRadius: 999, background: '#FF453A' }} />{daysInStage(l)}d in stage</span>}

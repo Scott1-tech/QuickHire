@@ -4,6 +4,8 @@ import { T, Icon } from '../tasks/lib';
 import { Card, Field, Input, Select, Textarea, primaryBtn, ghostBtn } from '../esign/ui';
 import { svc as hireSvc } from '../hire/store';
 import { pickAndSave, openFile } from '../shell/files';
+import { PhoneLink } from '../phone/PhoneLink';
+import { callNumber } from '../phone/store';
 import {
   useRecruit, svc, USERS, SOURCES, SCORE_META, INTEREST,
   isOverdue, daysInStage, stageByName, fmtAgo, fmtDate, dueLabel,
@@ -37,11 +39,11 @@ export function LeadProfile({ id, go, onClose, toast, setModal }: any) {
             <button onClick={() => setModal({ kind: 'editLead', id })} style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${T.border}`, background: '#fff', cursor: 'pointer', color: T.muted, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="pencil" size={13} /></button>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 6, fontSize: 12.5, color: T.muted }}>
-            <Meta icon="phone" v={l.phone} /><Meta icon="mapPin" v={l.location} /><Meta icon="sign" v={l.licenseType} /><Meta icon="briefcase" v={`${l.experienceYears} yrs`} /><Meta icon={sourceMeta(l.source).icon} v={sourceMeta(l.source).label} /><Meta icon="arrowRight" v={`${l.stageName} · ${daysInStage(l)}d`} />
+            <Meta icon="phone" v={<PhoneLink phone={l.phone} name={l.name} recordId={l.id} kind="lead" />} /><Meta icon="mapPin" v={l.location} /><Meta icon="sign" v={l.licenseType} /><Meta icon="briefcase" v={`${l.experienceYears} yrs`} /><Meta icon={sourceMeta(l.source).icon} v={sourceMeta(l.source).label} /><Meta icon="arrowRight" v={`${l.stageName} · ${daysInStage(l)}d`} />
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
-          {[['phone', 'Call', () => comm('call', 'outbound', 'connected')], ['message', 'SMS', () => comm('sms', 'outbound')], ['mail', 'Email', () => comm('email', 'outbound')], ['arrowRight', 'Stage', () => setModal({ kind: 'moveStage', id })], ['listChecks', 'Task', () => setModal({ kind: 'nextAction', id })]].map(([icon, label, fn]: any) =>
+          {[['phone', 'Call', () => callNumber(l.phone, { name: l.name, recordId: id, kind: 'lead' })], ['message', 'SMS', () => comm('sms', 'outbound')], ['mail', 'Email', () => comm('email', 'outbound')], ['arrowRight', 'Stage', () => setModal({ kind: 'moveStage', id })], ['listChecks', 'Task', () => setModal({ kind: 'nextAction', id })]].map(([icon, label, fn]: any) =>
             <Hover key={label} as="button" onClick={fn} title={label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, width: 54, padding: '8px 0', borderRadius: 10, border: `1px solid ${T.border}`, background: '#fff', cursor: 'pointer', color: T.text }} hover={{ background: T.hover }}><Icon name={icon} size={16} /><span style={{ fontSize: 10, fontWeight: 600, color: T.muted }}>{label}</span></Hover>)}
         </div>
       </div>
