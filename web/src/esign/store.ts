@@ -1,422 +1,615 @@
-/* QuickHire e-signature workspace — local-first store.
-   Everything persists to localStorage so the module behaves end-to-end with no
-   backend; a best-effort backend sync layer (api.ts) mirrors actions to
-   /api/docusign/* when a real deployment is serving the SPA. */
+/* QuickHire e-Sign — local-first store + service.
+   Envelope/template metadata persists to localStorage (`qh_esign_v2`, written
+   on a short throttle and flushed on pagehide); document bytes live in
+   IndexedDB (blobs.ts). A best-effort sync layer (api.ts) mirrors actions to
+   /api/docusign/* when a backend serves the SPA. Integrations with the rest of
+   QuickHire (activity log, notifications, driver documents) subscribe through
+   onEsignEvent() so this module has no import cycles with other stores. */
 import React from 'react';
 import { esignApi, bg } from './api';
+import {
+  Envelope, Template, TemplateRole, Recipient, Field, EDoc, Person, Values, Signature, EnvStatus, ViewKey,
+  uid, nowIso, daysFromNow, colorForIndex, advanceRouting, deriveStatus, activeRecipients, completion, autoValue, isDone,
+  validateForSend, instantiateTemplate, cloneFields, personMergeData, fillMerge, formDataCsv, inView, migrateEnvelopeV1, migrateTemplateV1,
+  FIELD_DEFS, STATUS_META, IN_FLIGHT, isInputType, fmtAgo, fmtDate, daysUntil, PAGE_W,
+} from './model';
+import { CATALOG, CATALOG_KEYS, catalogFields, catalogPages } from './catalog';
+import { putBlob, dataUrlToBytes, deleteBlob, listBlobIds, sha256Hex } from './blobs';
+import { readPdfFile } from './pdf';
+import { CANDS, CARRIER_LIST } from '../data';
 
-/* ───────────────────────── ids / time ───────────────────────── */
-export const uid = (p: string) => `${p}_${Math.random().toString(36).slice(2, 9)}`;
-export const nowIso = () => new Date().toISOString();
-const daysFromNow = (d: number) => new Date(Date.now() + d * 864e5).toISOString();
+export { uid, nowIso, STATUS_META, FIELD_DEFS, fmtAgo, fmtDate, daysUntil };
+export type { Envelope, Template, Recipient, Field, EDoc };
+/** v1 compatibility: catalog keyed by document key. */
+export const DOC_CATALOG = CATALOG;
+export const DOC_KEYS = CATALOG_KEYS;
 
-/* ───────────────────────── document catalog ───────────────────────── */
-export type FieldType =
-  | 'signature' | 'initial' | 'date' | 'text' | 'checkbox' | 'radio' | 'dropdown'
-  | 'fullname' | 'email' | 'company' | 'title' | 'attachment' | 'note' | 'autofill';
+/* ───────────────────────── settings ───────────────────────── */
+export const ERSD_TEXT = `Before you sign, please read this Electronic Record and Signature Disclosure.
 
-export const FIELD_DEFS: Record<FieldType, { label: string; icon: string; w: number; h: number; signer: boolean }> = {
-  signature: { label: 'Signature', icon: 'sign', w: 180, h: 44, signer: true },
-  initial: { label: 'Initial', icon: 'pencil', w: 70, h: 40, signer: true },
-  date: { label: 'Date Signed', icon: 'calendar', w: 120, h: 32, signer: true },
-  text: { label: 'Text', icon: 'fileText', w: 160, h: 32, signer: true },
-  checkbox: { label: 'Checkbox', icon: 'checkbox', w: 26, h: 26, signer: true },
-  radio: { label: 'Radio', icon: 'circle', w: 26, h: 26, signer: true },
-  dropdown: { label: 'Dropdown', icon: 'chevronDown', w: 150, h: 32, signer: true },
-  fullname: { label: 'Full Name', icon: 'user', w: 170, h: 32, signer: false },
-  email: { label: 'Email', icon: 'mail', w: 180, h: 32, signer: false },
-  company: { label: 'Company', icon: 'building', w: 180, h: 32, signer: false },
-  title: { label: 'Title', icon: 'tag', w: 150, h: 32, signer: false },
-  attachment: { label: 'Attachment', icon: 'paperclip', w: 150, h: 36, signer: true },
-  note: { label: 'Note', icon: 'message', w: 160, h: 50, signer: false },
-  autofill: { label: 'Auto-fill', icon: 'zap', w: 160, h: 32, signer: false },
-};
+1. Consent to electronic records. You agree that the sender may provide notices, disclosures, agreements and other documents to you electronically, and that your electronic signature has the same legal effect as a handwritten signature under the U.S. Electronic Signatures in Global and National Commerce Act (ESIGN) and the Uniform Electronic Transactions Act (UETA).
 
-export const AUTOFILL_GROUPS = [
-  { group: 'Driver Info', fields: [['driver.name', 'Driver Name'], ['driver.email', 'Driver Email'], ['driver.phone', 'Driver Phone'], ['driver.cdl', 'CDL Number'], ['driver.state', 'License State']] },
-  { group: 'Carrier Info', fields: [['carrier.name', 'Carrier Name'], ['carrier.dot', 'DOT Number'], ['carrier.mc', 'MC Number'], ['carrier.address', 'Carrier Address']] },
-  { group: 'Employment Info', fields: [['emp.position', 'Position'], ['emp.startDate', 'Start Date'], ['emp.payRate', 'Pay Rate']] },
-  { group: 'Truck Info', fields: [['truck.unit', 'Unit Number'], ['truck.vin', 'VIN'], ['truck.plate', 'Plate']] },
-  { group: 'Compliance Info', fields: [['comp.mvrDate', 'MVR Date'], ['comp.medCard', 'Medical Card Exp'], ['comp.clearinghouse', 'Clearinghouse ID']] },
-];
+2. Paper copies. You may request a paper copy of any document at no charge by contacting the sender. You may download and print each completed document.
 
-const BODY_GENERIC = (carrier: string) => [
-  `This agreement is entered into between ${carrier} ("Company") and the driver named below ("Driver").`,
-  'The Driver agrees to operate commercial motor vehicles in compliance with all FMCSA regulations (49 CFR), company safety policies, and hours-of-service rules.',
-  'Driver Name: ____________________   CDL #: ____________   State: ______',
-  'By signing below, the parties acknowledge they have read and agree to the terms set forth in this document.',
-  'Driver Signature: ____________________________     Date: ____________',
-];
+3. Withdrawing consent. You may withdraw consent at any time before signing by choosing "Decline to sign". Withdrawal does not affect documents already signed.
 
-export const DOC_CATALOG: Record<string, { name: string; category: string; signerFields: FieldType[]; body: (c: string) => string[] }> = {
-  offer_letter: { name: 'Offer Letter', category: 'Onboarding', signerFields: ['signature', 'date'], body: (c) => [`${c} is pleased to extend an offer of employment for the position of Company Driver.`, 'This offer is contingent on successful completion of DOT pre-employment screening, drug testing, and verification of driving history.', 'Compensation, benefits, and start date are described in the attached summary.', 'Please sign below to accept this offer.', 'Driver Signature: ____________________________     Date: ____________'] },
-  company_driver_agreement: { name: 'Company Driver Agreement', category: 'Onboarding', signerFields: ['signature', 'initial', 'date'], body: BODY_GENERIC },
-  mvr_consent: { name: 'MVR Consent', category: 'Compliance', signerFields: ['signature', 'date'], body: (c) => [`I authorize ${c} to obtain my Motor Vehicle Record (MVR) for employment screening purposes under the Fair Credit Reporting Act and FMCSA §391.23.`, 'This consent remains valid for the duration of my employment and the application process.', 'Driver Signature: ____________________________     Date: ____________'] },
-  psp_consent: { name: 'PSP Consent', category: 'Compliance', signerFields: ['signature', 'date'], body: (c) => [`I authorize ${c} to access my FMCSA Pre-Employment Screening Program (PSP) report, including crash and inspection history.`, 'I understand this disclosure is voluntary and used for employment screening only.', 'Driver Signature: ____________________________     Date: ____________'] },
-  w9: { name: 'W-9 Tax Form', category: 'Tax', signerFields: ['signature', 'date'], body: () => ['Request for Taxpayer Identification Number and Certification (Form W-9).', 'Name: ____________________   Business name: ____________________', 'Taxpayer Identification Number (SSN/EIN): ____________________', 'Under penalties of perjury, I certify the information provided is correct.', 'Signature: ____________________________     Date: ____________'] },
-  clearinghouse_consent: { name: 'Clearinghouse Consent', category: 'Compliance', signerFields: ['signature', 'date'], body: (c) => [`I consent to ${c} querying the FMCSA Drug & Alcohol Clearinghouse for my records as required under 49 CFR Part 382.`, 'This limited query consent covers the duration of the hiring process.', 'Driver Signature: ____________________________     Date: ____________'] },
-  owner_operator_agreement: { name: 'Owner Operator Agreement', category: 'Onboarding', signerFields: ['signature', 'initial', 'date'], body: (c) => [`This Independent Contractor (Owner-Operator) Agreement is between ${c} and the Owner-Operator named below.`, 'The Owner-Operator agrees to provide a commercial motor vehicle and transportation services under the Company’s operating authority per the lease terms.', 'Settlement, insurance, and equipment responsibilities are described herein.', 'Owner-Operator Signature: ____________________________     Date: ____________'] },
-  equipment_lease: { name: 'Equipment Lease', category: 'Onboarding', signerFields: ['signature', 'initial', 'date'], body: (c) => [`Equipment Lease Agreement between ${c} ("Lessor") and the Driver ("Lessee").`, 'Unit: ____________   VIN: ____________________   Plate: ____________', 'The Lessee agrees to the weekly lease payment, maintenance, and insurance terms set forth in this agreement.', 'Lessee Signature: ____________________________     Date: ____________'] },
-  drug_testing_consent: { name: 'Drug Testing Consent', category: 'Compliance', signerFields: ['signature', 'date'], body: (c) => [`I consent to pre-employment, random, post-accident, and reasonable-suspicion drug and alcohol testing as required by ${c} and FMCSA 49 CFR Part 382.`, 'I understand a positive result or refusal will disqualify me from a safety-sensitive position.', 'Driver Signature: ____________________________     Date: ____________'] },
-};
-export const DOC_KEYS = Object.keys(DOC_CATALOG);
+4. System requirements. A current web browser (Chrome, Safari, Edge or Firefox) with JavaScript enabled and the ability to view or save PDF files.
 
-/* ───────────────────────── statuses ───────────────────────── */
-export const STATUS_META: Record<string, { label: string; color: string; bg: string; group: string }> = {
-  draft: { label: 'Draft', color: '#6E6E73', bg: '#F2F2F7', group: 'action' },
-  missing_fields: { label: 'Missing Fields', color: '#C62820', bg: 'rgba(255,59,48,0.12)', group: 'action' },
-  needs_action: { label: 'Needs Action', color: '#A05A00', bg: 'rgba(255,159,10,0.14)', group: 'action' },
-  failed: { label: 'Failed Send', color: '#C62820', bg: 'rgba(255,59,48,0.12)', group: 'action' },
-  sent: { label: 'Sent', color: '#0066CC', bg: 'rgba(0,122,255,0.12)', group: 'waiting' },
-  viewed: { label: 'Viewed', color: '#0066CC', bg: 'rgba(0,122,255,0.12)', group: 'waiting' },
-  partially_signed: { label: 'Partially Signed', color: '#3F3BB8', bg: 'rgba(88,86,214,0.12)', group: 'waiting' },
-  expiring_soon: { label: 'Expiring Soon', color: '#A05A00', bg: 'rgba(255,159,10,0.14)', group: 'expiring' },
-  completed: { label: 'Completed', color: '#248A3D', bg: 'rgba(52,199,89,0.12)', group: 'completed' },
-  declined: { label: 'Declined', color: '#C62820', bg: 'rgba(255,59,48,0.12)', group: 'waiting' },
-  voided: { label: 'Voided', color: '#8E8E93', bg: '#F2F2F7', group: 'action' },
-};
-export const ACTION_STATUSES = ['draft', 'missing_fields', 'needs_action', 'failed'];
+5. Updating your contact information. Tell the sender if your email address or mobile number changes.`;
 
-/* ───────────────────────── persistence ───────────────────────── */
-const LS_KEY = 'qh_esign_v1';
-function load(): any | null { try { const r = localStorage.getItem(LS_KEY); return r ? JSON.parse(r) : null; } catch { return null; } }
-function persist() { try { localStorage.setItem(LS_KEY, JSON.stringify({ envelopes: store.envelopes, packages: store.packages, templates: store.templates, settings: store.settings, notifications: store.notifications })); } catch { /* quota */ } }
-
-/* ───────────────────────── defaults / seed ───────────────────────── */
 export const DEFAULT_SETTINGS = {
-  branding: { senderName: 'QuickHire Recruiting', logoText: 'QH', primaryColor: '#007AFF', emailFooter: 'Sent securely via QuickHire e-Signature.' },
-  emailTemplates: {
-    offer: { subject: 'Your offer from {carrier}', message: 'Hi {driver}, please review and sign your offer package.' },
-    onboarding: { subject: 'Onboarding documents for {carrier}', message: 'Hi {driver}, a few documents need your signature to finish onboarding.' },
-    compliance: { subject: 'Consent forms required', message: 'Hi {driver}, please sign the attached compliance consent forms.' },
-    rehire: { subject: 'Welcome back to {carrier}', message: 'Hi {driver}, please sign the attached rehire documents.' },
-  },
-  reminders: { everyDays: 3, maxCount: 3, message: 'A friendly reminder to sign your QuickHire documents.' },
-  expiration: { days: 14, expiringSoonDays: 3 },
-  recipients: { defaultOrder: 'sequential', defaultRole: 'signer' },
-  fields: { defaultRequired: true },
+  sender: { name: 'Nina Patel', email: 'nina.patel@quickhire.app', company: 'QuickHire Recruiting' },
+  branding: { senderName: 'QuickHire Recruiting', logoText: 'QH', primaryColor: '#007AFF', emailFooter: 'Sent securely with QuickHire e-Sign.' },
+  reminders: { enabled: true, everyDays: 3, maxCount: 3 },
+  expiration: { days: 30, warnDays: 3 },
+  staleHours: 48,
   simulationMode: true,
-  permissions: { recruiterCanVoid: true, recruiterCanDelete: true, viewerCanDownload: true },
+  ersd: ERSD_TEXT,
+  defaultMessage: 'Hi {first}, please review and sign the attached documents. Reach out with any questions.',
+  permissions: { recruiterCanVoid: true, recruiterCanDelete: true },
 };
+export type Settings = typeof DEFAULT_SETTINGS;
 
-const DEFAULT_PACKAGES = [
-  { name: 'Company Driver Onboarding', description: 'Full onboarding set for new company drivers.', category: 'Onboarding', documentKeys: ['offer_letter', 'company_driver_agreement', 'w9', 'drug_testing_consent'] },
-  { name: 'Owner Operator Onboarding', description: 'Lease & authority documents for owner-operators.', category: 'Onboarding', documentKeys: ['owner_operator_agreement', 'equipment_lease', 'w9', 'mvr_consent'] },
-  { name: 'Compliance Consent Package', description: 'FMCSA screening consent forms.', category: 'Compliance', documentKeys: ['mvr_consent', 'psp_consent', 'clearinghouse_consent'] },
-  { name: 'Rehire Package', description: 'Streamlined set for returning drivers.', category: 'Rehire', documentKeys: ['offer_letter', 'drug_testing_consent', 'mvr_consent'] },
-];
-
-function seedPackages() {
-  return DEFAULT_PACKAGES.map((p) => ({
-    id: uid('pkg'), ...p, roles: ['signer'], signingOrder: 'sequential',
-    subject: store?.settings?.emailTemplates?.onboarding?.subject || 'Documents to sign',
-    message: store?.settings?.emailTemplates?.onboarding?.message || '', reminderEveryDays: 3, expiresInDays: 14,
-    status: 'active', usageCount: Math.floor(Math.random() * 12), updatedAt: nowIso(),
-  }));
-}
-function seedTemplates() {
-  return [
-    ['Company Driver Agreement', 'company_driver_agreement', 'Onboarding'],
-    ['MVR Consent', 'mvr_consent', 'Compliance'],
-    ['Offer Letter', 'offer_letter', 'Onboarding'],
-  ].map(([name, key, category]) => ({
-    id: uid('tpl'), name, documentKey: key, category,
-    fields: defaultFieldsFor(key as string, 'r_signer'),
-    roles: ['signer'], signingOrder: 'sequential', subject: `Please sign: ${name}`, message: '',
-    reminderEveryDays: 3, expiresInDays: 14, status: 'active', lastUsed: nowIso(), usageCount: Math.floor(Math.random() * 20),
-  }));
-}
-
-/** Default field placements for a document, assigned to a recipient id. */
-export function defaultFieldsFor(docKey: string, recipientId: string): any[] {
-  const def = DOC_CATALOG[docKey]; if (!def) return [];
-  const out: any[] = [];
-  let y = 560;
-  for (const ft of def.signerFields) {
-    const fd = FIELD_DEFS[ft];
-    out.push({ id: uid('f'), docKey, page: 0, type: ft, x: ft === 'date' ? 360 : 80, y, w: fd.w, h: fd.h, recipientId, required: true, value: '', placeholder: fd.label, locked: false, autofill: '', label: fd.label });
-    if (ft !== 'date') y += 8; else y += 60;
-  }
-  return out;
-}
-
-function seedEnvelopes(): any[] {
-  const mk = (driverName: string, carrier: string, docKey: string, status: string, daysAgo: number, recipStatus = 'pending') => {
-    const r = { id: uid('r'), name: driverName, email: driverName.toLowerCase().replace(/[^a-z]/g, '.') + '@example.com', role: 'signer', order: 1, color: colorFor(driverName), status: recipStatus };
-    const created = new Date(Date.now() - daysAgo * 864e5).toISOString();
-    return {
-      id: uid('env'), title: DOC_CATALOG[docKey].name, documentKeys: [docKey], recipients: [r],
-      fields: defaultFieldsFor(docKey, r.id), status, subject: `Please sign: ${DOC_CATALOG[docKey].name}`, message: '',
-      reminderEveryDays: 3, maxReminders: 3, remindersSent: 0, expiresAt: daysFromNow(status === 'expiring_soon' ? 2 : 14),
-      createdAt: created, updatedAt: created, lastActivity: created, driverName, carrier,
-      audit: [{ id: uid('a'), event: 'created', at: created, actor: 'Nina Patel', detail: 'Envelope created' }],
-      certificate: status === 'completed' ? { completedAt: created, sealId: uid('seal').toUpperCase() } : null,
-    };
-  };
-  return [
-    mk('Sarah Chen', 'GRAND ONE LLC', 'offer_letter', 'sent', 1, 'viewed'),
-    mk('Mike Okafor', 'GRAND ONE LLC', 'company_driver_agreement', 'completed', 5, 'signed'),
-    mk('Derek Hill', 'GRAND ONE LLC', 'psp_consent', 'viewed', 2, 'viewed'),
-    mk('Aisha Bello', 'DT NATIONAL', 'clearinghouse_consent', 'expiring_soon', 12),
-    mk('Robert Johnson', 'GRAND ONE LLC', 'mvr_consent', 'draft', 0),
-    mk('Tracy Bowman', 'DT NATIONAL', 'w9', 'needs_action', 3),
-  ];
-}
-
-export function colorFor(name: string) {
-  const palette = ['#007AFF', '#34C759', '#FF9500', '#5856D6', '#FF2D55', '#AF52DE', '#00C7BE'];
-  let h = 0; for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
-  return palette[Math.abs(h) % palette.length];
-}
+export interface PowerForm { id: string; templateId: string; name: string; roleId: string; createdAt: string; uses: number; active: boolean; instructions: string }
+export interface Batch { id: string; templateId: string; name: string; createdAt: string; count: number; failed: number }
 
 /* ───────────────────────── store ───────────────────────── */
-export const store: any = { envelopes: [], packages: [], templates: [], settings: structuredClone(DEFAULT_SETTINGS), notifications: [] };
-(function init() {
-  const saved = load();
-  if (saved) {
-    store.envelopes = saved.envelopes || [];
-    store.packages = saved.packages || [];
-    store.templates = saved.templates || [];
-    store.settings = { ...structuredClone(DEFAULT_SETTINGS), ...(saved.settings || {}) };
-    store.notifications = saved.notifications || [];
-  } else {
-    store.envelopes = seedEnvelopes();
-    store.packages = seedPackages();
-    store.templates = seedTemplates();
-    store.notifications = [];
-    persist();
-  }
-})();
+export const store: {
+  envelopes: Envelope[]; templates: Template[]; folders: { id: string; name: string }[]; powerforms: PowerForm[]; batches: Batch[];
+  settings: Settings; notifications: any[]; rev: number; storageWarning?: string; lastRemovedTemplate?: Template | null;
+} = { envelopes: [], templates: [], folders: [], powerforms: [], batches: [], settings: structuredClone(DEFAULT_SETTINGS), notifications: [], rev: 0 };
 
-/* ───────────────────────── pub/sub ───────────────────────── */
+const LS_V2 = 'qh_esign_v2';
+const LS_V1 = 'qh_esign_v1';
+const readLS = (k: string) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : null; } catch { return null; } };
+
+let persistTimer: any = null;
+function persistNow() {
+  if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
+  try {
+    localStorage.setItem(LS_V2, JSON.stringify({ v: 2, envelopes: store.envelopes, templates: store.templates, folders: store.folders, powerforms: store.powerforms, batches: store.batches, settings: store.settings, notifications: store.notifications }));
+    store.storageWarning = undefined;
+  } catch {
+    store.storageWarning = 'This device is out of storage for e-Sign data. Download and purge old envelopes, or connect the QuickHire backend.';
+  }
+}
+function schedulePersist() { if (!persistTimer) persistTimer = setTimeout(persistNow, 200); }
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', persistNow);
+  document.addEventListener?.('visibilitychange', () => { if (document.visibilityState === 'hidden') persistNow(); });
+  // keep tabs in sync (e.g. a signing session open in another tab)
+  window.addEventListener('storage', (e) => { if (e.key === LS_V2 && e.newValue) { try { hydrate(JSON.parse(e.newValue)); listeners.forEach((l) => l()); } catch { /* ignore */ } } });
+}
+
 const listeners = new Set<() => void>();
-const emit = () => { persist(); listeners.forEach((l) => l()); };
+function emit() { store.rev++; schedulePersist(); listeners.forEach((l) => l()); }
 export function useEsign() {
   const [, force] = React.useReducer((x) => x + 1, 0);
   React.useEffect(() => { listeners.add(force); return () => { listeners.delete(force); }; }, []);
   return store;
 }
 export const getStore = () => store;
+export function flushPersist() { persistNow(); }
+
+/* ───────────────────────── events (integration hooks) ───────────────────────── */
+export type EsignEvent = { type: string; env: Envelope; recipient?: Recipient; from?: string; to?: string; detail?: string };
+const hooks = new Set<(e: EsignEvent) => void>();
+export function onEsignEvent(h: (e: EsignEvent) => void) { hooks.add(h); return () => { hooks.delete(h); }; }
+function fire(e: EsignEvent) { hooks.forEach((h) => { try { h(e); } catch (err) { console.warn('[esign] hook failed', err); } }); }
 
 /* ───────────────────────── helpers ───────────────────────── */
-export function recomputeStatus(env: any) {
-  // auto expiring-soon / nothing-else here (terminal states preserved)
-  if (['completed', 'voided', 'declined', 'draft', 'missing_fields'].includes(env.status)) return;
-  const exp = env.expiresAt ? +new Date(env.expiresAt) - Date.now() : Infinity;
-  const days = exp / 864e5;
-  if (days <= (store.settings.expiration.expiringSoonDays || 3) && days > 0 && env.status !== 'partially_signed') env.status = 'expiring_soon';
+const me = () => ({ name: store.settings.sender.name, email: store.settings.sender.email });
+function audit(env: Envelope, event: string, detail = '', actor?: { name: string; email?: string } | string, extra: Partial<{ recipientId: string; ua: string }> = {}) {
+  const a = typeof actor === 'string' ? { name: actor } : actor || me();
+  env.audit.push({ id: uid('a'), at: nowIso(), event, actor: a.name, actorEmail: a.email, detail, ...extra });
+  env.lastActivity = env.updatedAt = nowIso();
 }
-function audit(env: any, event: string, detail = '', actor = 'Nina Patel') {
-  env.audit = env.audit || [];
-  env.audit.push({ id: uid('a'), event, at: nowIso(), actor, detail });
-  env.lastActivity = nowIso();
-  env.updatedAt = nowIso();
+function setStatus(env: Envelope, next: EnvStatus) {
+  const from = env.status; if (from === next) return;
+  env.status = next; fire({ type: 'status', env, from, to: next });
 }
-function notify(kind: string, message: string) {
-  store.notifications.unshift({ id: uid('n'), kind, message, at: nowIso(), read: false });
-  store.notifications = store.notifications.slice(0, 50);
+/** Backend mirror: off in simulation mode (local-only preview), on for real deployments. */
+function sync(call: () => Promise<any> | undefined) { if (store.settings.simulationMode && !(globalThis as any).__QH_ESIGN_SYNC__) return; try { bg(call()); } catch { /* offline */ } }
+const sanitizeForApi = (env: Envelope) => ({ ...env, documents: env.documents.map((d) => ({ ...d, legacyImages: undefined })) });
+
+export function catalogDoc(key: string, carrier = 'GRAND ONE LLC'): EDoc {
+  return { id: uid('doc'), name: CATALOG[key]?.name || key, source: 'catalog', catalogKey: key, carrier, pages: catalogPages() };
 }
 
-/* Validation — returns array of human-readable problems (empty = ok to send). */
-export function validateEnvelope(env: any): string[] {
-  const errs: string[] = [];
-  if (!env.documentKeys?.length) errs.push('Add at least one document.');
-  const signers = (env.recipients || []).filter((r: any) => r.role === 'signer');
-  if (!(env.recipients || []).length) errs.push('Add at least one recipient.');
-  for (const r of env.recipients || []) {
-    if (!r.name?.trim()) errs.push('A recipient is missing a name.');
-    if (!r.email?.trim() || !/.+@.+\..+/.test(r.email)) errs.push(`${r.name || 'A recipient'} is missing a valid email.`);
-  }
-  for (const s of signers) {
-    const has = (env.fields || []).some((f: any) => f.recipientId === s.id && FIELD_DEFS[f.type as FieldType]?.signer && f.required);
-    if (!has) errs.push(`${s.name || 'Signer'} is missing a required signing field.`);
-  }
-  // overlap detection
-  const fs = env.fields || [];
-  for (let i = 0; i < fs.length; i++) for (let j = i + 1; j < fs.length; j++) {
-    if (fs[i].docKey === fs[j].docKey && fs[i].page === fs[j].page && overlaps(fs[i], fs[j])) {
-      errs.push(`${DOC_CATALOG[fs[i].docKey]?.name || 'A document'} has overlapping fields.`); i = j = fs.length; break;
+function normalize(e: any): Envelope {
+  const s = store.settings;
+  const env: Envelope = {
+    title: 'Untitled envelope', status: 'draft', documents: [], recipients: [], fields: [], subject: '', message: '', signingOrder: true,
+    reminders: { enabled: s.reminders.enabled, everyDays: s.reminders.everyDays }, remindersSent: 0, maxReminders: s.reminders.maxCount,
+    expireDays: s.expiration.days, expiresAt: daysFromNow(s.expiration.days), warnDays: s.expiration.warnDays, driverName: '', carrier: '',
+    createdAt: nowIso(), updatedAt: nowIso(), lastActivity: nowIso(), audit: [], comments: [], certificate: null, deletedAt: null, sender: me(), version: 2,
+    ...e,
+  };
+  env.recipients = (env.recipients || []).map((r: any, i: number) => ({ color: colorForIndex(i), order: i + 1, status: 'created', action: 'sign', name: '', email: '', ...r }));
+  env.fields = (env.fields || []).filter((f: any) => f && f.docId);
+  env.audit = env.audit || []; env.comments = env.comments || [];
+  return env;
+}
+
+/* ───────────────────────── seeds ───────────────────────── */
+const carrierInfo = (name: string) => { const c = CARRIER_LIST.find((x) => x.name === name || x.name.startsWith(name) || name.startsWith(x.name)); return c ? { name: c.name, dot: c.dot, mc: c.mc, address: c.address } : { name }; };
+export function candPerson(c: any): Person {
+  const cdl = String(c.cdl || 'TX · Class A');
+  return { kind: 'driver', id: c.id, name: c.name, email: c.email, phone: c.phone, cdlState: cdl.split(' ')[0], cdlClass: cdl.split('Class ')[1] || 'A', position: c.position || 'Company Driver', carrier: c.carrier, carrierInfo: carrierInfo(c.carrier), address: cdl.startsWith('FL') ? 'Miami, FL' : 'Dallas, TX', payRate: c.position === 'Owner Operator' ? '75% of linehaul' : '$0.62 / mile', startDate: '' };
+}
+
+function role(id: string, roleName: string, i: number, extra: Partial<TemplateRole> = {}): TemplateRole {
+  return { id, roleName, name: '', email: '', action: 'sign', order: i + 1, color: colorForIndex(i), ...extra };
+}
+function packetTemplate(name: string, description: string, category: string, carrier: string, keys: string[], roles: TemplateRole[], subject: string): Template {
+  const signerRoles = roles.filter((r) => r.action === 'sign' || r.action === 'in_person');
+  const documents = keys.map((k) => catalogDoc(k, carrier));
+  const fields = documents.flatMap((d) => catalogFields(d.catalogKey!, d.id, signerRoles.map((r) => r.id)));
+  return { id: uid('tpl'), name, description, category, carrier, documents, roles, fields, subject, message: DEFAULT_SETTINGS.defaultMessage, signingOrder: true, reminders: { enabled: true, everyDays: 3 }, expireDays: 30, status: 'active', usageCount: 0, createdAt: nowIso(), updatedAt: nowIso() };
+}
+function seedTemplates(): Template[] {
+  const g1 = 'GRAND ONE LLC', dt = 'DT NATIONAL TRANSPORTATION LLC';
+  return [
+    packetTemplate('GRAND ONE LLC — Company Driver Packet', 'Offer, driver agreement, W-9 and screening consents for new company drivers.', 'Carrier packet', g1,
+      ['offer_letter', 'company_driver_agreement', 'w9', 'drug_testing_consent', 'mvr_consent'],
+      [role('role_driver', 'Driver', 0), role('role_carrier', 'Carrier Representative', 1, { name: 'Dana Reed', email: 'dana.reed@grandone.example' }), role('role_cc', 'Recruiting file', 2, { action: 'cc', name: 'Nina Patel', email: 'nina.patel@quickhire.app' })],
+      'GRAND ONE LLC onboarding packet for {driver}'),
+    packetTemplate('DT NATIONAL — Owner Operator Packet', 'Lease agreement, equipment lease, W-9, PSP and Clearinghouse consents.', 'Carrier packet', dt,
+      ['owner_operator_agreement', 'equipment_lease', 'w9', 'psp_consent', 'clearinghouse_consent'],
+      [role('role_oo', 'Owner-Operator', 0), role('role_dt', 'DT National Representative', 1, { name: 'Sam Pike', email: 'sam.pike@dtnational.example' })],
+      'DT NATIONAL owner-operator documents for {driver}'),
+    packetTemplate('FMCSA Screening Consents', 'MVR, PSP, Clearinghouse and drug & alcohol testing consents.', 'Compliance', g1,
+      ['mvr_consent', 'psp_consent', 'clearinghouse_consent', 'drug_testing_consent'], [role('role_driver', 'Driver', 0)], 'Screening consent forms for {driver}'),
+    packetTemplate('Offer Letter', 'Single offer letter with carrier countersignature.', 'Onboarding', g1, ['offer_letter'],
+      [role('role_driver', 'Driver', 0), role('role_carrier', 'Carrier Representative', 1, { name: 'Dana Reed', email: 'dana.reed@grandone.example' })], 'Your offer from {carrier}'),
+    packetTemplate('Rehire Packet', 'Streamlined set for returning drivers.', 'Rehire', g1, ['offer_letter', 'drug_testing_consent', 'mvr_consent'],
+      [role('role_driver', 'Driver', 0), role('role_carrier', 'Carrier Representative', 1, { name: 'Dana Reed', email: 'dana.reed@grandone.example' })], 'Welcome back to {carrier}'),
+  ];
+}
+
+function seedEnvelopes(templates: Template[]): Envelope[] {
+  const H = 36e5;
+  const byName = (n: string) => CANDS.find((c: any) => c.name === n);
+  const tpl = (name: string) => templates.find((t) => t.name === name)!;
+  const make = (tName: string, cand: string, hoursAgo: number, progress: (e: Envelope, t0: number) => void) => {
+    const c = byName(cand); const p = candPerson(c);
+    const t = tpl(tName);
+    const inst = instantiateTemplate(t, { [t.roles[0].id]: { name: p.name, email: p.email || '', phone: p.phone, driverId: p.id } }, personMergeData(p));
+    const t0 = Date.now() - hoursAgo * H; const at = (h: number) => new Date(t0 + h * H).toISOString();
+    const env = normalize({ id: uid('env'), title: t.name.replace(/^.* — /, '') + ` — ${p.name}`, documents: inst.documents, recipients: inst.recipients, fields: inst.fields, subject: inst.subject, message: inst.message, templateId: t.id, driverId: p.id, driverName: p.name, carrier: p.carrierInfo?.name || p.carrier || '', createdAt: at(0), updatedAt: at(0), lastActivity: at(0) });
+    env.audit.push({ id: uid('a'), at: at(0), event: 'created', actor: 'Nina Patel', detail: `Created from template "${t.name}"` });
+    env.status = 'sent'; env.sentAt = at(0.1); env.expiresAt = new Date(t0 + 30 * 864e5).toISOString();
+    env.audit.push({ id: uid('a'), at: at(0.1), event: 'sent', actor: 'Nina Patel', detail: `Sent to ${env.recipients.filter((r) => r.order === 1).map((r) => r.name).join(', ')}` });
+    advanceRouting(env, at(0.1));
+    progress(env, t0);
+    env.status = env.status === 'sent' ? deriveStatus(env) : env.status;
+    env.lastActivity = env.audit[env.audit.length - 1].at;
+    return env;
+  };
+  const view = (e: Envelope, r: Recipient, at: string) => { r.status = 'delivered'; r.deliveredAt = at; r.consentAt = at; e.audit.push({ id: uid('a'), at, event: 'viewed', actor: r.name, actorEmail: r.email, detail: `${r.name} viewed the envelope` }); };
+  const sign = (e: Envelope, r: Recipient, at: string) => {
+    view(e, r, at);
+    r.signature = { kind: 'typed', font: 'Dancing Script', name: r.name, initials: r.name.split(' ').map((s) => s[0]).join(''), sigUrl: '', iniUrl: '', adoptedAt: at };
+    for (const f of e.fields.filter((x) => x.recipientId === r.id)) {
+      if (f.type === 'signature' || f.type === 'initial') f.value = 'signed';
+      else if (f.type === 'checkbox') f.value = 'true';
+      else if (FIELD_DEFS[f.type].kind === 'auto') f.value = autoValue(f, r, at);
+      else if (!f.value && f.type === 'dropdown') f.value = f.options?.[0] || '';
+      else if (!f.value && f.type === 'text' && !f.readOnly) f.value = f.validation?.kind === 'zip' ? '75201' : f.validation?.kind === 'regex' ? '123-45-6789' : 'On file';
+      f.filledAt = at;
     }
-  }
-  if (!env.subject?.trim()) errs.push('Add an email subject.');
-  if (env.expiresAt && +new Date(env.expiresAt) <= Date.now()) errs.push('Expiration date must be in the future.');
-  return [...new Set(errs)];
+    r.status = 'signed'; r.signedAt = at;
+    e.audit.push({ id: uid('a'), at, event: 'signed', actor: r.name, actorEmail: r.email, detail: `${r.name} signed` });
+    const res = advanceRouting(e, at);
+    res.notified.forEach((n) => e.audit.push({ id: uid('a'), at, event: 'sent', actor: 'System', detail: `Sent to ${n.name}` }));
+    if (res.complete) { e.status = 'completed'; e.completedAt = at; e.certificate = { completedAt: at, sealId: uid('seal').toUpperCase() }; e.audit.push({ id: uid('a'), at, event: 'completed', actor: 'System', detail: 'All recipients completed — envelope completed' }); }
+  };
+  const iso = (t0: number, h: number) => new Date(t0 + h * H).toISOString();
+  return [
+    make('GRAND ONE LLC — Company Driver Packet', 'Robert Johnson', 70, (e, t0) => view(e, e.recipients[0], iso(t0, 6))),
+    make('Offer Letter', 'Derek Hill', 30, (e, t0) => sign(e, e.recipients[0], iso(t0, 4))),
+    make('FMCSA Screening Consents', 'Mike Okafor', 130, (e, t0) => sign(e, e.recipients[0], iso(t0, 20))),
+    make('DT NATIONAL — Owner Operator Packet', 'Diego Ramos', 26 * 24, (e) => { e.expiresAt = daysFromNow(2); }),
+    make('Offer Letter', 'Tracy Bowman', 52, (e, t0) => { const r = e.recipients[0]; view(e, r, iso(t0, 3)); r.status = 'declined'; r.declinedAt = iso(t0, 3.2); r.declineReason = 'Pay rate is not what we discussed.'; e.status = 'declined'; e.declinedAt = r.declinedAt; e.declineReason = r.declineReason; e.audit.push({ id: uid('a'), at: r.declinedAt, event: 'declined', actor: r.name, detail: `Declined: ${r.declineReason}` }); }),
+    make('FMCSA Screening Consents', 'Kevin Brooks', 200, (e, t0) => { e.status = 'voided'; e.voidedAt = iso(t0, 50); e.voidReason = 'Wrong carrier selected'; e.audit.push({ id: uid('a'), at: e.voidedAt, event: 'voided', actor: 'Nina Patel', detail: 'Voided: Wrong carrier selected' }); }),
+  ];
 }
-export function overlaps(a: any, b: any) {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
+/* ───────────────────────── init / migration ───────────────────────── */
+function hydrate(saved: any) {
+  store.settings = { ...structuredClone(DEFAULT_SETTINGS), ...(saved.settings || {}), sender: { ...DEFAULT_SETTINGS.sender, ...(saved.settings?.sender || {}) } } as Settings;
+  store.envelopes = (saved.envelopes || []).map(normalize);
+  store.templates = saved.templates || [];
+  store.folders = saved.folders || [];
+  store.powerforms = saved.powerforms || [];
+  store.batches = saved.batches || [];
+  store.notifications = saved.notifications || [];
 }
-export function findOverlaps(fields: any[]): Set<string> {
-  const bad = new Set<string>();
-  for (let i = 0; i < fields.length; i++) for (let j = i + 1; j < fields.length; j++) {
-    if (fields[i].docKey === fields[j].docKey && fields[i].page === fields[j].page && overlaps(fields[i], fields[j])) { bad.add(fields[i].id); bad.add(fields[j].id); }
+
+(function init() {
+  if (typeof localStorage === 'undefined') return;
+  const v2 = readLS(LS_V2);
+  if (v2) { hydrate(v2); return; }
+  const v1 = readLS(LS_V1);
+  if (v1 && (v1.envelopes?.length || v1.templates?.length || v1.packages?.length)) {
+    const sender = { ...DEFAULT_SETTINGS.sender };
+    const catalog = CATALOG as any;
+    store.envelopes = (v1.envelopes || []).map((e: any) => normalize(migrateEnvelopeV1(e, catalog, sender)));
+    store.templates = [
+      ...seedTemplates(),
+      ...(v1.templates || []).map((t: any) => migrateTemplateV1(t, catalog)),
+      ...(v1.packages || []).map((p: any) => migrateTemplateV1(p, catalog, true)),
+    ];
+    for (const t of store.templates) for (const d of t.documents) if (d.source === 'catalog' && !d.carrier) d.carrier = t.carrier || 'GRAND ONE LLC';
+    if (v1.settings?.simulationMode === false) store.settings.simulationMode = false;
+    store.notifications = v1.notifications || [];
+    persistNow();
+    return;
   }
-  return bad;
+  store.templates = seedTemplates();
+  store.envelopes = seedEnvelopes(store.templates);
+  persistNow();
+})();
+
+/** Move legacy v1 page images out of localStorage into IndexedDB, then drop the v1 key. */
+export async function migrateLegacyBlobs() {
+  let moved = 0;
+  for (const e of store.envelopes) for (const d of e.documents) {
+    if (!d.legacyImages?.length) continue;
+    const ids: string[] = [];
+    for (const url of d.legacyImages) { const { bytes, type } = dataUrlToBytes(url); ids.push(await putBlob(bytes, type)); }
+    d.imageBlobIds = ids; delete d.legacyImages; moved++;
+  }
+  if (moved) persistNow();
+  const stillLegacy = store.envelopes.some((e) => e.documents.some((d) => d.legacyImages?.length));
+  if (!stillLegacy) { try { localStorage.removeItem(LS_V1); } catch { /* ignore */ } }
+  return moved;
+}
+
+/** Delete IndexedDB blobs no envelope or template references any more. */
+export async function gcBlobs() {
+  const used = new Set<string>();
+  const add = (d: EDoc) => { if (d.blobId) used.add(d.blobId); (d.imageBlobIds || []).forEach((x) => used.add(x)); };
+  store.envelopes.forEach((e) => e.documents.forEach(add)); store.templates.forEach((t) => t.documents.forEach(add));
+  for (const id of await listBlobIds()) if (!used.has(id)) await deleteBlob(id);
 }
 
 /* ───────────────────────── service ───────────────────────── */
 export const svc = {
-  /* counts for the dashboard */
+  envelope(id?: string | null) { return id ? store.envelopes.find((e) => e.id === id) : undefined; },
+  template(id?: string | null) { return id ? store.templates.find((t) => t.id === id) : undefined; },
+  me,
   counts() {
-    const c: any = { action: 0, waiting: 0, completed: 0, expiring: 0 };
-    for (const e of store.envelopes) { recomputeStatus(e); const g = STATUS_META[e.status]?.group; if (g && c[g] != null) c[g]++; }
-    return c;
+    const out: Record<string, number> = {};
+    for (const v of ['inbox', 'sent', 'drafts', 'deleted', 'action', 'waiting', 'expiring', 'completed', 'closed'] as ViewKey[]) out[v] = store.envelopes.filter((e) => inView(e, v)).length;
+    return out;
   },
 
-  envelope(id: string) { return store.envelopes.find((e: any) => e.id === id); },
+  /* ── documents ── */
+  async importPdf(file: File): Promise<EDoc> {
+    const info = await readPdfFile(file);
+    const blobId = await putBlob(info.bytes, 'application/pdf');
+    return { id: uid('doc'), name: info.name, source: 'pdf', blobId, pages: info.pages, size: info.size, sha256: await sha256Hex(info.bytes) };
+  },
+  catalogDoc,
 
-  createEnvelope(partial: any = {}) {
-    const env = {
-      id: uid('env'), title: partial.title || 'Untitled envelope', documentKeys: partial.documentKeys || [],
-      recipients: partial.recipients || [], fields: partial.fields || [], status: 'draft',
-      subject: partial.subject || '', message: partial.message || '', reminderEveryDays: store.settings.reminders.everyDays,
-      maxReminders: store.settings.reminders.maxCount, remindersSent: 0, expiresAt: daysFromNow(store.settings.expiration.days),
-      createdAt: nowIso(), updatedAt: nowIso(), lastActivity: nowIso(), driverName: partial.driverName || '', carrier: partial.carrier || '',
-      audit: [], certificate: null, uploads: partial.uploads || {},
-    };
-    audit(env, 'created', 'Envelope created');
+  /* ── drafts ── */
+  createEnvelope(partial: Partial<Envelope> = {}) {
+    const env = normalize({ id: uid('env'), ...partial, status: 'draft', createdAt: nowIso(), updatedAt: nowIso(), lastActivity: nowIso(), audit: [], comments: [] });
+    if (!env.message && !env.selfSign) env.message = '';
+    audit(env, 'created', partial.templateId ? `Created from template "${svc.template(partial.templateId)?.name || ''}"` : 'Envelope created');
     store.envelopes.unshift(env); emit();
-    bg(esignApi.create(env));
+    sync(() => esignApi.create(sanitizeForApi(env)));
     return env;
   },
-  updateEnvelope(id: string, patch: any) { const e = this.envelope(id); if (!e) return; Object.assign(e, patch); e.updatedAt = nowIso(); emit(); },
-
-  /** Register an uploaded+rendered PDF onto an envelope; returns its doc key. */
-  addUpload(id: string, rendered: any) {
-    const e = this.envelope(id); if (!e) return null;
-    const key = uid('upload');
-    e.uploads = { ...(e.uploads || {}), [key]: rendered };
-    e.documentKeys = [...(e.documentKeys || []), key];
-    if (e.title === 'Untitled envelope') e.title = rendered.name || 'Uploaded document';
-    audit(e, 'created', `Uploaded "${rendered.name}" (${(rendered.pages || []).length} page${(rendered.pages || []).length === 1 ? '' : 's'})`);
-    emit();
-    return key;
+  updateEnvelope(id: string, patch: Partial<Envelope>) {
+    const e = svc.envelope(id); if (!e) return;
+    Object.assign(e, patch); e.updatedAt = nowIso(); emit();
+    if (e.status === 'draft') { clearTimeout((svc as any)._saveT); (svc as any)._saveT = setTimeout(() => sync(() => esignApi.saveDraft(id, sanitizeForApi(e))), 1500); }
   },
-  saveDraft(id: string) { const e = this.envelope(id); if (!e) return; if (e.status === 'draft') audit(e, 'draft_saved', 'Draft saved'); emit(); bg(esignApi.saveDraft(id, e)); },
+  /** Link a driver: fills the first signer and every merge field. */
+  linkPerson(id: string, p: Person | null) {
+    const e = svc.envelope(id); if (!e) return { missing: [] as string[] };
+    if (!p) { svc.updateEnvelope(id, { driverId: undefined, leadId: undefined, driverName: '' }); return { missing: [] }; }
+    const data = personMergeData(p);
+    const filled = fillMerge(e.fields, data);
+    const recipients = [...e.recipients];
+    const first = recipients.find((r) => r.action === 'sign' || r.action === 'in_person');
+    if (first && (!first.name || first.driverId || !first.email)) Object.assign(first, { name: p.name, email: p.email || first.email, phone: p.phone || first.phone, driverId: p.id });
+    else if (!first) recipients.unshift({ id: uid('r'), name: p.name, email: p.email || '', phone: p.phone, action: 'sign', order: 1, color: colorForIndex(recipients.length), status: 'created', driverId: p.id, roleName: 'Driver' });
+    svc.updateEnvelope(id, { fields: filled.fields, recipients, driverId: p.kind === 'lead' ? undefined : p.id, leadId: p.kind === 'lead' ? p.id : undefined, driverName: p.name, carrier: p.carrierInfo?.name || p.carrier || e.carrier });
+    return { missing: filled.missing };
+  },
+  deleteDraft(id: string) { store.envelopes = store.envelopes.filter((e) => e.id !== id); emit(); },
 
-  send(id: string) {
-    const e = this.envelope(id); if (!e) return { ok: false, errors: ['Envelope not found'] };
-    const errs = validateEnvelope(e);
-    if (errs.length) { e.status = 'missing_fields'; audit(e, 'corrected', 'Send blocked — validation failed'); emit(); return { ok: false, errors: errs }; }
-    e.status = 'sent'; e.sentAt = nowIso();
-    audit(e, 'sent', `Sent to ${(e.recipients || []).map((r: any) => r.name).join(', ')}`);
-    notify('sent', `${e.title} sent to ${e.driverName || (e.recipients[0] || {}).name || 'recipient'}`);
-    emit(); bg(esignApi.send(id, e));
+  /* ── sending ── */
+  send(id: string): { ok: boolean; errors: string[] } {
+    const e = svc.envelope(id); if (!e) return { ok: false, errors: ['Envelope not found'] };
+    const errors = validateForSend(e);
+    if (errors.length) return { ok: false, errors };
+    const at = nowIso();
+    for (const r of e.recipients) Object.assign(r, { status: 'created', sentAt: undefined, deliveredAt: undefined, signedAt: undefined, completedAt: undefined });
+    for (const f of e.fields) (f as any).senderValue = f.value;
+    e.sentAt = at; e.expiresAt = daysFromNow(e.expireDays || store.settings.expiration.days);
+    e.remindersSent = 0; e.reminders = { ...e.reminders, lastAt: undefined };
+    setStatus(e, 'sent');
+    if (e.selfSign) audit(e, 'sent', 'Self-signing session started');
+    else audit(e, 'sent', `Envelope sent${e.signingOrder ? ' with signing order' : ''} · expires ${fmtDate(e.expiresAt)}`);
+    const res = advanceRouting(e, at);
+    res.notified.forEach((r) => audit(e, r.action === 'cc' ? 'copied' : 'delivered_email', r.action === 'in_person' ? `In-person session queued for ${r.name} (host: ${r.hostName || me().name})` : `${r.action === 'cc' ? 'Copy sent' : 'Invitation sent'} to ${r.name} <${r.email}>${r.accessCode ? ' · access code required' : ''}${r.smsAuth ? ' · SMS code' : ''}`, 'System', { recipientId: r.id }));
+    fire({ type: 'sent', env: e });
+    emit(); sync(() => esignApi.send(id, sanitizeForApi(e)));
     return { ok: true, errors: [] };
   },
-
-  remind(id: string) {
-    const e = this.envelope(id); if (!e) return;
-    if ((e.remindersSent || 0) >= (e.maxReminders || 3)) { return { ok: false, message: 'Max reminders reached' }; }
-    e.remindersSent = (e.remindersSent || 0) + 1;
-    audit(e, 'reminder_sent', `Reminder ${e.remindersSent} of ${e.maxReminders} sent`);
-    notify('reminder', `Reminder sent for ${e.title}`);
-    emit(); bg(esignApi.remind(id));
+  resend(id: string) {
+    const e = svc.envelope(id); if (!e) return;
+    const act = activeRecipients(e);
+    act.forEach((r) => audit(e, 'resent', `Invitation re-sent to ${r.name} <${r.email}>`, undefined, { recipientId: r.id }));
+    fire({ type: 'resent', env: e }); emit(); sync(() => esignApi.saveDraft(id, sanitizeForApi(e)));
+    return act.length;
+  },
+  remind(id: string, auto = false): { ok: boolean; message?: string } {
+    const e = svc.envelope(id); if (!e) return { ok: false };
+    const act = activeRecipients(e);
+    if (!act.length) return { ok: false, message: 'Nobody is waiting to sign' };
+    if (auto && e.remindersSent >= e.maxReminders) return { ok: false, message: 'Reminder limit reached' };
+    e.remindersSent++; e.reminders = { ...e.reminders, lastAt: nowIso() };
+    audit(e, 'reminder_sent', `${auto ? 'Automatic reminder' : 'Reminder'} sent to ${act.map((r) => r.name).join(', ')}`, auto ? 'System' : undefined);
+    fire({ type: 'reminded', env: e, detail: auto ? 'auto' : 'manual' });
+    emit(); sync(() => esignApi.remind(id));
     return { ok: true };
   },
-  extendExpiration(id: string, days = 14) { const e = this.envelope(id); if (!e) return; e.expiresAt = daysFromNow(days); if (e.status === 'expiring_soon') e.status = e.sentAt ? 'sent' : 'draft'; audit(e, 'corrected', `Expiration extended ${days} days`); emit(); },
+  void(id: string, reason: string) {
+    const e = svc.envelope(id); if (!e) return;
+    e.voidedAt = nowIso(); e.voidReason = reason;
+    setStatus(e, 'voided'); audit(e, 'voided', `Voided: ${reason}`);
+    emit(); sync(() => esignApi.void(id, reason));
+  },
 
-  void(id: string, reason = '') { const e = this.envelope(id); if (!e) return; e.status = 'voided'; audit(e, 'voided', reason || 'Envelope voided'); notify('action', `${e.title} was voided`); emit(); bg(esignApi.void(id, reason)); },
-  decline(id: string) { const e = this.envelope(id); if (!e) return; e.status = 'declined'; (e.recipients || []).forEach((r: any) => { if (r.status === 'pending' || r.status === 'viewed') r.status = 'declined'; }); audit(e, 'declined', 'Recipient declined to sign', (e.recipients[0] || {}).name || 'Recipient'); emit(); },
+  /* ── correct ── */
+  beginCorrect(id: string) {
+    const e = svc.envelope(id); if (!e || !IN_FLIGHT.includes(e.status)) return false;
+    (e as any).prevStatus = e.status;
+    const doneIds = new Set(e.recipients.filter((r) => isDone(r)).map((r) => r.id));
+    e.fields.forEach((f) => { f.locked = doneIds.has(f.recipientId); });
+    setStatus(e, 'correcting'); audit(e, 'correcting', 'Correction started — signing paused');
+    emit(); return true;
+  },
+  finishCorrect(id: string): { ok: boolean; errors: string[] } {
+    const e = svc.envelope(id); if (!e) return { ok: false, errors: ['Envelope not found'] };
+    const errors = validateForSend({ ...e, expiresAt: e.expiresAt });
+    if (errors.length) return { ok: false, errors };
+    e.fields.forEach((f) => { delete f.locked; });
+    e.recipients.forEach((r) => { if (!r.status) r.status = 'created'; });
+    e.status = 'sent'; // temporarily in flight so routing + status derive from recipients
+    const res = advanceRouting(e);
+    res.notified.forEach((r) => audit(e, 'delivered_email', `Invitation sent to ${r.name} <${r.email}>`, 'System', { recipientId: r.id }));
+    const next = res.complete ? 'completed' : deriveStatus(e);
+    e.status = 'correcting';
+    setStatus(e, next);
+    if (next === 'completed') { e.completedAt = nowIso(); e.certificate = { completedAt: e.completedAt, sealId: uid('seal').toUpperCase() }; fire({ type: 'completed', env: e }); }
+    delete (e as any).prevStatus;
+    audit(e, 'corrected', 'Envelope corrected and re-sent to pending recipients');
+    activeRecipients(e).forEach((r) => audit(e, 'resent', `Corrected invitation sent to ${r.name}`, 'System', { recipientId: r.id }));
+    fire({ type: 'corrected', env: e }); emit(); sync(() => esignApi.saveDraft(id, sanitizeForApi(e)));
+    return { ok: true, errors: [] };
+  },
+  cancelCorrect(id: string) {
+    const e = svc.envelope(id); if (!e || e.status !== 'correcting') return;
+    e.fields.forEach((f) => { delete f.locked; });
+    setStatus(e, (e as any).prevStatus || 'sent'); delete (e as any).prevStatus;
+    audit(e, 'corrected', 'Correction cancelled — no changes sent'); emit();
+  },
 
-  duplicate(id: string) {
-    const e = this.envelope(id); if (!e) return;
-    const copy = structuredClone(e);
-    copy.id = uid('env'); copy.title = e.title + ' (copy)'; copy.status = 'draft'; copy.remindersSent = 0; copy.certificate = null;
-    copy.createdAt = copy.updatedAt = copy.lastActivity = nowIso(); copy.audit = []; copy.sentAt = null;
-    copy.recipients = (e.recipients || []).map((r: any) => ({ ...r, id: uid('r'), status: 'pending' }));
-    // remap field recipientIds
-    const map: any = {}; (e.recipients || []).forEach((r: any, i: number) => { map[r.id] = copy.recipients[i]?.id; });
-    copy.fields = (e.fields || []).map((f: any) => ({ ...f, id: uid('f'), recipientId: map[f.recipientId] || f.recipientId }));
-    audit(copy, 'created', `Duplicated from ${e.title}`);
-    store.envelopes.unshift(copy); emit();
+  /* ── signing session ── */
+  openSession(id: string, rid: string, opts: { host?: string } = {}) {
+    const e = svc.envelope(id); const r = e?.recipients.find((x) => x.id === rid); if (!e || !r) return;
+    if (!r.deliveredAt) {
+      r.deliveredAt = nowIso();
+      if (r.status === 'sent') r.status = 'delivered';
+      audit(e, 'viewed', opts.host ? `${r.name} opened the in-person session hosted by ${opts.host}` : `${r.name} opened the envelope`, { name: r.name, email: r.email }, { recipientId: r.id, ua: navigator.userAgent });
+      if (IN_FLIGHT.includes(e.status) && e.status !== 'correcting') setStatus(e, deriveStatus(e));
+      fire({ type: 'viewed', env: e, recipient: r });
+      emit();
+    }
+  },
+  verifyAccess(id: string, rid: string, code: string): boolean {
+    const e = svc.envelope(id); const r = e?.recipients.find((x) => x.id === rid); if (!e || !r) return false;
+    const ok = !r.accessCode || code.trim() === r.accessCode.trim();
+    if (ok) { r.authAt = nowIso(); audit(e, 'auth_passed', `${r.name} entered the correct access code`, { name: r.name, email: r.email }, { recipientId: r.id }); }
+    else audit(e, 'auth_failed', `Incorrect access code entered for ${r.name}`, { name: r.name, email: r.email }, { recipientId: r.id });
+    emit(); return ok;
+  },
+  smsVerified(id: string, rid: string) {
+    const e = svc.envelope(id); const r = e?.recipients.find((x) => x.id === rid); if (!e || !r) return;
+    r.authAt = nowIso(); audit(e, 'auth_passed', `${r.name} verified the SMS code sent to •••${String(r.phone || '').replace(/\D/g, '').slice(-4)}${store.settings.simulationMode ? ' (simulated delivery)' : ''}`, { name: r.name, email: r.email }, { recipientId: rid }); emit();
+  },
+  consent(id: string, rid: string) {
+    const e = svc.envelope(id); const r = e?.recipients.find((x) => x.id === rid); if (!e || !r) return;
+    r.consentAt = nowIso(); audit(e, 'consent', `${r.name} agreed to use electronic records and signatures`, { name: r.name, email: r.email }, { recipientId: r.id }); emit();
+  },
+  saveProgress(id: string, rid: string, values: Values) {
+    const e = svc.envelope(id); const r = e?.recipients.find((x) => x.id === rid); if (!e || !r) return;
+    for (const f of e.fields) if (f.recipientId === rid && !f.readOnly && values[f.id] !== undefined && f.type !== 'signature' && f.type !== 'initial') f.value = values[f.id];
+    audit(e, 'finish_later', `${r.name} saved progress to finish later`, { name: r.name, email: r.email }, { recipientId: rid }); emit();
+  },
+  finish(id: string, rid: string, values: Values, signature: Signature | null): { ok: boolean; complete?: boolean; error?: string } {
+    const e = svc.envelope(id); const r = e?.recipients.find((x) => x.id === rid); if (!e || !r) return { ok: false, error: 'Envelope not found' };
+    if (!activeRecipients(e).some((x) => x.id === rid)) return { ok: false, error: 'This envelope is not waiting for you.' };
+    const all: Values = { ...Object.fromEntries(e.fields.map((f) => [f.id, f.value])), ...values };
+    const c = completion(e.fields, rid, all);
+    if (!c.complete) return { ok: false, error: c.missing.length ? 'Complete all required fields.' : c.errors[0]?.message };
+    const at = nowIso();
+    for (const f of e.fields) {
+      if (f.recipientId !== rid) continue;
+      if (FIELD_DEFS[f.type].kind === 'auto') f.value = autoValue(f, r, at);
+      else if (!f.readOnly && all[f.id] !== undefined) f.value = all[f.id];
+      if (f.value || isInputType(f.type)) f.filledAt = at;
+    }
+    r.signature = signature || r.signature || null;
+    r.userAgent = navigator.userAgent;
+    const approver = r.action === 'approve';
+    const viewer = r.action === 'view';
+    r.status = viewer ? 'completed' : 'signed';
+    if (viewer) r.completedAt = at; else r.signedAt = at;
+    audit(e, viewer ? 'viewed_done' : approver ? 'approved' : 'signed', viewer ? `${r.name} reviewed the documents` : approver ? `${r.name} approved` : `${r.name} signed`, { name: r.name, email: r.email }, { recipientId: rid, ua: navigator.userAgent });
+    fire({ type: 'signed', env: e, recipient: r });
+    const res = advanceRouting(e, at);
+    res.notified.forEach((n) => audit(e, n.action === 'cc' ? 'copied' : 'delivered_email', `${n.action === 'cc' ? 'Copy sent' : 'Invitation sent'} to ${n.name} <${n.email}>`, 'System', { recipientId: n.id }));
+    if (res.complete) {
+      e.completedAt = at; e.certificate = { completedAt: at, sealId: uid('seal').toUpperCase() };
+      setStatus(e, 'completed');
+      audit(e, 'completed', 'All recipients completed — envelope completed', 'System');
+      fire({ type: 'completed', env: e });
+    } else setStatus(e, deriveStatus(e));
+    emit(); sync(() => esignApi.saveDraft(id, sanitizeForApi(e)));
+    return { ok: true, complete: res.complete };
+  },
+  decline(id: string, rid: string, reason: string) {
+    const e = svc.envelope(id); const r = e?.recipients.find((x) => x.id === rid); if (!e || !r) return;
+    r.status = 'declined'; r.declinedAt = nowIso(); r.declineReason = reason;
+    e.declinedAt = r.declinedAt; e.declineReason = reason;
+    setStatus(e, 'declined');
+    audit(e, 'declined', `${r.name} declined to sign: ${reason}`, { name: r.name, email: r.email }, { recipientId: rid });
+    emit(); sync(() => esignApi.saveDraft(id, sanitizeForApi(e)));
+  },
+  delegate(id: string, rid: string, to: { name: string; email: string; reason?: string }) {
+    const e = svc.envelope(id); const r = e?.recipients.find((x) => x.id === rid); if (!e || !r) return;
+    const from = { name: r.name, email: r.email, reason: to.reason, at: nowIso() };
+    Object.assign(r, { name: to.name, email: to.email, delegatedFrom: from, status: 'sent', sentAt: nowIso(), deliveredAt: undefined, consentAt: undefined, authAt: undefined, signature: null, driverId: undefined });
+    audit(e, 'delegated', `${from.name} assigned their part to ${to.name} <${to.email}>${to.reason ? ` — ${to.reason}` : ''}`, { name: from.name, email: from.email }, { recipientId: rid });
+    fire({ type: 'delegated', env: e, recipient: r }); emit();
+  },
+  addComment(id: string, c: { author: string; authorEmail?: string; text: string; recipientId?: string }) {
+    const e = svc.envelope(id); if (!e || !c.text.trim()) return;
+    e.comments.push({ id: uid('c'), at: nowIso(), ...c, text: c.text.trim() });
+    audit(e, 'comment', `${c.author} commented`, { name: c.author, email: c.authorEmail }); emit();
+  },
+
+  /* ── manage ── */
+  clone(id: string): Envelope | undefined {
+    const e = svc.envelope(id); if (!e) return;
+    const rmap: Record<string, string> = {};
+    const recipients = e.recipients.map((r, i) => { const nid = uid('r'); rmap[r.id] = nid; return { id: nid, name: r.delegatedFrom?.name || r.name, email: r.delegatedFrom?.email || r.email, phone: r.phone, action: r.action, order: r.order, color: r.color || colorForIndex(i), status: 'created' as const, roleName: r.roleName, privateMessage: r.privateMessage, accessCode: r.accessCode, smsAuth: r.smsAuth, language: r.language, hostName: r.hostName, hostEmail: r.hostEmail, driverId: r.driverId }; });
+    const dmap: Record<string, string> = {};
+    const documents = e.documents.map((d) => { const nid = uid('doc'); dmap[d.id] = nid; return { ...d, id: nid }; });
+    const fields = cloneFields(e.fields, (f) => ({ recipientId: rmap[f.recipientId] || f.recipientId, docId: dmap[f.docId] || f.docId, value: (f as any).senderValue ?? (f.filledAt ? '' : f.value), filledAt: undefined, locked: undefined }));
+    const copy = svc.createEnvelope({ title: e.title.replace(/( \(copy\))?$/, ' (copy)'), documents, recipients, fields, subject: e.subject, message: e.message, signingOrder: e.signingOrder, reminders: { enabled: e.reminders.enabled, everyDays: e.reminders.everyDays }, expireDays: e.expireDays, warnDays: e.warnDays, driverId: e.driverId, leadId: e.leadId, driverName: e.driverName, carrier: e.carrier, templateId: e.templateId });
+    audit(copy, 'cloned', `Cloned from "${e.title}"`); emit();
     return copy;
   },
-  remove(id: string) { store.envelopes = store.envelopes.filter((e: any) => e.id !== id); emit(); },
-
-  /* signing simulation — advances recipient + envelope status, builds certificate */
-  simulateView(id: string) { const e = this.envelope(id); if (!e) return; const r = (e.recipients || []).find((x: any) => x.status === 'pending'); if (r) { r.status = 'viewed'; } if (e.status === 'sent') e.status = 'viewed'; audit(e, 'viewed', `${(r || {}).name || 'Recipient'} viewed the document`, (r || {}).name || 'Recipient'); emit(); },
-  simulateSign(id: string, recipientId?: string) {
-    const e = this.envelope(id); if (!e) return;
-    const r = recipientId ? (e.recipients || []).find((x: any) => x.id === recipientId) : (e.recipients || []).find((x: any) => x.status !== 'signed');
-    if (r) { r.status = 'signed'; r.signedAt = nowIso(); audit(e, 'signed', `${r.name} signed`, r.name); }
-    const allSigned = (e.recipients || []).filter((x: any) => x.role === 'signer').every((x: any) => x.status === 'signed');
-    if (allSigned) { e.status = 'completed'; e.certificate = { completedAt: nowIso(), sealId: uid('seal').toUpperCase() }; audit(e, 'completed', 'All recipients signed — envelope completed'); notify('completed', `${e.title} completed`); }
-    else { e.status = 'partially_signed'; }
-    emit(); bg(esignApi.simulate(id));
-  },
-  markDownloaded(id: string, what = 'signed PDF') { const e = this.envelope(id); if (!e) return; audit(e, 'downloaded', `${what} downloaded`); emit(); },
-
-  /* ── packages ── */
-  createPackage(p: any) { const pkg = { id: uid('pkg'), status: 'active', usageCount: 0, updatedAt: nowIso(), roles: ['signer'], signingOrder: 'sequential', reminderEveryDays: 3, expiresInDays: 14, subject: '', message: '', ...p }; store.packages.unshift(pkg); emit(); bg(esignApi.createPackage(pkg)); return pkg; },
-  updatePackage(id: string, patch: any) { const p = store.packages.find((x: any) => x.id === id); if (p) { Object.assign(p, patch); p.updatedAt = nowIso(); emit(); } },
-  duplicatePackage(id: string) { const p = store.packages.find((x: any) => x.id === id); if (!p) return; const copy = { ...structuredClone(p), id: uid('pkg'), name: p.name + ' (copy)', usageCount: 0, updatedAt: nowIso() }; store.packages.unshift(copy); emit(); return copy; },
-  archivePackage(id: string) { const p = store.packages.find((x: any) => x.id === id); if (p) { p.status = p.status === 'archived' ? 'active' : 'archived'; emit(); } },
-  removePackage(id: string) { store.packages = store.packages.filter((x: any) => x.id !== id); emit(); },
-
-  /** Build & send an envelope from a package for a driver/carrier. */
-  sendPackage(packageId: string, driver: { name: string; email: string; carrier: string }, opts: any = {}) {
-    const p = store.packages.find((x: any) => x.id === packageId); if (!p) return null;
-    const r = { id: uid('r'), name: driver.name, email: driver.email, role: 'signer', order: 1, color: colorFor(driver.name), status: 'pending' };
-    const fields: any[] = [];
-    p.documentKeys.forEach((k: string) => fields.push(...defaultFieldsFor(k, r.id)));
-    const env = {
-      id: uid('env'), title: p.name, documentKeys: [...p.documentKeys], recipients: [r], fields,
-      status: 'draft', subject: (p.subject || `${p.name} — please sign`).replace('{driver}', driver.name).replace('{carrier}', driver.carrier),
-      message: (p.message || '').replace('{driver}', driver.name).replace('{carrier}', driver.carrier),
-      reminderEveryDays: p.reminderEveryDays || 3, maxReminders: store.settings.reminders.maxCount, remindersSent: 0,
-      expiresAt: daysFromNow(p.expiresInDays || 14), createdAt: nowIso(), updatedAt: nowIso(), lastActivity: nowIso(),
-      driverName: driver.name, carrier: driver.carrier, packageId, audit: [], certificate: null,
-    };
-    audit(env, 'created', `Created from package "${p.name}"`);
-    store.envelopes.unshift(env);
-    p.usageCount = (p.usageCount || 0) + 1; p.updatedAt = nowIso();
-    if (!opts.draftOnly) { emit(); const res = this.send(env.id); return { env, res }; }
-    emit(); return { env, res: { ok: true, errors: [] } };
-  },
+  softDelete(id: string) { const e = svc.envelope(id); if (!e) return; e.deletedAt = nowIso(); audit(e, 'deleted', 'Moved to Deleted'); fire({ type: 'deleted', env: e }); emit(); },
+  restore(id: string) { const e = svc.envelope(id); if (!e) return; e.deletedAt = null; audit(e, 'restored', 'Restored from Deleted'); emit(); },
+  purge(id: string) { store.envelopes = store.envelopes.filter((e) => e.id !== id); emit(); gcBlobs().catch(() => {}); },
+  moveToFolder(id: string, folderId: string | null) { const e = svc.envelope(id); if (!e) return; e.folder = folderId || undefined; audit(e, 'moved', folderId ? `Moved to folder "${store.folders.find((f) => f.id === folderId)?.name || ''}"` : 'Removed from folder'); emit(); },
+  createFolder(name: string) { const f = { id: uid('fld'), name: name.trim() || 'New folder' }; store.folders.push(f); emit(); return f; },
+  renameFolder(id: string, name: string) { const f = store.folders.find((x) => x.id === id); if (f) { f.name = name; emit(); } },
+  deleteFolder(id: string) { store.folders = store.folders.filter((x) => x.id !== id); store.envelopes.forEach((e) => { if (e.folder === id) e.folder = undefined; }); emit(); },
+  markDownloaded(id: string, what: string) { const e = svc.envelope(id); if (!e) return; audit(e, 'downloaded', `${what} downloaded`); emit(); },
+  setSignedFile(id: string, fileId: string, docHash?: string) { const e = svc.envelope(id); if (!e) return; e.signedFileId = fileId; if (docHash && e.certificate) e.certificate.docHash = docHash; emit(); },
+  exportCsv(id: string) { const e = svc.envelope(id); return e ? formDataCsv(e) : ''; },
 
   /* ── templates ── */
-  createTemplate(t: any) { const tpl = { id: uid('tpl'), status: 'active', usageCount: 0, lastUsed: nowIso(), roles: ['signer'], signingOrder: 'sequential', reminderEveryDays: 3, expiresInDays: 14, subject: '', message: '', fields: [], ...t }; store.templates.unshift(tpl); emit(); return tpl; },
-  updateTemplate(id: string, patch: any) { const t = store.templates.find((x: any) => x.id === id); if (t) { Object.assign(t, patch); emit(); } },
-  duplicateTemplate(id: string) { const t = store.templates.find((x: any) => x.id === id); if (!t) return; const copy = { ...structuredClone(t), id: uid('tpl'), name: t.name + ' (copy)', usageCount: 0, lastUsed: nowIso() }; store.templates.unshift(copy); emit(); return copy; },
-  archiveTemplate(id: string) { const t = store.templates.find((x: any) => x.id === id); if (t) { t.status = t.status === 'archived' ? 'active' : 'archived'; emit(); } },
-  removeTemplate(id: string) { store.templates = store.templates.filter((x: any) => x.id !== id); emit(); },
-  useTemplate(id: string, driver?: { name: string; email: string; carrier: string }) {
-    const t = store.templates.find((x: any) => x.id === id); if (!t) return null;
-    t.usageCount = (t.usageCount || 0) + 1; t.lastUsed = nowIso();
-    const r = { id: uid('r'), name: driver?.name || '', email: driver?.email || '', role: 'signer', order: 1, color: colorFor(driver?.name || 'Signer'), status: 'pending' };
-    const map: any = {}; const recipDefault = (t.fields[0] || {}).recipientId;
-    const fields = (t.fields || []).map((f: any) => { map[f.recipientId] = r.id; return { ...f, id: uid('f'), recipientId: r.id }; });
-    void recipDefault;
-    const env = this.createEnvelope({ title: t.name, documentKeys: [t.documentKey], recipients: [r], fields, subject: t.subject || `Please sign: ${t.name}`, message: t.message, driverName: driver?.name || '', carrier: driver?.carrier || '' });
-    return env;
+  createTemplate(t: Partial<Template> = {}): Template {
+    const tpl: Template = { id: uid('tpl'), name: 'Untitled template', description: '', category: 'Onboarding', documents: [], roles: [role(uid('role'), 'Driver', 0)], fields: [], subject: '', message: store.settings.defaultMessage, signingOrder: true, reminders: { enabled: true, everyDays: store.settings.reminders.everyDays }, expireDays: store.settings.expiration.days, status: 'active', usageCount: 0, createdAt: nowIso(), updatedAt: nowIso(), ...t };
+    store.templates.unshift(tpl); emit(); return tpl;
+  },
+  updateTemplate(id: string, patch: Partial<Template>) { const t = svc.template(id); if (!t) return; Object.assign(t, patch, { updatedAt: nowIso() }); emit(); },
+  removeTemplate(id: string) { const t = svc.template(id); if (!t) return; store.lastRemovedTemplate = t; store.templates = store.templates.filter((x) => x.id !== id); emit(); return t; },
+  restoreTemplate(t: Template) { if (!store.templates.some((x) => x.id === t.id)) store.templates.unshift(t); emit(); },
+  duplicateTemplate(id: string) {
+    const t = svc.template(id); if (!t) return;
+    const rmap: Record<string, string> = {}; const roles = t.roles.map((r) => { const nid = uid('role'); rmap[r.id] = nid; return { ...r, id: nid }; });
+    const dmap: Record<string, string> = {}; const documents = t.documents.map((d) => { const nid = uid('doc'); dmap[d.id] = nid; return { ...d, id: nid }; });
+    const copy: Template = { ...structuredClone(t), id: uid('tpl'), name: t.name + ' (copy)', roles, documents, fields: cloneFields(t.fields, (f) => ({ recipientId: rmap[f.recipientId] || f.recipientId, docId: dmap[f.docId] || f.docId })), usageCount: 0, createdAt: nowIso(), updatedAt: nowIso() };
+    store.templates.unshift(copy); emit(); return copy;
+  },
+  saveAsTemplate(id: string, name: string): Template | undefined {
+    const e = svc.envelope(id); if (!e) return;
+    const rmap: Record<string, string> = {};
+    const roles: TemplateRole[] = e.recipients.map((r, i) => { const rid = uid('role'); rmap[r.id] = rid; const isDriver = !!r.driverId || i === 0; return { id: rid, roleName: r.roleName || (isDriver ? 'Driver' : `Recipient ${i + 1}`), name: isDriver ? '' : r.name, email: isDriver ? '' : r.email, action: r.action, order: r.order, color: r.color, accessCode: r.accessCode, privateMessage: r.privateMessage }; });
+    const dmap: Record<string, string> = {}; const documents = e.documents.map((d) => { const nid = uid('doc'); dmap[d.id] = nid; return { ...d, id: nid }; });
+    const fields = cloneFields(e.fields, (f) => ({ recipientId: rmap[f.recipientId] || f.recipientId, docId: dmap[f.docId] || f.docId, value: f.mergeKey ? '' : ((f as any).senderValue ?? (f.filledAt ? '' : f.value)), filledAt: undefined, locked: undefined }));
+    const tpl = svc.createTemplate({ name: name.trim() || e.title, description: `Saved from envelope "${e.title}"`, category: 'Saved', carrier: e.carrier, documents, roles, fields, subject: e.subject, message: e.message, signingOrder: e.signingOrder, reminders: { enabled: e.reminders.enabled, everyDays: e.reminders.everyDays }, expireDays: e.expireDays });
+    audit(e, 'saved_template', `Saved as template "${tpl.name}"`); emit();
+    return tpl;
+  },
+  /** Primary signing role of a template (receives the driver). */
+  driverRole(t: Template) { return [...t.roles].filter((r) => r.action !== 'cc').sort((a, b) => a.order - b.order)[0] || t.roles[0]; },
+  envelopeFromTemplate(tplId: string, person?: Person | null, extra: Record<string, { name: string; email: string }> = {}): { env: Envelope; missing: string[] } | null {
+    const t = svc.template(tplId); if (!t) return null;
+    const lead = svc.driverRole(t);
+    const assign: any = { ...extra };
+    if (person && lead) assign[lead.id] = { name: person.name, email: person.email || '', phone: person.phone, driverId: person.id };
+    const inst = instantiateTemplate(t, assign, personMergeData(person));
+    if (person) inst.documents.forEach((d) => { if (d.source === 'catalog' && person.carrierInfo?.name) d.carrier = person.carrierInfo.name; });
+    t.usageCount++; t.lastUsed = nowIso();
+    const env = svc.createEnvelope({ title: person ? `${t.name.replace(/^.* — /, '')} — ${person.name}` : t.name, documents: inst.documents, recipients: inst.recipients, fields: inst.fields, subject: inst.subject || `Please sign: ${t.name}`, message: inst.message, signingOrder: t.signingOrder, reminders: { ...t.reminders }, expireDays: t.expireDays, templateId: t.id, driverId: person?.kind === 'lead' ? undefined : person?.id, leadId: person?.kind === 'lead' ? person.id : undefined, driverName: person?.name || '', carrier: person?.carrierInfo?.name || person?.carrier || t.carrier || '' });
+    return { env, missing: inst.missingMerge };
+  },
+  bulkSend(tplId: string, rows: { person?: Person | null; name: string; email: string; phone?: string }[]) {
+    const t = svc.template(tplId); if (!t) return null;
+    const batch: Batch = { id: uid('batch'), templateId: tplId, name: `${t.name} · ${new Date().toLocaleDateString()}`, createdAt: nowIso(), count: 0, failed: 0 };
+    const results: { name: string; ok: boolean; envId?: string; error?: string }[] = [];
+    for (const row of rows) {
+      const person: Person = row.person || { name: row.name, email: row.email, phone: row.phone };
+      const out = svc.envelopeFromTemplate(tplId, { ...person, name: row.name || person.name, email: row.email || person.email, phone: row.phone || person.phone });
+      if (!out) { results.push({ name: row.name, ok: false, error: 'Template missing' }); batch.failed++; continue; }
+      out.env.batchId = batch.id;
+      const res = svc.send(out.env.id);
+      if (res.ok) { batch.count++; results.push({ name: row.name, ok: true, envId: out.env.id }); }
+      else { batch.failed++; results.push({ name: row.name, ok: false, envId: out.env.id, error: res.errors[0] }); }
+    }
+    store.batches.unshift(batch); emit();
+    return { batch, results };
+  },
+
+  /* ── self-service links (PowerForm-style) ── */
+  createPowerForm(tplId: string) {
+    const t = svc.template(tplId); if (!t) return null;
+    const pf: PowerForm = { id: uid('pf'), templateId: tplId, name: t.name, roleId: svc.driverRole(t).id, createdAt: nowIso(), uses: 0, active: true, instructions: 'Enter your name and email to review and sign.' };
+    store.powerforms.unshift(pf); emit(); return pf;
+  },
+  togglePowerForm(id: string) { const p = store.powerforms.find((x) => x.id === id); if (p) { p.active = !p.active; emit(); } },
+  removePowerForm(id: string) { store.powerforms = store.powerforms.filter((x) => x.id !== id); emit(); },
+  submitPowerForm(id: string, who: { name: string; email: string; phone?: string }) {
+    const pf = store.powerforms.find((x) => x.id === id); if (!pf || !pf.active) return null;
+    const out = svc.envelopeFromTemplate(pf.templateId, { name: who.name, email: who.email, phone: who.phone }); if (!out) return null;
+    out.env.title = `${pf.name} — ${who.name} (self-service)`;
+    audit(out.env, 'powerform', `Started from self-service link by ${who.name} <${who.email}>`, { name: who.name, email: who.email });
+    const res = svc.send(out.env.id);
+    if (!res.ok) return { env: out.env, errors: res.errors };
+    pf.uses++; emit();
+    const rid = activeRecipients(out.env).find((r) => r.email === who.email)?.id;
+    return { env: out.env, recipientId: rid, errors: [] };
+  },
+
+  /* ── housekeeping: expirations, automatic reminders, 48h stale alerts ── */
+  tick(now = Date.now()) {
+    let changed = false;
+    for (const e of store.envelopes) {
+      if (!IN_FLIGHT.includes(e.status) || e.status === 'correcting' || e.deletedAt) continue;
+      if (e.expiresAt && +new Date(e.expiresAt) <= now) { setStatus(e, 'expired'); audit(e, 'expired', 'Envelope expired before all recipients finished', 'System'); changed = true; continue; }
+      const act = activeRecipients(e);
+      if (!act.length) continue;
+      if (e.reminders.enabled && e.remindersSent < e.maxReminders) {
+        const last = +new Date(e.reminders.lastAt || e.sentAt || e.createdAt);
+        if (now - last >= (e.reminders.everyDays || 3) * 864e5) { svc.remind(e.id, true); changed = true; }
+      }
+      const oldest = Math.min(...act.map((r) => +new Date(r.sentAt || e.sentAt || e.createdAt)));
+      if (!e.staleNotifiedAt && now - oldest >= (store.settings.staleHours || 48) * 36e5) {
+        e.staleNotifiedAt = new Date(now).toISOString(); fire({ type: 'stale', env: e, detail: act.map((r) => r.name).join(', ') }); changed = true;
+      }
+    }
+    if (changed) emit();
   },
 
   /* ── settings ── */
-  updateSettings(patch: any) { store.settings = { ...store.settings, ...patch }; emit(); bg(esignApi.updateSettings(store.settings)); },
-  setSettingPath(path: string, value: any) { const parts = path.split('.'); let o = store.settings; for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]]; o[parts[parts.length - 1]] = value; emit(); },
-
-  markNotificationsRead() { store.notifications.forEach((n: any) => (n.read = true)); emit(); },
-  resetDemo() { store.envelopes = seedEnvelopes(); store.packages = seedPackages(); store.templates = seedTemplates(); store.notifications = []; store.settings = structuredClone(DEFAULT_SETTINGS); emit(); },
+  setSetting(path: string, value: any) { const parts = path.split('.'); let o: any = store.settings; for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]] = { ...(o[parts[i]] || {}) }; o[parts[parts.length - 1]] = value; emit(); sync(() => esignApi.updateSettings(store.settings)); },
+  async resetDemo() { store.templates = seedTemplates(); store.envelopes = seedEnvelopes(store.templates); store.folders = []; store.powerforms = []; store.batches = []; store.settings = structuredClone(DEFAULT_SETTINGS); emit(); gcBlobs().catch(() => {}); },
 };
 
-/* ───────────────────────── formatting ───────────────────────── */
-export function fmtAgo(iso: string) {
-  if (!iso) return '—';
-  const ms = Date.now() - +new Date(iso); const m = Math.floor(ms / 6e4);
-  if (m < 1) return 'just now'; if (m < 60) return m + 'm ago';
-  const h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
-  const d = Math.floor(h / 24); return d + 'd ago';
-}
-export function fmtDate(iso: string) { if (!iso) return '—'; return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }); }
-export function daysUntil(iso: string) { if (!iso) return null; return Math.ceil((+new Date(iso) - Date.now()) / 864e5); }
-
-/** Display name for a document key, resolving uploaded PDFs from the envelope. */
-export function docName(env: any, key: string) {
-  if (key && key.startsWith('upload_')) return env?.uploads?.[key]?.name || 'Uploaded document';
-  return DOC_CATALOG[key]?.name || key;
-}
-/** Rendered pages for an uploaded doc, or null for catalog documents. */
-export function uploadPages(env: any, key: string) {
-  if (key && key.startsWith('upload_')) return env?.uploads?.[key]?.pages || [];
-  return null;
-}
+/* ───────────────────────── v1 compatibility helpers ───────────────────────── */
+export function docName(env: Envelope | any, key: string) { return env?.documents?.find((d: EDoc) => d.id === key)?.name || CATALOG[key]?.name || key; }
+export function totalPages(docs: EDoc[]) { return docs.reduce((n, d) => n + d.pages.length, 0); }
+export { PAGE_W };

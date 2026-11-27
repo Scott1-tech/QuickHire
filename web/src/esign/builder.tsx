@@ -1,274 +1,339 @@
+/* Send flow: Setup (documents · recipients · message · options) → Prepare
+   (field editor) → Send. The same flow edits templates (roles instead of
+   recipients), corrects sent envelopes and prepares self-signing. Every edit
+   autosaves to the draft. */
 import React from 'react';
-import { Hover } from '../lib/dc';
-import { T, Icon } from '../tasks/lib';
-import { store, svc, DOC_CATALOG, DOC_KEYS, defaultFieldsFor, uid, colorFor, validateEnvelope, daysUntil } from './store';
-import { Modal, Field, Input, Textarea, Select, primaryBtn, ghostBtn, StatusPill } from './ui';
+import { T } from '../tasks/lib';
+import { Envelope, Template, EDoc, Field, Recipient, TemplateRole, ACTIONS, RecipientAction, colorForIndex, uid, validateForSend, personMergeData, routingSteps, isDone, actionLabel, Person, canHaveFields } from './model';
+import { svc, store, useEsign } from './store';
+import { CATALOG, CATALOG_KEYS, catalogFields } from './catalog';
+import { PdfError } from './pdf';
+import { PageImage } from './pages';
 import { DocumentEditor } from './editor';
-import { SigningPreview } from './signing';
-import { renderPdf } from './pdf';
+import { SigningSession } from './signing';
+import { listPeople, personForEnvelope } from './integrations';
+import { Icon, Btn, IconButton, Input, Textarea, Select, Toggle, SectionCard, Dropdown, MenuItem, MenuSep, Label, Chip, RecipientAvatar, hexA, useWidth, inputStyle, Field as FormField } from './ui';
 
-const STEPS = ['Documents', 'Recipients', 'Prepare', 'Review & Send'];
+export type BuilderKind = 'envelope' | 'template' | 'self' | 'correct';
+type Party = Partial<Recipient> & Partial<TemplateRole> & { id: string; name: string; email: string; action: RecipientAction; order: number; color: string };
 
-/* Full envelope builder. Operates on a real draft envelope in the store. */
-export function EnvelopeBuilder({ envId, onClose, onSent, toast }: any) {
-  const [step, setStep] = React.useState(0);
-  const [editing, setEditing] = React.useState(false);
-  const [preview, setPreview] = React.useState(false);
-  const [, force] = React.useReducer((x) => x + 1, 0);
-  const env = svc.envelope(envId);
-  if (!env) return null;
+export function SendFlow({ kind, id, onClose, toast, onOpenEnvelope, startAt = 'setup' }: { kind: BuilderKind; id: string; onClose: () => void; toast: (t: string, k?: string, a?: any) => void; onOpenEnvelope?: (id: string) => void; startAt?: 'setup' | 'prepare' }) {
+  useEsign();
+  const isTpl = kind === 'template';
+  const env = isTpl ? undefined : svc.envelope(id);
+  const tpl = isTpl ? svc.template(id) : undefined;
+  const [step, setStep] = React.useState<'setup' | 'prepare' | 'sent'>(startAt);
+  const [issues, setIssues] = React.useState<string[]>([]);
+  const [preview, setPreview] = React.useState<string | null>(null);
+  const [selfSession, setSelfSession] = React.useState<string | null>(null);
+  const [savedAt, setSavedAt] = React.useState<number>(Date.now());
+  const width = useWidth();
+  if (!env && !tpl) return null;
 
-  const patch = (p: any) => { svc.updateEnvelope(envId, p); force(); };
-  const errs = validateEnvelope(env);
+  const title = isTpl ? tpl!.name : env!.title;
+  const documents: EDoc[] = (isTpl ? tpl!.documents : env!.documents) || [];
+  const parties: Party[] = (isTpl ? tpl!.roles : env!.recipients) as any;
+  const fields: Field[] = isTpl ? tpl!.fields : env!.fields;
+  const signingOrder = isTpl ? tpl!.signingOrder : env!.signingOrder;
+  const patch = (p: any) => { if (isTpl) svc.updateTemplate(id, p); else svc.updateEnvelope(id, p); setSavedAt(Date.now()); };
+  const person = env ? personForEnvelope(env) : null;
+  const mergeData = person ? personMergeData(person) : undefined;
 
-  const send = () => { const res = svc.send(envId); if (res.ok) { toast?.('Envelope sent', 'success'); onSent?.(); onClose(); } else { toast?.(res.errors[0] || 'Cannot send', 'error'); setStep(3); } };
-  const saveDraft = () => { svc.saveDraft(envId); toast?.('Draft saved', 'success'); onClose(); };
+  const closeAll = () => { if (kind === 'correct' && env?.status === 'correcting') { svc.cancelCorrect(id); toast('Correction cancelled', 'info'); } else if (!isTpl && env?.status === 'draft') toast('Draft saved', 'info'); onClose(); };
 
-  if (editing) return <DocumentEditor title={env.title} subtitle={`${env.driverName || 'Recipient'} · ${env.carrier || ''}`}
-    value={env} onChange={patch} onClose={() => setEditing(false)} onPreview={() => setPreview(true)}
-    onSave={() => { svc.saveDraft(envId); toast?.('Draft saved', 'success'); }}
-    onSend={() => { const res = svc.send(envId); if (res.ok) { toast?.('Envelope sent', 'success'); onSent?.(); onClose(); } else { toast?.(res.errors[0], 'error'); } }} />;
+  /* ── minimal checks before Prepare ── */
+  const setupIssues = () => {
+    const out: string[] = [];
+    if (!documents.length) out.push('Add at least one document.');
+    if (kind !== 'self') {
+      if (!parties.length) out.push(isTpl ? 'Add at least one role.' : 'Add at least one recipient.');
+      parties.forEach((p) => { if (isTpl) { if (!String(p.roleName || '').trim()) out.push('Every role needs a name.'); } else { if (!p.name?.trim()) out.push('Every recipient needs a name.'); if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(p.email || '').trim())) out.push(`${p.name || 'A recipient'} needs a valid email.`); } });
+    }
+    return [...new Set(out)];
+  };
 
-  if (preview) return <SigningPreview env={env} onClose={() => setPreview(false)} onComplete={(rid: string) => { svc.simulateSign(envId, rid); force(); }} />;
+  if (step === 'prepare') {
+    const editorRecipients = parties.map((p) => ({ id: p.id, name: p.name, roleName: p.roleName, email: p.email, action: p.action, color: p.color }));
+    const primary = kind === 'template' ? { label: 'Save template', icon: 'check', onClick: () => { toast('Template saved', 'success'); onClose(); } }
+      : kind === 'self' ? { label: 'Sign now', icon: 'sign', onClick: () => { const res = svc.send(id); if (!res.ok) { setIssues(res.errors); return; } setSelfSession(env!.recipients[0].id); } }
+        : kind === 'correct' ? { label: 'Finish correcting', icon: 'send', onClick: () => { const res = svc.finishCorrect(id); if (!res.ok) { setIssues(res.errors); return; } toast('Envelope corrected and re-sent', 'success'); onClose(); } }
+          : { label: 'Send', icon: 'send', onClick: () => { const res = svc.send(id); if (!res.ok) { setIssues(res.errors); return; } setStep('sent'); } };
+    const firstSigner = parties.find((p) => canHaveFields(p as any) && !isDone(p as any));
+    return <>
+      <DocumentEditor mode={kind === 'correct' ? 'correct' : kind === 'template' ? 'template' : kind === 'self' ? 'self' : 'envelope'} title={title}
+        documents={documents} recipients={editorRecipients} fields={fields} onFields={(f) => patch({ fields: f })} mergeData={mergeData}
+        onBack={() => setStep('setup')} backLabel="Setup" primary={primary} issues={issues} onDismissIssues={() => setIssues([])} toast={toast}
+        secondary={<>
+          {kind !== 'self' && firstSigner && <Btn icon="eye" onClick={() => setPreview(firstSigner.id)} data-testid="editor-preview">{width > 1200 ? 'Preview' : null}</Btn>}
+          {kind === 'envelope' && <Btn onClick={() => { svc.updateEnvelope(id, {}); toast('Draft saved', 'success'); onClose(); }}>{width > 1200 ? 'Save & close' : 'Save'}</Btn>}
+        </>} />
+      {preview && <SigningSession mode="preview" env={isTpl ? templatePreviewEnv(tpl!) : env} recipientId={preview} onClose={() => setPreview(null)} toast={toast} />}
+      {selfSession && <SigningSession mode="self" envId={id} recipientId={selfSession} onClose={() => { setSelfSession(null); onClose(); }} toast={toast} />}
+    </>;
+  }
 
-  return <div style={{ position: 'fixed', inset: 0, zIndex: 78, background: '#F5F6F8', display: 'flex', flexDirection: 'column' }}>
-    <div style={{ height: 56, flex: 'none', display: 'flex', alignItems: 'center', gap: 14, padding: '0 18px', background: '#fff', borderBottom: `1px solid ${T.hair}` }}>
-      <Hover as="button" onClick={onClose} style={{ width: 32, height: 32, borderRadius: 8, border: 'none', background: 'transparent', color: T.muted, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} hover={{ background: 'rgba(0,0,0,0.05)' }}><Icon name="x" size={18} /></Hover>
-      <div style={{ fontSize: 14, fontWeight: 650 }}>New Envelope</div>
-      <div style={{ flex: 1 }} />
-      <Hover as="button" onClick={saveDraft} style={ghostBtn} hover={{ background: 'rgba(0,0,0,0.04)' }}>Save Draft</Hover>
-    </div>
-    {/* stepper */}
-    <div style={{ flex: 'none', display: 'flex', justifyContent: 'center', gap: 6, padding: '16px', background: '#fff', borderBottom: `1px solid ${T.hair}` }}>
-      {STEPS.map((s, i) => <button key={s} onClick={() => setStep(i)} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 32, padding: '0 14px', borderRadius: 999, border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 600, background: step === i ? 'rgba(0,122,255,0.1)' : 'transparent', color: step === i ? '#007AFF' : T.muted }}>
-        <span style={{ width: 20, height: 20, borderRadius: 999, background: step > i ? '#34C759' : step === i ? '#007AFF' : '#E3E3E8', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>{step > i ? <Icon name="check" size={12} /> : i + 1}</span>{s}
-      </button>)}
-    </div>
+  if (step === 'sent' && env) return <SentScreen env={env} onClose={onClose} onOpen={() => { onClose(); onOpenEnvelope?.(env.id); }} />;
 
-    <div style={{ flex: 1, overflowY: 'auto', padding: '26px 20px 80px' }}>
-      <div style={{ maxWidth: 720, margin: '0 auto' }}>
-        {step === 0 && <DocumentsStep env={env} patch={patch} toast={toast} />}
-        {step === 1 && <RecipientsStep env={env} patch={patch} />}
-        {step === 2 && <PrepareStep env={env} onOpen={() => setEditing(true)} />}
-        {step === 3 && <ReviewStep env={env} patch={patch} errs={errs} onPreview={() => setPreview(true)} />}
+  /* ── Setup ── */
+  const next = () => { const errs = setupIssues(); if (errs.length) { setIssues(errs); toast(errs[0], 'warning'); return; } setIssues([]); setStep('prepare'); };
+  const lockedDocs = kind === 'correct' && env!.recipients.some(isDone);
+  return <div style={{ position: 'fixed', inset: 0, zIndex: 85, background: '#F5F6F8', display: 'flex', flexDirection: 'column' }} data-testid="send-setup">
+    <header style={{ height: 56, flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px', background: '#fff', borderBottom: `1px solid ${T.hair}` }}>
+      <IconButton icon="x" title="Close" onClick={closeAll} />
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <input value={title} aria-label={isTpl ? 'Template name' : 'Envelope name'} onChange={(e) => patch(isTpl ? { name: e.target.value } : { title: e.target.value })} data-testid="envelope-title"
+          style={{ border: 'none', outline: 'none', fontSize: 15, fontWeight: 700, width: '100%', background: 'transparent', fontFamily: 'inherit', color: T.text, padding: 0 }} />
+        <div style={{ fontSize: 11.5, color: T.faint }}>{kind === 'template' ? 'Template' : kind === 'self' ? 'Sign a document yourself' : kind === 'correct' ? 'Correcting sent envelope' : 'Draft'} · <SavedLabel at={savedAt} /></div>
       </div>
-    </div>
-
-    <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', background: '#fff', borderTop: `1px solid ${T.hair}` }}>
-      <div style={{ flex: 1, fontSize: 12, color: errs.length ? '#C62820' : '#248A3D' }}>{errs.length ? `${errs.length} item${errs.length > 1 ? 's' : ''} to resolve before sending` : 'Ready to send'}</div>
-      {step > 0 && <Hover as="button" onClick={() => setStep(step - 1)} style={ghostBtn} hover={{ background: 'rgba(0,0,0,0.04)' }}>Back</Hover>}
-      {step < 3 ? <Hover as="button" onClick={() => setStep(step + 1)} style={primaryBtn} hover={{ background: '#0066D6' }}>Continue</Hover>
-        : <Hover as="button" onClick={send} style={{ ...primaryBtn, opacity: errs.length ? 0.6 : 1 }} hover={{ background: '#0066D6' }}><Icon name="send" size={15} />Send Envelope</Hover>}
+      <Steps step={0} kind={kind} />
+      <Btn kind="primary" onClick={next} data-testid="setup-next" icon="arrowRight">Next</Btn>
+    </header>
+    <div style={{ flex: 1, overflowY: 'auto', padding: width < 700 ? '16px 12px 80px' : '24px 20px 80px' }}>
+      <div style={{ maxWidth: 860, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {issues.length > 0 && <div role="alert" style={{ padding: '10px 14px', borderRadius: 12, background: '#FFF4F3', border: '1px solid rgba(255,59,48,0.22)', color: '#B3261E', fontSize: 13 }}>{issues.join(' · ')}</div>}
+        <DocumentsCard kind={kind} documents={documents} locked={lockedDocs} carrier={(env?.carrier || tpl?.carrier || 'GRAND ONE LLC')} toast={toast}
+          onChange={(docs: EDoc[], extra?: any) => patch({ documents: docs, ...(extra || {}) })} fields={fields} parties={parties} isTpl={isTpl} envId={isTpl ? undefined : id} getDocs={() => ((isTpl ? svc.template(id)?.documents : svc.envelope(id)?.documents) || [])} />
+        {kind !== 'self' && <RecipientsCard kind={kind} env={env} parties={parties} signingOrder={signingOrder} fields={fields} onChange={patch} toast={toast} />}
+        {kind !== 'self' && <MessageCard subject={isTpl ? tpl!.subject : env!.subject} message={isTpl ? tpl!.message : env!.message} isTpl={isTpl} onChange={patch} documents={documents} />}
+        {kind !== 'self' && <OptionsCard reminders={isTpl ? tpl!.reminders : env!.reminders} expireDays={isTpl ? tpl!.expireDays : env!.expireDays} warnDays={env?.warnDays ?? 3} isTpl={isTpl} onChange={patch} />}
+        {isTpl && <TemplateMetaCard tpl={tpl!} onChange={patch} />}
+      </div>
     </div>
   </div>;
 }
 
-function DocumentsStep({ env, patch, toast }: any) {
-  const keys: string[] = env.documentKeys || [];
-  const [uploading, setUploading] = React.useState(false);
-  const fileRef = React.useRef<HTMLInputElement>(null);
-  const toggle = (k: string) => {
-    const next = keys.includes(k) ? keys.filter((x) => x !== k) : [...keys, k];
-    const signer = (env.recipients || []).find((r: any) => r.role === 'signer')?.id || (env.recipients[0] || {}).id || 'r1';
-    // rebuild fields: keep fields for kept docs, add defaults for new docs
-    let fields = (env.fields || []).filter((f: any) => next.includes(f.docKey));
-    const added = next.filter((x) => !keys.includes(x));
-    added.forEach((k2) => { fields = [...fields, ...defaultFieldsFor(k2, signer)]; });
-    patch({ documentKeys: next, fields, title: env.title === 'Untitled envelope' && next.length ? DOC_CATALOG[next[0]].name : env.title });
+function templatePreviewEnv(t: Template): Envelope {
+  return { id: 'preview', title: t.name, status: 'sent', documents: t.documents, recipients: t.roles.map((r) => ({ id: r.id, name: r.name || r.roleName, email: r.email || 'recipient@example.com', action: r.action, order: r.order, color: r.color, status: 'sent', roleName: r.roleName })), fields: t.fields, subject: t.subject, message: t.message, signingOrder: t.signingOrder, reminders: { ...t.reminders }, remindersSent: 0, maxReminders: 3, expireDays: t.expireDays, expiresAt: new Date(Date.now() + 864e5 * 30).toISOString(), warnDays: 3, driverName: '', carrier: t.carrier || '', createdAt: '', updatedAt: '', lastActivity: '', audit: [], comments: [], sender: svc.me(), version: 2 };
+}
+
+function SavedLabel({ at }: { at: number }) {
+  const [, tick] = React.useReducer((x) => x + 1, 0);
+  React.useEffect(() => { const t = setInterval(tick, 15000); return () => clearInterval(t); }, []);
+  const s = Math.round((Date.now() - at) / 1000);
+  return <span style={{ color: '#248A3D' }} data-testid="autosave">Saved{s > 20 ? ` ${s < 60 ? 'moments' : Math.round(s / 60) + ' min'} ago` : ''}</span>;
+}
+
+function Steps({ step, kind }: { step: number; kind: BuilderKind }) {
+  if (useWidth() < 900) return null;
+  const labels = ['Setup', kind === 'template' ? 'Fields' : 'Prepare', kind === 'template' ? 'Save' : kind === 'self' ? 'Sign' : kind === 'correct' ? 'Re-send' : 'Send'];
+  return <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 8 }}>{labels.map((l, i) => <React.Fragment key={l}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 650, color: i === step ? '#007AFF' : T.faint }}><span style={{ width: 18, height: 18, borderRadius: 99, background: i === step ? '#007AFF' : '#E5E5EA', color: i === step ? '#fff' : T.muted, fontSize: 10.5, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>{l}</span>
+    {i < labels.length - 1 && <span style={{ width: 18, height: 1, background: '#D1D1D6' }} />}
+  </React.Fragment>)}</div>;
+}
+
+/* ───────────────────────── documents ───────────────────────── */
+function DocumentsCard({ kind, documents, onChange, toast, locked, carrier, fields, parties, isTpl, envId, getDocs }: any) {
+  const [busy, setBusy] = React.useState(0);
+  const [over, setOver] = React.useState(false);
+  const input = React.useRef<HTMLInputElement>(null);
+  const addFiles = async (files: FileList | File[]) => {
+    const list = [...files]; if (!list.length) return;
+    setBusy((n) => n + list.length);
+    const added: EDoc[] = [];
+    for (const f of list) {
+      try { added.push(await svc.importPdf(f)); }
+      catch (e: any) { toast(e instanceof PdfError ? e.message : `${f.name} could not be added`, 'error'); }
+      finally { setBusy((n) => n - 1); }
+    }
+    if (added.length) {
+      const latest = getDocs();
+      const extra: any = {};
+      const cur = !isTpl ? svc.envelope(envId) : null;
+      if (cur && /^Untitled/.test(cur.title || '')) extra.title = added[0].name;
+      onChange([...latest, ...added], extra);
+      toast(`Added ${added.map((d) => `${d.name} (${d.pages.length} page${d.pages.length === 1 ? '' : 's'})`).join(', ')}`, 'success');
+    }
   };
-  const onFile = async (file?: File) => {
-    if (!file) return;
-    if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) { toast?.('Please choose a PDF file', 'error'); return; }
-    setUploading(true);
-    try {
-      const rendered = await renderPdf(file);
-      svc.addUpload(env.id, rendered);
-      patch({}); // re-render the builder
-      toast?.(`Uploaded ${rendered.name} (${rendered.pages.length} page${rendered.pages.length === 1 ? '' : 's'})`, 'success');
-    } catch (e: any) {
-      toast?.('Could not read that PDF', 'error');
-    } finally { setUploading(false); if (fileRef.current) fileRef.current.value = ''; }
+  const addCatalog = (key: string) => {
+    const d = svc.catalogDoc(key, carrier);
+    const signerIds = (parties as Party[]).filter((p) => canHaveFields(p as any)).sort((a, b) => a.order - b.order).map((p) => p.id);
+    const extra: any = { fields: [...fields, ...(signerIds.length ? catalogFields(key, d.id, signerIds) : [])] };
+    onChange([...documents, d], extra);
+    toast(`${d.name} added${signerIds.length ? ' with signature fields' : ''}`, 'success');
   };
-  const uploadKeys = keys.filter((k) => k.startsWith('upload_'));
-  return <>
-    <SectionTitle title="Choose documents" desc="Upload your own PDF, or pick from QuickHire's onboarding library, a template, or a package." />
-    <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: 'none' }} onChange={(e) => onFile(e.target.files?.[0])} />
-    <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-      <Hover as="button" onClick={() => fileRef.current?.click()} style={{ ...ghostBtn, opacity: uploading ? 0.6 : 1 }} hover={{ background: 'rgba(0,0,0,0.04)' }}><Icon name={uploading ? 'refresh' : 'upload'} size={15} />{uploading ? 'Rendering PDF…' : 'Upload PDF'}</Hover>
-      <SmallMenu label="Use template" icon="copy" items={store.templates.map((t: any) => ({ label: t.name, onClick: () => { const fields = defaultFieldsFor(t.documentKey, (env.recipients[0] || {}).id || 'r1'); patch({ documentKeys: [...new Set([...keys, t.documentKey])], fields: [...env.fields.filter((f: any) => f.docKey !== t.documentKey), ...fields], title: t.name }); } }))} />
-      <SmallMenu label="Use package" icon="briefcase" items={store.packages.map((p: any) => ({ label: p.name, onClick: () => { const signer = (env.recipients[0] || {}).id || 'r1'; let fields: any[] = []; p.documentKeys.forEach((k: string) => fields.push(...defaultFieldsFor(k, signer))); patch({ documentKeys: [...p.documentKeys], fields, title: p.name }); } }))} />
-    </div>
-    {uploadKeys.length > 0 && <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: '0.02em', textTransform: 'uppercase', color: T.faint, marginBottom: 8 }}>Uploaded</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {uploadKeys.map((k) => { const up = env.uploads?.[k]; return <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: 12, borderRadius: 12, border: '1.5px solid #34C759', background: 'rgba(52,199,89,0.05)' }}>
-          <span style={{ width: 34, height: 34, flex: 'none', borderRadius: 9, background: '#34C759', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="fileText" size={16} /></span>
-          <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{up?.name || 'Uploaded PDF'}</div><div style={{ fontSize: 11.5, color: T.faint }}>{(up?.pages || []).length} page{(up?.pages || []).length === 1 ? '' : 's'} · your document</div></div>
-          <Hover as="button" onClick={() => { const next = keys.filter((x) => x !== k); const ups = { ...(env.uploads || {}) }; delete ups[k]; patch({ documentKeys: next, fields: (env.fields || []).filter((f: any) => f.docKey !== k), uploads: ups }); }} style={{ width: 30, height: 30, borderRadius: 8, border: 'none', background: 'transparent', color: '#C62820', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} hover={{ background: 'rgba(255,59,48,0.08)' }}><Icon name="trash" size={15} /></Hover>
-        </div>; })}
-      </div>
+  const remove = (doc: EDoc) => {
+    const prevDocs = documents, prevFields = fields;
+    onChange(documents.filter((d: EDoc) => d.id !== doc.id), { fields: fields.filter((f: Field) => f.docId !== doc.id) });
+    toast(`Removed ${doc.name}`, 'info', { label: 'Undo', run: () => onChange(prevDocs, { fields: prevFields }) });
+  };
+  const move = (i: number, dir: number) => { const j = i + dir; if (j < 0 || j >= documents.length) return; const n = [...documents]; [n[i], n[j]] = [n[j], n[i]]; onChange(n); };
+  const rename = (doc: EDoc, name: string) => onChange(documents.map((d: EDoc) => (d.id === doc.id ? { ...d, name } : d)));
+  return <SectionCard icon="fileText" title="Documents" desc={kind === 'self' ? 'Upload the document you want to sign.' : 'Upload PDFs or add QuickHire documents. They are sent as one envelope, in this order.'}
+    right={<div style={{ display: 'flex', gap: 6 }}>
+      <Dropdown align="right" width={260} trigger={<Btn size="sm" icon="filePlus" disabled={locked}>Library</Btn>}>
+        {(close: any) => <>{CATALOG_KEYS.map((k) => <MenuItem key={k} icon="fileText" label={CATALOG[k].name} hint={CATALOG[k].category} onClick={() => { addCatalog(k); close(); }} />)}</>}
+      </Dropdown>
+    </div>}>
+    <input ref={input} type="file" accept="application/pdf,.pdf" multiple style={{ display: 'none' }} data-testid="pdf-input" onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ''; }} />
+    {!locked && <div onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files); }}
+      onClick={() => input.current?.click()} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') input.current?.click(); }} data-testid="dropzone"
+      style={{ border: `1.5px dashed ${over ? '#007AFF' : 'rgba(0,0,0,0.16)'}`, background: over ? 'rgba(0,122,255,0.05)' : '#FAFAFB', borderRadius: 12, padding: documents.length ? '14px' : '28px 14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, cursor: 'pointer', marginBottom: documents.length ? 14 : 0, flexWrap: 'wrap', textAlign: 'center' }}>
+      <span style={{ width: 38, height: 38, borderRadius: 11, background: 'rgba(0,122,255,0.1)', color: '#007AFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={busy ? 'refresh' : 'upload'} size={18} /></span>
+      <div><div style={{ fontSize: 13.5, fontWeight: 650 }}>{busy ? `Reading ${busy} PDF${busy > 1 ? 's' : ''}…` : 'Drop PDFs here or click to upload'}</div><div style={{ fontSize: 12, color: T.faint }}>Up to 25 MB each · multi-page supported</div></div>
     </div>}
-    <div style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: '0.02em', textTransform: 'uppercase', color: T.faint, marginBottom: 8 }}>Document library</div>
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-      {DOC_KEYS.map((k) => { const on = keys.includes(k); const d = DOC_CATALOG[k]; return <Hover key={k} as="button" onClick={() => toggle(k)} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: 12, borderRadius: 12, border: `1.5px solid ${on ? '#007AFF' : T.border}`, background: on ? 'rgba(0,122,255,0.04)' : '#fff', cursor: 'pointer', textAlign: 'left' }} hover={{ background: on ? 'rgba(0,122,255,0.06)' : 'rgba(0,0,0,0.02)' }}>
-        <span style={{ width: 34, height: 34, flex: 'none', borderRadius: 9, background: on ? '#007AFF' : '#F2F2F7', color: on ? '#fff' : T.muted, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="fileText" size={16} /></span>
-        <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 600 }}>{d.name}</div><div style={{ fontSize: 11.5, color: T.faint }}>{d.category}</div></div>
-        {on && <Icon name="checkCircle" size={18} style={{ color: '#007AFF' }} />}
-      </Hover>; })}
+    {locked && <div style={{ fontSize: 12.5, color: T.muted, marginBottom: 10, display: 'flex', gap: 6 }}><Icon name="lock" size={14} />Documents can't change after someone has signed.</div>}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }} data-testid="doc-list">
+      {documents.map((d: EDoc, i: number) => <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 10, border: `1px solid ${T.border}`, borderRadius: 12, background: '#fff' }}>
+        <div style={{ position: 'relative', width: 44, height: 56, flex: 'none', borderRadius: 4, overflow: 'hidden', border: '1px solid rgba(0,0,0,0.1)' }}><PageImage doc={d} page={0} eager /></div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <input value={d.name} onChange={(e) => rename(d, e.target.value)} aria-label="Document name" disabled={locked} style={{ border: 'none', outline: 'none', fontSize: 13.5, fontWeight: 650, width: '100%', background: 'transparent', padding: 0, fontFamily: 'inherit', color: T.text }} />
+          <div style={{ fontSize: 11.5, color: T.faint }}>{d.pages.length} page{d.pages.length === 1 ? '' : 's'} · {d.source === 'pdf' ? `Uploaded PDF${d.size ? ` · ${Math.max(1, Math.round(d.size / 1024))} KB` : ''}` : d.source === 'catalog' ? 'QuickHire document' : 'Uploaded (legacy)'} · {fields.filter((f: Field) => f.docId === d.id).length} fields</div>
+        </div>
+        {!locked && <>
+          <IconButton icon="arrowUp" title="Move up" disabled={i === 0} onClick={() => move(i, -1)} />
+          <IconButton icon="arrowDown" title="Move down" disabled={i === documents.length - 1} onClick={() => move(i, 1)} />
+          <IconButton icon="trash" title={`Remove ${d.name}`} onClick={() => remove(d)} />
+        </>}
+      </div>)}
     </div>
-  </>;
+  </SectionCard>;
 }
 
-function RecipientsStep({ env, patch }: any) {
-  const recips = env.recipients || [];
-  const add = () => patch({ recipients: [...recips, { id: uid('r'), name: '', email: '', role: 'signer', order: recips.length + 1, color: colorFor('R' + recips.length), status: 'pending' }] });
-  const upd = (id: string, p: any) => patch({ recipients: recips.map((r: any) => (r.id === id ? { ...r, ...p } : r)) });
-  const del = (id: string) => patch({ recipients: recips.filter((r: any) => r.id !== id), fields: (env.fields || []).filter((f: any) => f.recipientId !== id) });
-  const ROLES = [{ value: 'signer', label: 'Needs to Sign' }, { value: 'cc', label: 'Receives a Copy' }, { value: 'viewer', label: 'Needs to View' }, { value: 'approver', label: 'Approver' }];
-  return <>
-    <SectionTitle title="Add recipients" desc="Set the signing order, role, and an optional private message for each recipient." />
-    {recips.map((r: any, i: number) => <div key={r.id} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: 12, border: `1px solid ${T.border}`, borderRadius: 12, marginBottom: 10, background: '#fff' }}>
-      <span style={{ width: 26, height: 26, marginTop: 6, flex: 'none', borderRadius: 999, background: r.color, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>{i + 1}</span>
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-        <Input value={r.name} onChange={(e: any) => upd(r.id, { name: e.target.value })} placeholder="Full name" />
-        <Input value={r.email} onChange={(e: any) => upd(r.id, { email: e.target.value })} placeholder="Email address" />
-        <Select value={r.role} onChange={(v: string) => upd(r.id, { role: v })} options={ROLES} />
-        <Input value={r.message || ''} onChange={(e: any) => upd(r.id, { message: e.target.value })} placeholder="Private message (optional)" />
-      </div>
-      <Hover as="button" onClick={() => del(r.id)} style={{ width: 30, height: 30, marginTop: 4, flex: 'none', borderRadius: 8, border: 'none', background: 'transparent', color: '#C62820', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} hover={{ background: 'rgba(255,59,48,0.08)' }}><Icon name="trash" size={15} /></Hover>
-    </div>)}
-    <Hover as="button" onClick={add} style={{ ...ghostBtn, width: '100%', justifyContent: 'center' }} hover={{ background: 'rgba(0,0,0,0.03)' }}><Icon name="userPlus" size={15} />Add recipient</Hover>
-  </>;
-}
-
-function PrepareStep({ env, onOpen }: any) {
-  const signerFields = (env.fields || []).filter((f: any) => f.recipientId && env.recipients.some((r: any) => r.id === f.recipientId && r.role === 'signer'));
-  return <>
-    <SectionTitle title="Prepare documents" desc="Place signature, date, and data fields on each page. Assign every required field to a signer." />
-    <div style={{ display: 'flex', gap: 14, alignItems: 'center', padding: 18, border: `1px solid ${T.border}`, borderRadius: 14, background: '#fff' }}>
-      <span style={{ width: 44, height: 44, flex: 'none', borderRadius: 11, background: 'rgba(0,122,255,0.1)', color: '#007AFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="sign" size={22} /></span>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 14, fontWeight: 650 }}>{(env.documentKeys || []).length} document{(env.documentKeys || []).length === 1 ? '' : 's'} · {(env.fields || []).length} field{(env.fields || []).length === 1 ? '' : 's'}</div>
-        <div style={{ fontSize: 12.5, color: T.muted, marginTop: 2 }}>{signerFields.length} field{signerFields.length === 1 ? '' : 's'} assigned to signers</div>
-      </div>
-      <Hover as="button" onClick={onOpen} style={primaryBtn} hover={{ background: '#0066D6' }}><Icon name="pencil" size={15} />Open editor</Hover>
-    </div>
-  </>;
-}
-
-function ReviewStep({ env, patch, errs, onPreview }: any) {
-  const exp = daysUntil(env.expiresAt);
-  return <>
-    <SectionTitle title="Review & send" desc="Confirm the email, reminders, and expiration, then send or save as a draft." />
-    {errs.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: 14, borderRadius: 12, background: 'rgba(255,59,48,0.06)', border: '1px solid rgba(255,59,48,0.2)', marginBottom: 16 }}>
-      <div style={{ fontSize: 12.5, fontWeight: 700, color: '#C62820', display: 'flex', alignItems: 'center', gap: 7 }}><Icon name="alert" size={15} />Resolve before sending</div>
-      {errs.map((e: string, i: number) => <div key={i} style={{ fontSize: 12.5, color: '#C62820', paddingLeft: 22 }}>· {e}</div>)}
+/* ───────────────────────── recipients ───────────────────────── */
+function RecipientsCard({ kind, env, parties, signingOrder, fields, onChange, toast }: { kind: BuilderKind; env?: Envelope; parties: Party[]; signingOrder: boolean; fields: Field[]; onChange: (p: any) => void; toast: any }) {
+  const isTpl = kind === 'template';
+  const key = isTpl ? 'roles' : 'recipients';
+  const [open, setOpen] = React.useState<Record<string, boolean>>({});
+  const set = (list: Party[]) => onChange({ [key]: list });
+  const upd = (id: string, p: Partial<Party>) => set(parties.map((r) => (r.id === id ? { ...r, ...p } : r)));
+  const add = (seed: Partial<Party> = {}) => {
+    const i = parties.length;
+    const maxOrder = Math.max(0, ...parties.map((r) => r.order || 1));
+    const r: any = { id: isTpl ? uid('role') : uid('r'), name: '', email: '', action: 'sign', order: maxOrder + 1, color: colorForIndex(i), ...(isTpl ? { roleName: `Recipient ${i + 1}` } : { status: 'created' }), ...seed };
+    set([...parties, r]);
+  };
+  const remove = (r: Party) => {
+    const prevP = parties, prevF = fields;
+    onChange({ [key]: parties.filter((x) => x.id !== r.id), fields: fields.filter((f) => f.recipientId !== r.id) });
+    toast(`Removed ${r.name || r.roleName || 'recipient'}`, 'info', { label: 'Undo', run: () => onChange({ [key]: prevP, fields: prevF }) });
+  };
+  const me = svc.me();
+  const linked = env ? personForEnvelope(env) : null;
+  return <SectionCard icon="users" title={isTpl ? 'Roles' : 'Recipients'} desc={isTpl ? 'Placeholders filled in when the template is used — e.g. Driver, Carrier Representative.' : 'Who needs to sign, approve, view or get a copy.'}
+    right={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ fontSize: 12.5, color: T.muted }}>Set signing order</span><Toggle on={signingOrder} onChange={(v: boolean) => onChange({ signingOrder: v })} label="Set signing order" /></div>}>
+    {!isTpl && env && kind !== 'correct' && <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, padding: 10, borderRadius: 12, background: '#F7F9FC', border: `1px solid ${T.hair}`, flexWrap: 'wrap' }}>
+      <Icon name="truck" size={16} style={{ color: T.muted }} />
+      <div style={{ flex: 1, minWidth: 180 }}><div style={{ fontSize: 13, fontWeight: 650 }}>{linked ? `Linked to ${linked.name}` : 'Link a driver'}</div><div style={{ fontSize: 11.5, color: T.faint }}>{linked ? `${linked.carrierInfo?.name || linked.carrier || ''} · driver data fills merge fields and the signed PDF files to their documents` : 'Fills the first signer and every driver-data field automatically.'}</div></div>
+      <PersonPicker label={linked ? 'Change' : 'Choose driver'} onPick={(p) => { const res = svc.linkPerson(env.id, p); toast(res.missing.length ? `Linked ${p.name} — ${res.missing.length} driver field${res.missing.length > 1 ? 's' : ''} have no data yet` : `Linked ${p.name}`, res.missing.length ? 'warning' : 'success'); }} />
+      {linked && <Btn size="sm" kind="plain" onClick={() => svc.linkPerson(env.id, null)}>Unlink</Btn>}
     </div>}
-    <Field label="Email subject"><Input value={env.subject} onChange={(e: any) => patch({ subject: e.target.value })} placeholder="Please sign your documents" /></Field>
-    <Field label="Email message"><Textarea rows={3} value={env.message} onChange={(e: any) => patch({ message: e.target.value })} placeholder="Add a personal note…" /></Field>
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-      <Field label="Remind every (days)"><Input type="number" value={env.reminderEveryDays} onChange={(e: any) => patch({ reminderEveryDays: +e.target.value })} /></Field>
-      <Field label="Max reminders"><Input type="number" value={env.maxReminders} onChange={(e: any) => patch({ maxReminders: +e.target.value })} /></Field>
-      <Field label="Expires in (days)"><Input type="number" value={exp ?? 14} onChange={(e: any) => patch({ expiresAt: new Date(Date.now() + (+e.target.value) * 864e5).toISOString() })} /></Field>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} data-testid="recipient-list">
+      {parties.map((r, i) => {
+        const done = !isTpl && isDone(r as any);
+        const locked = kind === 'correct' && (done || r.status === 'declined');
+        const expanded = open[r.id];
+        const nFields = fields.filter((f) => f.recipientId === r.id).length;
+        return <div key={r.id} data-testid="recipient-row" style={{ border: `1px solid ${T.border}`, borderLeft: `4px solid ${r.color}`, borderRadius: 12, background: '#fff', padding: 12 }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            {signingOrder ? <input type="number" min={1} value={r.order} disabled={locked} aria-label="Signing order" data-testid="recipient-order" onChange={(e) => upd(r.id, { order: Math.max(1, Number(e.target.value) || 1) })} style={{ ...inputStyle, width: 54, textAlign: 'center', fontWeight: 700, padding: '0 4px', flex: 'none' }} />
+              : <RecipientAvatar r={r} size={34} />}
+            <div style={{ flex: 1, minWidth: 220, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8 }}>
+              {isTpl && <Input value={r.roleName || ''} onChange={(e: any) => upd(r.id, { roleName: e.target.value })} placeholder="Role (e.g. Driver)" aria-label="Role name" data-testid="role-name" />}
+              <Input value={r.name} disabled={locked} onChange={(e: any) => upd(r.id, { name: e.target.value })} placeholder={isTpl ? 'Name (optional)' : 'Full name'} aria-label="Name" data-testid="recipient-name" />
+              <Input value={r.email} disabled={locked} type="email" onChange={(e: any) => upd(r.id, { email: e.target.value })} placeholder={isTpl ? 'Email (optional)' : 'Email'} aria-label="Email" data-testid="recipient-email" />
+              <Select value={r.action} disabled={locked} onChange={(v: RecipientAction) => upd(r.id, { action: v, ...(v === 'in_person' && !r.hostName ? { hostName: me.name, hostEmail: me.email } : {}) })} options={ACTIONS.map((a) => ({ value: a.value, label: a.label }))} aria-label="Action" data-testid="recipient-action" />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Btn size="sm" kind="plain" onClick={() => setOpen((o) => ({ ...o, [r.id]: !o[r.id] }))} data-testid="recipient-more" icon={expanded ? 'chevronDown' : 'settings'}>{expanded ? 'Less' : 'More'}</Btn>
+              {!locked && <IconButton icon="trash" title="Remove recipient" onClick={() => remove(r)} />}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8, paddingLeft: signingOrder ? 64 : 44 }}>
+            {done && <Chip color="#248A3D" bg="rgba(52,199,89,0.12)" icon="check">{r.action === 'view' ? 'Viewed' : 'Signed'}</Chip>}
+            {r.accessCode && <Chip icon="key">Access code</Chip>}
+            {r.smsAuth && <Chip icon="smartphone">SMS code</Chip>}
+            {r.language && r.language !== 'en' && <Chip icon="globe">{r.language === 'es' ? 'Español' : r.language}</Chip>}
+            {r.privateMessage && <Chip icon="message">Private message</Chip>}
+            {r.action === 'in_person' && <Chip icon="users">Host: {r.hostName || me.name}</Chip>}
+            {canHaveFields(r as any) && <Chip>{nFields} field{nFields === 1 ? '' : 's'}</Chip>}
+          </div>
+          {expanded && <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.hair}`, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }} data-testid="recipient-options">
+            <FormField label="Access code" hint="Share it with the recipient separately. They must enter it to open the envelope." style={{ marginBottom: 0 }}><Input value={r.accessCode || ''} disabled={locked} onChange={(e: any) => upd(r.id, { accessCode: e.target.value })} placeholder="None" data-testid="access-code" /></FormField>
+            <FormField label="Mobile (for SMS code)" style={{ marginBottom: 0 }}><div style={{ display: 'flex', gap: 8, alignItems: 'center' }}><Input value={r.phone || ''} disabled={locked} onChange={(e: any) => upd(r.id, { phone: e.target.value })} placeholder="(555) 010-0101" /><Toggle on={!!r.smsAuth} onChange={(v: boolean) => upd(r.id, { smsAuth: v })} label="Require SMS code" /></div></FormField>
+            <FormField label="Signing language" style={{ marginBottom: 0 }}><Select value={r.language || 'en'} onChange={(v: string) => upd(r.id, { language: v })} options={[{ value: 'en', label: 'English' }, { value: 'es', label: 'Español' }]} /></FormField>
+            {r.action === 'in_person' && <FormField label="Host (in person)" style={{ marginBottom: 0 }}><Input value={r.hostName || ''} onChange={(e: any) => upd(r.id, { hostName: e.target.value })} placeholder={me.name} /></FormField>}
+            <FormField label="Private message" style={{ gridColumn: '1 / -1', marginBottom: 0 }}><Textarea rows={2} value={r.privateMessage || ''} onChange={(e: any) => upd(r.id, { privateMessage: e.target.value })} placeholder="Only this recipient sees this message" /></FormField>
+          </div>}
+        </div>;
+      })}
     </div>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
-      <Hover as="button" onClick={onPreview} style={ghostBtn} hover={{ background: 'rgba(0,0,0,0.04)' }}><Icon name="eye" size={15} />Preview signer experience</Hover>
-      <div style={{ flex: 1 }} />
-      <span style={{ fontSize: 12, color: T.faint }}>{(env.recipients || []).length} recipient{(env.recipients || []).length === 1 ? '' : 's'} · {(env.documentKeys || []).length} doc{(env.documentKeys || []).length === 1 ? '' : 's'}</span>
+    <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+      <Btn icon="userPlus" onClick={() => add()} data-testid="add-recipient">Add recipient</Btn>
+      {!isTpl && !parties.some((p) => p.email?.toLowerCase() === me.email.toLowerCase()) && <Btn kind="plain" icon="user" onClick={() => add({ name: me.name, email: me.email, roleName: 'Recruiter' })}>Add me</Btn>}
+      {!isTpl && <PersonPicker label="Add driver" icon="truck" onPick={(p) => add({ name: p.name, email: p.email || '', phone: p.phone, driverId: p.id })} />}
     </div>
-  </>;
+    {signingOrder && parties.length > 1 && <div style={{ marginTop: 12, fontSize: 12, color: T.muted, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }} data-testid="routing-summary">
+      <Icon name="arrowRight" size={13} />Routing: {routingSteps({ signingOrder, recipients: parties as any }).map(([o, rs]) => `${o}. ${rs.map((x) => x.name || x.roleName || 'recipient').join(' + ')}`).join('  →  ')}
+      <span style={{ color: T.faint }}>(same number = at the same time)</span>
+    </div>}
+  </SectionCard>;
 }
 
-function SectionTitle({ title, desc }: any) { return <div style={{ marginBottom: 16 }}><h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>{title}</h2><p style={{ margin: '3px 0 0', fontSize: 13, color: T.muted }}>{desc}</p></div>; }
+/** Driver/lead search picker. */
+export function PersonPicker({ label = 'Choose driver', icon = 'search', onPick, width = 300 }: { label?: string; icon?: string; onPick: (p: Person) => void; width?: number }) {
+  const [q, setQ] = React.useState('');
+  return <Dropdown width={width} align="right" trigger={<Btn size="sm" icon={icon} data-testid="person-picker">{label}</Btn>}>
+    {(close: any) => {
+      const people = listPeople();
+      const rows = people.filter((p) => !q || `${p.name} ${p.email} ${p.carrier} ${p.phone}`.toLowerCase().includes(q.toLowerCase())).slice(0, 40);
+      return <>
+        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search drivers and leads" style={{ ...inputStyle, height: 34, fontSize: 13, marginBottom: 6 }} data-testid="person-search" />
+        {rows.map((p) => <MenuItem key={`${p.kind}:${p.id}`} icon={p.kind === 'lead' ? 'user' : 'truck'} label={p.name} hint={[p.kind === 'lead' ? 'Lead' : p.position || 'Driver', p.carrierInfo?.name || p.carrier, p.email].filter(Boolean).join(' · ')} onClick={() => { onPick(p); close(); setQ(''); }} />)}
+        {!rows.length && <div style={{ padding: 10, fontSize: 12.5, color: T.faint }}>No matches</div>}
+      </>;
+    }}
+  </Dropdown>;
+}
 
-function SmallMenu({ label, icon, items }: any) {
+/* ───────────────────────── message + options ───────────────────────── */
+function MessageCard({ subject, message, onChange, isTpl, documents }: any) {
+  return <SectionCard icon="mail" title="Message" desc={isTpl ? 'Use {driver}, {first}, {carrier} and {position} — filled in when the template is used.' : 'This email goes to every recipient. Add a private message per recipient under "More".'}>
+    <FormField label="Subject"><Input value={subject} onChange={(e: any) => onChange({ subject: e.target.value.slice(0, 100) })} placeholder={`Please sign: ${documents[0]?.name || 'documents'}`} data-testid="env-subject" /><div style={{ fontSize: 11, color: T.faint, textAlign: 'right', marginTop: 3 }}>{String(subject || '').length}/100</div></FormField>
+    <FormField label="Message" style={{ marginBottom: 0 }}><Textarea rows={4} value={message} onChange={(e: any) => onChange({ message: e.target.value.slice(0, 10000) })} placeholder="Hi, please review and sign the attached documents." data-testid="env-message" /></FormField>
+  </SectionCard>;
+}
+
+function OptionsCard({ reminders, expireDays, warnDays, onChange, isTpl }: any) {
   const [open, setOpen] = React.useState(false);
-  return <div style={{ position: 'relative' }}>
-    <Hover as="button" onClick={() => setOpen((o) => !o)} style={ghostBtn} hover={{ background: 'rgba(0,0,0,0.04)' }}><Icon name={icon} size={15} />{label}<Icon name="chevronDown" size={13} /></Hover>
-    {open && <><div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 9 }} /><div style={{ position: 'absolute', top: 42, left: 0, zIndex: 10, minWidth: 220, background: '#fff', border: `1px solid ${T.border}`, borderRadius: 12, boxShadow: '0 12px 30px rgba(0,0,0,0.12)', padding: 6 }}>
-      {items.length === 0 && <div style={{ fontSize: 12.5, color: T.faint, padding: 10 }}>None available</div>}
-      {items.map((it: any, i: number) => <Hover key={i} as="button" onClick={() => { it.onClick(); setOpen(false); }} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', border: 'none', background: 'transparent', borderRadius: 8, fontSize: 13, cursor: 'pointer', color: T.text }} hover={{ background: 'rgba(0,0,0,0.05)' }}>{it.label}</Hover>)}
-    </div></>}
-  </div>;
+  return <SectionCard icon="clock" title="Reminders & expiration" desc={`${reminders.enabled ? `Reminder every ${reminders.everyDays} day${reminders.everyDays === 1 ? '' : 's'}` : 'No automatic reminders'} · expires in ${expireDays} days`} right={<Btn size="sm" kind="plain" onClick={() => setOpen(!open)} data-testid="options-toggle">{open ? 'Done' : 'Edit'}</Btn>}>
+    {open ? <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
+      <div><Label>Automatic reminders</Label><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><Toggle on={reminders.enabled} onChange={(v: boolean) => onChange({ reminders: { ...reminders, enabled: v } })} label="Automatic reminders" /><span style={{ fontSize: 13 }}>every</span><Input type="number" min={1} max={30} value={reminders.everyDays} onChange={(e: any) => onChange({ reminders: { ...reminders, everyDays: Math.max(1, Math.min(30, Number(e.target.value) || 1)) } })} style={{ width: 70 }} data-testid="remind-days" /><span style={{ fontSize: 13 }}>days</span></div></div>
+      <div><Label>Expires after</Label><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><Input type="number" min={1} max={365} value={expireDays} onChange={(e: any) => { const d = Math.max(1, Math.min(365, Number(e.target.value) || 1)); onChange(isTpl ? { expireDays: d } : { expireDays: d, expiresAt: new Date(Date.now() + d * 864e5).toISOString() }); }} style={{ width: 80 }} data-testid="expire-days" /><span style={{ fontSize: 13 }}>days</span></div></div>
+      {!isTpl && <div><Label>Warn before expiring</Label><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><Input type="number" min={0} max={30} value={warnDays} onChange={(e: any) => onChange({ warnDays: Math.max(0, Number(e.target.value) || 0) })} style={{ width: 70 }} /><span style={{ fontSize: 13 }}>days</span></div></div>}
+    </div> : <div style={{ fontSize: 12.5, color: T.muted }}>Smart defaults from Settings. Unsigned envelopes also raise a QuickHire notification after 48 hours.</div>}
+  </SectionCard>;
 }
 
-/* ───────────────────────── Create / Edit package ───────────────────────── */
-export function PackageModal({ pkg, onClose, toast }: any) {
-  const [name, setName] = React.useState(pkg?.name || '');
-  const [description, setDescription] = React.useState(pkg?.description || '');
-  const [category, setCategory] = React.useState(pkg?.category || 'Onboarding');
-  const [docKeys, setDocKeys] = React.useState<string[]>(pkg?.documentKeys || []);
-  const [signingOrder, setSigningOrder] = React.useState(pkg?.signingOrder || 'sequential');
-  const [subject, setSubject] = React.useState(pkg?.subject || '');
-  const [message, setMessage] = React.useState(pkg?.message || '');
-  const [reminderEveryDays, setRem] = React.useState(pkg?.reminderEveryDays || 3);
-  const [expiresInDays, setExp] = React.useState(pkg?.expiresInDays || 14);
-
-  const move = (i: number, dir: number) => { const j = i + dir; if (j < 0 || j >= docKeys.length) return; const next = [...docKeys]; [next[i], next[j]] = [next[j], next[i]]; setDocKeys(next); };
-  const save = () => {
-    if (!name.trim()) { toast?.('Name your package', 'error'); return; }
-    if (!docKeys.length) { toast?.('Add at least one document', 'error'); return; }
-    const data = { name: name.trim(), description, category, documentKeys: docKeys, signingOrder, subject, message, reminderEveryDays: +reminderEveryDays, expiresInDays: +expiresInDays };
-    if (pkg) { svc.updatePackage(pkg.id, data); toast?.('Package updated', 'success'); } else { svc.createPackage(data); toast?.('Package created', 'success'); }
-    onClose();
-  };
-  return <Modal title={pkg ? 'Edit package' : 'Create package'} subtitle="Reusable bundle of documents recruiters can send in one click." width={640} onClose={onClose}
-    footer={<><Hover as="button" onClick={onClose} style={ghostBtn} hover={{ background: 'rgba(0,0,0,0.04)' }}>Cancel</Hover><Hover as="button" onClick={save} style={primaryBtn} hover={{ background: '#0066D6' }}>{pkg ? 'Save package' : 'Create package'}</Hover></>}>
-    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
-      <Field label="Package name"><Input value={name} onChange={(e: any) => setName(e.target.value)} placeholder="Company Driver Onboarding" /></Field>
-      <Field label="Category"><Select value={category} onChange={setCategory} options={['Onboarding', 'Compliance', 'Rehire', 'Tax', 'Other']} /></Field>
+function TemplateMetaCard({ tpl, onChange }: { tpl: Template; onChange: (p: any) => void }) {
+  return <SectionCard icon="copy" title="Template details">
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+      <FormField label="Category"><Select value={tpl.category} onChange={(v: string) => onChange({ category: v })} options={[...new Set(['Carrier packet', 'Onboarding', 'Compliance', 'Rehire', 'Tax', 'Saved', 'Other', tpl.category])]} /></FormField>
+      <FormField label="Carrier"><Select value={tpl.carrier || ''} onChange={(v: string) => onChange({ carrier: v, documents: tpl.documents.map((d) => (d.source === 'catalog' ? { ...d, carrier: v || d.carrier } : d)) })} options={[{ value: '', label: 'Any carrier' }, ...['GRAND ONE LLC', 'DT NATIONAL TRANSPORTATION LLC', 'PREMIER TRUCKING GROUP INC', 'RMR TRANSPORT'].map((c) => ({ value: c, label: c }))]} /></FormField>
     </div>
-    <Field label="Description"><Input value={description} onChange={(e: any) => setDescription(e.target.value)} placeholder="What this package is for" /></Field>
-    <Field label="Documents" hint="Click to add. Use the arrows to set the order documents appear in.">
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
-        {DOC_KEYS.map((k) => { const on = docKeys.includes(k); return <Hover key={k} as="button" onClick={() => setDocKeys(on ? docKeys.filter((x) => x !== k) : [...docKeys, k])} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 9, border: `1px solid ${on ? '#007AFF' : T.border}`, background: on ? 'rgba(0,122,255,0.06)' : '#fff', fontSize: 12.5, cursor: 'pointer', color: on ? '#007AFF' : T.text }} hover={{ background: on ? 'rgba(0,122,255,0.08)' : 'rgba(0,0,0,0.03)' }}>{on ? <Icon name="checkCircle" size={14} /> : <Icon name="plus" size={14} />}{DOC_CATALOG[k].name}</Hover>; })}
-      </div>
-    </Field>
-    {docKeys.length > 0 && <Field label="Signing order">
-      <div style={{ border: `1px solid ${T.border}`, borderRadius: 10, overflow: 'hidden' }}>
-        {docKeys.map((k, i) => <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 10px', borderTop: i ? `1px solid ${T.hair}` : 'none' }}>
-          <span style={{ fontSize: 11, color: T.faint, width: 16 }}>{i + 1}</span><span style={{ flex: 1, fontSize: 12.5 }}>{DOC_CATALOG[k].name}</span>
-          <button onClick={() => move(i, -1)} style={arrowBtn}><Icon name="chevronDown" size={13} style={{ transform: 'rotate(180deg)' }} /></button>
-          <button onClick={() => move(i, 1)} style={arrowBtn}><Icon name="chevronDown" size={13} /></button>
+    <FormField label="Description" style={{ marginBottom: 0 }}><Input value={tpl.description} onChange={(e: any) => onChange({ description: e.target.value })} placeholder="What this template is for" /></FormField>
+  </SectionCard>;
+}
+
+/* ───────────────────────── sent confirmation ───────────────────────── */
+function SentScreen({ env, onClose, onOpen }: { env: Envelope; onClose: () => void; onOpen: () => void }) {
+  const steps = routingSteps(env);
+  return <div style={{ position: 'fixed', inset: 0, zIndex: 85, background: '#F5F6F8', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} data-testid="sent-screen">
+    <div style={{ width: 520, maxWidth: '100%', background: '#fff', borderRadius: 18, border: `1px solid ${T.border}`, boxShadow: '0 20px 60px rgba(0,0,0,0.08)', padding: 28, textAlign: 'center' }}>
+      <span style={{ width: 60, height: 60, borderRadius: 99, background: 'rgba(52,199,89,0.12)', color: '#34C759', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="send" size={26} /></span>
+      <div style={{ fontSize: 21, fontWeight: 700, marginTop: 14 }}>Your envelope was sent</div>
+      <div style={{ fontSize: 13.5, color: T.muted, marginTop: 6 }}>{env.title}</div>
+      <div style={{ textAlign: 'left', marginTop: 20, border: `1px solid ${T.hair}`, borderRadius: 12, padding: '6px 14px' }}>
+        {steps.map(([o, rs]) => <div key={o} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: o === steps[0][0] ? 'none' : `1px solid ${T.hair}` }}>
+          <span style={{ width: 22, height: 22, borderRadius: 99, background: '#F2F2F7', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.muted }}>{o}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>{rs.map((r) => <div key={r.id} style={{ fontSize: 13 }}><b>{r.name}</b> <span style={{ color: T.faint }}>· {actionLabel(r.action)}</span></div>)}</div>
+          <span style={{ fontSize: 11.5, fontWeight: 650, color: rs.some((r) => r.status === 'sent' || r.status === 'completed') ? '#0066CC' : T.faint }}>{rs.some((r) => r.status === 'sent') ? 'Sent now' : rs.some((r) => r.status === 'completed') ? 'Copy sent' : 'Waiting'}</span>
         </div>)}
       </div>
-    </Field>}
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-      <Field label="Remind every (days)"><Input type="number" value={reminderEveryDays} onChange={(e: any) => setRem(e.target.value)} /></Field>
-      <Field label="Expires in (days)"><Input type="number" value={expiresInDays} onChange={(e: any) => setExp(e.target.value)} /></Field>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 22, flexWrap: 'wrap' }}>
+        <Btn onClick={onClose}>Done</Btn>
+        <Btn kind="primary" icon="eye" onClick={onOpen} data-testid="view-envelope">View envelope</Btn>
+      </div>
     </div>
-    <Field label="Default email subject"><Input value={subject} onChange={(e: any) => setSubject(e.target.value)} placeholder="Use {driver} and {carrier} as placeholders" /></Field>
-    <Field label="Default email message"><Textarea rows={2} value={message} onChange={(e: any) => setMessage(e.target.value)} /></Field>
-    <input type="hidden" value={signingOrder} onChange={() => setSigningOrder('sequential')} />
-  </Modal>;
-}
-const arrowBtn: React.CSSProperties = { width: 24, height: 24, borderRadius: 6, border: `1px solid ${T.border}`, background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.muted };
-
-/* ───────────────────────── Send package ───────────────────────── */
-export function SendPackageModal({ pkg, drivers, onClose, onSent, toast }: any) {
-  const [packageId, setPackageId] = React.useState(pkg?.id || store.packages[0]?.id || '');
-  const [name, setName] = React.useState('');
-  const [email, setEmail] = React.useState('');
-  const [carrier, setCarrier] = React.useState('GRAND ONE LLC');
-  const selected = store.packages.find((p: any) => p.id === packageId);
-
-  const send = (draftOnly = false) => {
-    if (!packageId) { toast?.('Choose a package', 'error'); return; }
-    if (!name.trim() || !/.+@.+\..+/.test(email)) { toast?.('Add recipient name and a valid email', 'error'); return; }
-    const out = svc.sendPackage(packageId, { name: name.trim(), email: email.trim(), carrier }, { draftOnly });
-    if (out?.res?.ok) { toast?.(draftOnly ? 'Saved as draft' : 'Package sent', 'success'); onSent?.(); onClose(); }
-    else { toast?.(out?.res?.errors?.[0] || 'Could not send', 'error'); }
-  };
-  return <Modal title="Send package" subtitle="Bundle of documents sent to one driver in a single envelope." width={560} onClose={onClose}
-    footer={<><Hover as="button" onClick={() => send(true)} style={ghostBtn} hover={{ background: 'rgba(0,0,0,0.04)' }}>Save as draft</Hover><Hover as="button" onClick={() => send(false)} style={primaryBtn} hover={{ background: '#0066D6' }}><Icon name="send" size={15} />Send now</Hover></>}>
-    <Field label="Package"><Select value={packageId} onChange={setPackageId} options={store.packages.map((p: any) => ({ value: p.id, label: `${p.name} (${p.documentKeys.length} docs)` }))} /></Field>
-    {selected && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>{selected.documentKeys.map((k: string) => <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 24, padding: '0 9px', borderRadius: 999, background: '#F2F2F7', fontSize: 11.5, color: T.muted }}><Icon name="fileText" size={12} />{DOC_CATALOG[k]?.name}</span>)}</div>}
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-      <Field label="Driver / recipient"><Input value={name} onChange={(e: any) => setName(e.target.value)} placeholder="Full name" list="qh-drivers" /></Field>
-      <Field label="Email"><Input value={email} onChange={(e: any) => setEmail(e.target.value)} placeholder="driver@example.com" /></Field>
-    </div>
-    {drivers && <datalist id="qh-drivers">{drivers.map((d: any) => <option key={d.id} value={d.name} />)}</datalist>}
-    {drivers && drivers.length > 0 && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>{drivers.slice(0, 6).map((d: any) => <Hover key={d.id} as="button" onClick={() => { setName(d.name); setEmail(d.email || (d.name.toLowerCase().replace(/[^a-z]/g, '.') + '@example.com')); setCarrier(d.carrier || carrier); }} style={{ height: 26, padding: '0 10px', borderRadius: 999, border: `1px solid ${T.border}`, background: '#fff', fontSize: 11.5, cursor: 'pointer', color: T.muted }} hover={{ background: 'rgba(0,0,0,0.04)' }}>{d.name}</Hover>)}</div>}
-    <Field label="Carrier / company"><Input value={carrier} onChange={(e: any) => setCarrier(e.target.value)} /></Field>
-  </Modal>;
+  </div>;
 }
