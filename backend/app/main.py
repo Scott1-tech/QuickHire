@@ -133,12 +133,22 @@ async def spa_fallback(rest: str):
     if rest:
         candidate = os.path.normpath(os.path.join(app_root, rest))
         if candidate.startswith(app_root + os.sep) and os.path.isfile(candidate):
-            return FileResponse(candidate)
+            return _spa_shell(candidate) if candidate.endswith(".html") else FileResponse(candidate)
     # Otherwise it's a client-side route (/app/dashboard, …) → serve the SPA shell.
     index = os.path.join(app_root, "index.html")
     if os.path.exists(index):
-        return FileResponse(index)
+        return _spa_shell(index)
     return JSONResponse(status_code=404, content={"error": "Not found"})
+
+
+def _spa_shell(path: str) -> FileResponse:
+    """Serve the SPA HTML with a non-sensitive marker cookie telling the client
+    that the API backend is present, so best-effort sync (e.g. the phone's
+    RingCentral config and call logs) never fires failing requests when the
+    built SPA is opened from a plain static server."""
+    resp = FileResponse(path)
+    resp.set_cookie("qh_backend", "1", path="/", samesite="lax", httponly=False)
+    return resp
 
 
 # ── Static frontend (mounted last; serves index.html at /) ───────────────────

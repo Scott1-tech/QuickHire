@@ -14,6 +14,8 @@ import CarrierFolders from './hire/CarrierFolders';
 import HiringPipeline from './hire/HiringPipeline';
 import RecruitPipeline from './recruit/RecruitPipeline';
 import { TopBar } from './shell/TopBar';
+import PhoneDock from './phone/PhoneDock';
+import { requestLeadOpen } from './phone/nav';
 import { CARRIER_LIST, CANDS } from './data';
 
 /**
@@ -116,6 +118,11 @@ export default class QuickHire extends QuickHireLogic {
         {v.dotSheetOpen && this.renderDotSheet(v)}
         {v.paletteOpen && this.renderPalette(v)}
         {this.renderToasts(v)}
+        {/* In-app calling: floating phone, screen pop, live call + wrap-up (mounted once) */}
+        <PhoneDock bottomOffset={v.isProfile ? 118 : 0}
+          openDriver={(id: string) => this.openCand(id)}
+          openLead={(id: string) => { requestLeadOpen(id); if (this.state.page !== 'recruiting') this.go('recruiting'); }}
+          openSettings={() => this.setState({ page: 'settings', settingsSection: 'ringcentral', paletteOpen: false })} />
       </div>
     );
   }

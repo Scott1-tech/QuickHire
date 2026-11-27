@@ -5,6 +5,7 @@ import { Modal, Field, Input, Textarea, Select, primaryBtn, ghostBtn } from '../
 import { useShell, svc, fmtAgo } from './store';
 import { addExternalTask, makeTask } from '../tasks/bus';
 import { saveFile, openFile, fmtSize } from './files';
+import { PhoneTopButton } from '../phone/PhoneDock';
 
 type Props = {
   go: (page: string) => void;
@@ -82,6 +83,9 @@ export function TopBar({ go, openCandidate, openTasks, taskCount, drivers, carri
         {CREATE_ITEMS.map((it) => <MenuRow key={it.key} icon={it.icon} label={it.label} onClick={() => onCreate(it.key)} />)}
       </Dropdown>}
     </div>
+
+    {/* Phone */}
+    <PhoneTopButton />
 
     {/* Tasks */}
     <Hover as="button" onClick={openTasks} title="Tasks" style={iconBtnBox} hover={{ background: 'rgba(0,0,0,0.03)' }}>

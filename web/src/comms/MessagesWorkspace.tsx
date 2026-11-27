@@ -2,6 +2,8 @@ import React from 'react';
 import { Hover } from '../lib/dc';
 import { T, Icon, Btn, Menu, MenuItem, Avatar, Toggle, useToasts, ToastHost, avatarColor, initials } from '../tasks/lib';
 import { useComms, svc, fmtWhen, fmtClock, CALL_OUTCOMES, MSG_STATUS } from './store';
+import { PhoneLink } from '../phone/PhoneLink';
+import { callNumber } from '../phone/store';
 
 const WARN = '#FF9500', OK = '#34C759', ERR = '#FF3B30', PRI = '#007AFF';
 const ME = 'Nina Patel';
@@ -110,8 +112,8 @@ export default function MessagesWorkspace() {
       {c && <>
         <div style={{ height: 60, flex: 'none', display: 'flex', alignItems: 'center', gap: 12, padding: '0 20px', background: 'rgba(255,255,255,0.86)', backdropFilter: 'blur(20px)', borderBottom: `1px solid ${T.border}` }}>
           <Avatar name={c.name} size={36} />
-          <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 15, fontWeight: 650 }}>{c.name}</div><div style={{ fontSize: 12, color: T.faint }}>{c.phone} · {c.email}</div></div>
-          <Hover as="button" onClick={() => { setTab('call'); doCall('connected'); }} title="Call" style={iconBtn} hover={{ background: 'rgba(0,0,0,0.05)' }}><Icon name="phone" size={17} /></Hover>
+          <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 15, fontWeight: 650 }}>{c.name}</div><div style={{ fontSize: 12, color: T.faint, display: 'flex', alignItems: 'center', gap: 4 }}><PhoneLink phone={c.phone} name={c.name} recordId={c.id} kind={c.kind === 'lead' ? 'lead' : 'driver'} /> · {c.email}</div></div>
+          <Hover as="button" onClick={() => callNumber(c.phone, { name: c.name, recordId: c.id, kind: c.kind === 'lead' ? 'lead' : 'driver' })} title={`Call ${c.name}`} style={iconBtn} hover={{ background: 'rgba(0,0,0,0.05)' }}><Icon name="phone" size={17} /></Hover>
           <Hover as="button" onClick={() => setTab('sms')} title="SMS" style={iconBtn} hover={{ background: 'rgba(0,0,0,0.05)' }}><Icon name="message" size={17} /></Hover>
           <Hover as="button" onClick={() => setTab('email')} title="Email" style={iconBtn} hover={{ background: 'rgba(0,0,0,0.05)' }}><Icon name="mail" size={17} /></Hover>
         </div>

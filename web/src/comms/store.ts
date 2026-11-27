@@ -237,6 +237,18 @@ export const svc = {
     emit(); return m;
   },
 
+  /** Show a call made/received in the in-app phone on this contact's thread.
+      Display only — the phone already logged it, created tasks and hit the API. */
+  recordCall(contactId: string, p: { direction: 'inbound' | 'outbound'; outcome: string; note?: string; durationSec?: number; number?: string }) {
+    const c = contact(contactId); if (!c) return null;
+    const line = store.rcNumbers.find((n) => n.defaultOutbound) || store.rcNumbers[0];
+    const key = ({ wrong_number: 'bad_number' } as Record<string, string>)[p.outcome] || p.outcome;
+    const label = CALL_OUTCOMES.find((o) => o.key === key) ? key : ({ not_interested: 'Not interested', missed: 'Missed' } as Record<string, string>)[p.outcome] || p.outcome;
+    const out = p.direction === 'outbound';
+    const m = { id: uid('call'), contactId, channel: p.outcome === 'left_voicemail' ? 'voicemail' : 'call', direction: p.direction, from: out ? line?.phoneNumber || '' : p.number || c.phone, to: out ? p.number || c.phone : line?.phoneNumber || '', via: line?.id || '', recruiter: 'Nina Patel', body: p.note || 'Call', callOutcome: label, durationSec: p.durationSec || 0, status: p.outcome === 'missed' ? 'missed' : 'completed', time: new Date().toISOString(), read: true, needsReply: p.outcome === 'missed' };
+    store.messages.push(m); emit(); return m;
+  },
+
   saveNote(contactId: string, body: string, opts: any = {}) {
     const m = { id: uid('note'), contactId, channel: 'internal_note', direction: 'outbound', from: opts.recruiter || 'Nina Patel', to: '', via: '', recruiter: opts.recruiter || 'Nina Patel', body, status: 'note', time: new Date().toISOString(), read: true, needsReply: false };
     store.messages.push(m); emit(); return m;

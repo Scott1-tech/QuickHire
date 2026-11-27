@@ -69,6 +69,73 @@ auto-flag the driver as opted-out.
 
 ---
 
+## 1b. In-app calling (RingCentral Embeddable)
+
+Recruiters make and receive calls inside QuickHire: click any phone number (or
+the phone button bottom-right / in the top bar), and an incoming call pops up a
+card with the driver's name, stage, last note and open tasks. When the call
+ends, a short wrap-up (outcome, note, follow-up time like "friday 2pm") logs the
+call on the right driver or lead, creates the follow-up task, and — for a brand
+new lead that you reached — moves it to the next stage.
+
+This uses **RingCentral Embeddable**, RingCentral's official softphone widget.
+It is separate from the server-side JWT app in section 1: it is a *browser* app,
+each recruiter signs in with their own RingCentral login, and **no secret is
+stored in QuickHire** — only the app's public Client ID.
+
+Without a Client ID the phone runs in **demo mode** (simulated calls, a "Demo
+mode — connect RingCentral in Settings" label, and a *Simulate incoming call*
+action) so the whole flow can be tried and trained on with no credentials.
+
+### Create the app (once, RingCentral admin)
+1. <https://developers.ringcentral.com> → **Console → Apps → Create App**.
+2. Choose a **client-side web app** (browser-based; "3-legged OAuth flow
+   authorization code" with PKCE — no client secret is used by Embeddable).
+3. **Permissions:** VoIP Calling, Call Control, Read Call Log, Read Messages,
+   SMS, WebSocket Subscriptions. (Add Read Contacts / Read Presence only if you
+   want those widget features.)
+4. **OAuth redirect URI:**
+   `https://apps.ringcentral.com/integration/ringcentral-embeddable/latest/redirect.html`
+   — *verify in RingCentral's current Embeddable docs; RingCentral occasionally
+   changes this path.*
+5. Save, then copy the app's **Client ID**. New apps start in the sandbox;
+   request production graduation in the console before go-live. The shared demo
+   Client ID that ships with Embeddable is rate-limited and **not for
+   production**.
+
+### Connect QuickHire
+1. **Settings → RingCentral → In-app calling** → paste the **Client ID** →
+   **Save**. QuickHire stores it for the whole workspace
+   (`PUT /api/ringcentral/embed-config`, admin only) and in the browser.
+   Alternatively set `RINGCENTRAL_EMBED_CLIENT_ID` on the server as the default.
+2. Pick the **calling mode**:
+   - **Browser** — talk through the computer's headset; answer, mute, hold,
+     record and transfer right from QuickHire's call panel.
+   - **RingOut** — RingCentral rings the recruiter's desk/mobile phone first,
+     then connects the driver. Good for recruiters without a headset; in-call
+     controls then live on that phone.
+3. Pick the **default caller ID** (the numbers come from *Sync numbers* above).
+4. Each recruiter clicks **Open phone** and **signs in once**; the status line
+   turns green ("Signed in as …"). Allow microphone access when the browser asks.
+
+### How calls are logged
+- Every saved call lands on the driver's or lead's activity timeline, in the
+  activity log, in the Messages thread (when that contact exists there), and is
+  posted to `POST /api/drivers/{id}/call-log` with its RingCentral session id.
+- Missed calls are logged automatically, raise a notification, add a "Call
+  back" task, and show a red badge on the phone button.
+- Only the focused browser tab receives call events
+  (`disableInactiveTabCallEvent=1`), so a call is logged once even with several
+  QuickHire tabs open.
+- **Recordings:** subscribe your RingCentral webhook (section 1) to
+  telephony-session events; when a notification carries a recording for a
+  session QuickHire logged, the recording id/URL is attached to that call log.
+  Set `RINGCENTRAL_WEBHOOK_TOKEN` to the subscription's verification token to
+  reject forged notifications. Check call-recording consent laws in the states
+  you recruit in (several require all-party consent).
+
+---
+
 ## 2. Connect your email inboxes
 
 Pick **one** sending provider. **Resend** is the simplest; **SMTP** works with
@@ -235,6 +302,7 @@ the webhooks maps them to name/email/phone and keeps the rest as custom fields.
 | Integration | Required variables |
 |---|---|
 | RingCentral | `RINGCENTRAL_CLIENT_ID` + `RINGCENTRAL_CLIENT_SECRET` + `RINGCENTRAL_JWT_TOKEN` + `RINGCENTRAL_FROM` |
+| In-app calling | Client ID pasted in **Settings → RingCentral → In-app calling** (or `RINGCENTRAL_EMBED_CLIENT_ID`); optional `RINGCENTRAL_WEBHOOK_TOKEN` |
 | Email (Resend) | `RESEND_API_KEY` + `EMAIL_FROM` |
 | Email (SMTP) | `SMTP_HOST` + `SMTP_USER` + `SMTP_PASS` + `SMTP_FROM` |
 | FMCSA | `FMCSA_API_KEY` |

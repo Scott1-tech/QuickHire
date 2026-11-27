@@ -4,6 +4,7 @@ import { T, Icon, Btn, Toggle, Menu, MenuItem, useToasts, ToastHost } from '../t
 import { useComms, svc, fmtWhen } from './store';
 import { FmcsaResearch } from './fmcsa';
 import { api } from './api';
+import { PhoneCallingSettings } from '../phone/PhoneSettings';
 
 const OK = '#34C759', WARN = '#FF9500', PRI = '#007AFF';
 
@@ -160,6 +161,8 @@ function RingCentralSettings() {
         <Field label="Last sync">{fmtWhen(acc.lastSyncAt)} ago</Field>
       </div>
     </Card>
+
+    <PhoneCallingSettings />
 
     <Card style={{ padding: 0, overflow: 'hidden' }}>
       <div style={{ padding: '14px 18px', fontSize: 15, fontWeight: 650 }}>Phone Numbers</div>

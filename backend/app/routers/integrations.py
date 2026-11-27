@@ -8,7 +8,9 @@ absent. Multi-number/inbox config, message history and the FMCSA watchlist are
 persisted in the KV store so they survive restarts.
 """
 import json
+import hmac
 import os
+import re
 import time
 from datetime import datetime, timezone
 
@@ -162,16 +164,97 @@ async def driver_sms(did: str, request: Request):
 async def driver_call_log(did: str, request: Request):
     body = await request.json()
     outcome = body.get("outcome", "connected")
-    to, notes, dur = body.get("to", ""), body.get("notes", ""), int(body.get("durationSec") or 0)
+    to, notes = body.get("to", ""), body.get("notes", "")
+    try:
+        dur = max(0, int(float(body.get("durationSec") or 0)))
+    except (TypeError, ValueError):
+        dur = 0
+    direction = "inbound" if body.get("direction") == "inbound" else "outbound"
     if ringcentral.is_configured() and to:
         try:
             await ringcentral.log_call(to, outcome, dur, notes)
         except Exception:  # noqa: BLE001
             pass
     channel = "voicemail" if outcome == "left_voicemail" else "call"
-    m = await _append_message(_msg(did, channel, "outbound", body.get("from", ""), to, notes or outcome, "completed", via=body.get("via", "rc1"), createdBy=body.get("createdBy", "recruiter")))
-    m["callOutcome"] = outcome
+    status = "missed" if outcome == "missed" else "completed"
+    m = _msg(did, channel, direction, body.get("from", ""), to, notes or outcome, status, via=body.get("via", "rc1"), createdBy=body.get("createdBy", "recruiter"))
+    # In-app calls (RingCentral Embeddable / demo phone) carry the RC telephony
+    # session id so a later recording webhook can find this entry.
+    m.update({"callOutcome": outcome, "durationSec": dur, "callId": str(body.get("callId") or "")[:128] or None,
+              "recordKind": body.get("recordKind"), "source": body.get("source")})
+    await _append_message(m)
     return {"ok": True, "message": m}
+
+
+# ── In-app calling (RingCentral Embeddable) ────────────────────────────────
+K_RC_EMBED = "integ:rc_embed"
+_CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+
+def _embed_out(cfg: dict) -> dict:
+    return {"clientId": cfg.get("client_id", ""), "mode": cfg.get("mode", "browser"),
+            "callerId": cfg.get("caller_id", ""), "updatedAt": cfg.get("updated_at")}
+
+
+@router.get("/api/ringcentral/embed-config", dependencies=[Depends(require_admin)])
+async def rc_embed_config_get():
+    """Org-wide softphone config. The Client ID is public (it is in the widget's
+    script URL), so returning it is safe; no secret is ever stored here."""
+    cfg = await _get(K_RC_EMBED, {})
+    if not cfg.get("client_id") and os.environ.get("RINGCENTRAL_EMBED_CLIENT_ID"):
+        cfg = {**cfg, "client_id": os.environ["RINGCENTRAL_EMBED_CLIENT_ID"]}
+    return _embed_out(cfg)
+
+
+@router.put("/api/ringcentral/embed-config", dependencies=[Depends(require_admin)])
+async def rc_embed_config_put(request: Request):
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        raise error(400, "Body must be JSON")
+    if not isinstance(body, dict):
+        raise error(400, "Body must be a JSON object")
+    client_id = str(body.get("clientId", body.get("client_id", "")) or "").strip()
+    mode = str(body.get("mode") or "browser").lower()
+    caller_id = str(body.get("callerId", body.get("caller_id", "")) or "").strip()
+    if client_id and not _CLIENT_ID_RE.match(client_id):
+        raise error(400, "clientId must be 8-64 letters, digits, '-' or '_'")
+    if mode not in ("browser", "ringout"):
+        raise error(400, "mode must be 'browser' or 'ringout'")
+    if len(caller_id) > 32:
+        raise error(400, "callerId is too long")
+    cfg = {"client_id": client_id, "mode": mode, "caller_id": caller_id, "updated_at": _now()}
+    await _set(K_RC_EMBED, cfg)
+    return _embed_out(cfg)
+
+
+def _recording_from(msg: dict) -> tuple[str, dict] | None:
+    """Pull (session id, recording) out of a RingCentral telephony-session or
+    call-log notification body, or None when it carries no recording."""
+    session = msg.get("telephonySessionId") or msg.get("sessionId") or ""
+    rec = msg.get("recording") if isinstance(msg.get("recording"), dict) else None
+    if not rec:
+        for party in msg.get("parties") or []:
+            if not isinstance(party, dict):
+                continue
+            recs = party.get("recordings") or []
+            if recs and isinstance(recs[0], dict):
+                rec = recs[0]
+                break
+    if not session or not rec or not rec.get("id"):
+        return None
+    url = rec.get("contentUri") or rec.get("uri") or ""
+    return str(session), {"id": str(rec.get("id")), "url": url if str(url).startswith("https://") else ""}
+
+
+async def _attach_recording(session_id: str, recording: dict) -> bool:
+    msgs = await _get(K_MSGS, [])
+    for m in reversed(msgs):
+        if m.get("channel") in ("call", "voicemail") and m.get("callId") == session_id:
+            m["recording"] = recording
+            await _set(K_MSGS, msgs)
+            return True
+    return False
 
 
 @router.get("/api/drivers/{did}/messages", dependencies=[Depends(require_admin)])
@@ -192,7 +275,24 @@ async def rc_webhook(request: Request):
     if vt:
         from fastapi.responses import Response
         return Response(status_code=200, headers={"Validation-Token": vt})
+    # Optional hardening: when the subscription was created with a verification
+    # token, RingCentral echoes it on every notification — reject anything else.
+    expected = os.environ.get("RINGCENTRAL_WEBHOOK_TOKEN", "")
+    if expected and not hmac.compare_digest(request.headers.get("verification-token", ""), expected):
+        raise error(401, "Invalid verification token")
+    if not isinstance(body, dict):
+        body = {}
     msg = (body.get("body") or {})
+    if not isinstance(msg, dict):
+        msg = {}
+    # Telephony-session / call-log events: attach the recording to the matching
+    # in-app call log instead of recording a bogus inbound SMS.
+    rec = _recording_from(msg)
+    if rec:
+        attached = await _attach_recording(*rec)
+        return {"ok": True, "recordingAttached": attached}
+    if (msg.get("telephonySessionId") or msg.get("parties")) and not (msg.get("subject") or msg.get("text")):
+        return {"ok": True, "ignored": "call event"}
     text = msg.get("subject") or msg.get("text") or ""
     frm = ((msg.get("from") or {}).get("phoneNumber")) or ""
     if text.strip().upper() in {"STOP", "UNSUBSCRIBE", "QUIT"} and frm:

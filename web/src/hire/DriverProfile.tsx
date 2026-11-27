@@ -10,6 +10,8 @@ import {
   completeness, initials, fmtAgo, fmtDate, STAGES,
 } from './store';
 import { store as esignStore } from '../esign/store';
+import { PhoneLink } from '../phone/PhoneLink';
+import { callNumber } from '../phone/store';
 
 const BG = '#F5F6F8';
 const TABS = ['Overview', 'Application', 'Checklist', 'Documents', 'DocuSign', 'Messages', 'PEV', 'Activity'];
@@ -42,12 +44,12 @@ export default function DriverProfile({ driverId, go, onBack }: { driverId: stri
             <button onClick={() => setModal({ kind: 'editDriver' })} style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${T.border}`, background: '#fff', cursor: 'pointer', color: T.muted, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="pencil" size={13} /></button>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 6, fontSize: 12.5, color: T.muted }}>
-            <Meta icon="user" v={`${d.stage}`} /><Meta icon="building" v={d.carrier} /><Meta icon="phone" v={d.phone} /><Meta icon="mail" v={d.email} /><Meta icon="sign" v={`CDL ${d.cdlClass}`} /><Meta icon="briefcase" v={d.position} /><Meta icon="gauge" v={`Risk: ${d.risk}`} />
+            <Meta icon="user" v={`${d.stage}`} /><Meta icon="building" v={d.carrier} /><Meta icon="phone" v={<PhoneLink phone={d.phone} name={d.name} recordId={d.id} kind="driver" />} /><Meta icon="mail" v={d.email} /><Meta icon="sign" v={`CDL ${d.cdlClass}`} /><Meta icon="briefcase" v={d.position} /><Meta icon="gauge" v={`Risk: ${d.risk}`} />
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
           {[['phone', 'Call', 'call'], ['message', 'Text', 'text'], ['mail', 'Email', 'email'], ['fileText', 'Note', 'note'], ['listChecks', 'Task', 'task']].map(([icon, label, type]) =>
-            <Hover key={type} as="button" onClick={() => type === 'task' ? setModal({ kind: 'task' }) : act(type, label)} title={label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, width: 54, padding: '8px 0', borderRadius: 10, border: `1px solid ${T.border}`, background: '#fff', cursor: 'pointer', color: T.text }} hover={{ background: T.hover }}><Icon name={icon} size={16} /><span style={{ fontSize: 10, fontWeight: 600, color: T.muted }}>{label}</span></Hover>)}
+            <Hover key={type} as="button" onClick={() => type === 'task' ? setModal({ kind: 'task' }) : type === 'call' ? callNumber(d.phone, { name: d.name, recordId: d.id, kind: 'driver' }) : act(type, label)} title={label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, width: 54, padding: '8px 0', borderRadius: 10, border: `1px solid ${T.border}`, background: '#fff', cursor: 'pointer', color: T.text }} hover={{ background: T.hover }}><Icon name={icon} size={16} /><span style={{ fontSize: 10, fontWeight: 600, color: T.muted }}>{label}</span></Hover>)}
         </div>
       </div>
     </div>
