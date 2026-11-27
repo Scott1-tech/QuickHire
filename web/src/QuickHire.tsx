@@ -11,8 +11,7 @@ import { AnnaSettings } from './anna/settings';
 import EsignWorkspace from './esign/EsignWorkspace';
 import DriverProfile from './hire/DriverProfile';
 import CarrierFolders from './hire/CarrierFolders';
-import HiringPipeline from './hire/HiringPipeline';
-import RecruitPipeline from './recruit/RecruitPipeline';
+import PipelinesPage from './pipes/PipelinesPage';
 import { TopBar } from './shell/TopBar';
 import PhoneDock from './phone/PhoneDock';
 import { requestLeadOpen } from './phone/nav';
@@ -95,7 +94,7 @@ export default class QuickHire extends QuickHireLogic {
           {/* SCROLL CONTENT */}
           <main style={css('flex:1; overflow-y:auto; position:relative;')}>
             {v.isDashboard && this.renderDashboard(v)}
-            {v.isPipeline && this.renderPipeline(v)}
+            {v.isPipelines && <PipelinesPage go={(p: string) => this.go(p)} openDriver={(id: string) => this.openCand(id)} initialPipe={this.state.pipesFocus || undefined} nonce={this.state.pipesNonce} />}
             {v.isProfile && this.renderProfile(v)}
             {v.isDocusign && this.renderDocusign(v)}
             {v.isCompliance && this.renderCompliance(v)}
@@ -107,7 +106,6 @@ export default class QuickHire extends QuickHireLogic {
             {v.isIntegrations && this.renderIntegrationsPage(v)}
             {v.isTasks && <TasksWorkspace />}
             {v.isAnna && <AnnaWorkspace go={(page: string, payload?: any) => this.annaGo(page, payload)} />}
-            {v.isRecruiting && <RecruitPipeline go={(p: string) => this.go(p)} />}
           </main>
         </div>
 
@@ -121,7 +119,7 @@ export default class QuickHire extends QuickHireLogic {
         {/* In-app calling: floating phone, screen pop, live call + wrap-up (mounted once) */}
         <PhoneDock bottomOffset={v.isProfile ? 118 : 0}
           openDriver={(id: string) => this.openCand(id)}
-          openLead={(id: string) => { requestLeadOpen(id); if (this.state.page !== 'recruiting') this.go('recruiting'); }}
+          openLead={(id: string) => { requestLeadOpen(id); this.go('recruiting'); }}
           openSettings={() => this.setState({ page: 'settings', settingsSection: 'ringcentral', paletteOpen: false })} />
       </div>
     );
@@ -256,11 +254,7 @@ export default class QuickHire extends QuickHireLogic {
     );
   }
 
-  // ===================== HIRING PIPELINE =====================
-  renderPipeline(_v: any) {
-    return <HiringPipeline openDriver={(id: string) => this.openCand(id)} />;
-  }
-
+  // ===================== HIRING PIPELINE (legacy design port, unused) =====================
   renderPipelineLegacy(v: any) {
     return (
       <div style={css('padding:28px 28px 0; height:100%; display:flex; flex-direction:column;')}>
@@ -328,7 +322,7 @@ export default class QuickHire extends QuickHireLogic {
   }
 
   renderProfile(_v: any) {
-    return <DriverProfile driverId={this.state.candidateId} go={(p: string) => this.go(p)} onBack={() => this.go('pipeline')} />;
+    return <DriverProfile driverId={this.state.candidateId} go={(p: string) => this.go(p)} onBack={() => this.go('pipelines')} />;
   }
 
   renderProfileLegacy(v: any) {

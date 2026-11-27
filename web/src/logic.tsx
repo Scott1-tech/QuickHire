@@ -37,7 +37,9 @@ export class QuickHireLogic extends React.Component<any, any> {
   state: any = {
     page: 'dashboard',
     theme: null,
-    collapsed: false,
+    // start with the sidebar collapsed on phone-sized screens
+    collapsed: typeof window !== 'undefined' && window.innerWidth < 760,
+    pipesFocus: null, pipesNonce: 0,
     candidateId: 'p1',
     profileTab: 'overview',
     dsTab: 'home',
@@ -132,7 +134,16 @@ export class QuickHireLogic extends React.Component<any, any> {
   taskDone(id: string) { this.setState((s: any) => ({ taskDone: { ...s.taskDone, [id]: true } })); this.toast('Task completed', '', 'success'); }
 
   // ---------- actions ----------
-  go(page: string) { this.setState({ page, paletteOpen: false }); }
+  go(page: string) {
+    // Recruiting + Hiring now live in one "Pipelines" page; keep the old routes
+    // working by opening Pipelines on Leads / Hiring respectively.
+    if (page === 'recruiting' || page === 'pipeline') {
+      this.setState((s: any) => ({ page: 'pipelines', pipesFocus: page === 'recruiting' ? 'leads' : 'hiring', pipesNonce: (s.pipesNonce || 0) + 1, paletteOpen: false }));
+      return;
+    }
+    if (page === 'pipelines') { this.setState({ page, pipesFocus: null, paletteOpen: false }); return; }
+    this.setState({ page, paletteOpen: false });
+  }
   toast(title: string, body?: string, type?: string) {
     const id = 'to' + Date.now() + Math.random();
     const conf = (({ success: ['rgba(52,199,89,0.16)', '#248A3D', 'check'], warning: ['rgba(255,159,10,0.18)', '#A05A00', 'alert'], danger: ['rgba(255,59,48,0.14)', '#C62820', 'alert'], info: ['rgba(0,122,255,0.14)', '#0066CC', 'check'] } as Record<string, string[]>)[type || 'success']);
@@ -145,7 +156,9 @@ export class QuickHireLogic extends React.Component<any, any> {
       roster/compliance row leads to a real profile. */
   openDriverByName(name: string, carrier = 'GRAND ONE LLC', stage = 'Hired') {
     let d = hireStore.drivers.find((x: any) => x.name.toLowerCase() === name.toLowerCase());
-    if (!d) d = hireSvc.addDriver({ name, carrier, phone: '(555) 010-0000', email: name.toLowerCase().replace(/[^a-z]/g, '.') + '@example.com', position: 'Company Driver' }, stage);
+    // roster drivers ("Hired") are current fleet drivers → Active lifecycle
+    const fleet = stage === 'Hired' ? { lifecycle: 'active', activeStage: 'Active', activeSince: new Date().toISOString(), hireDate: new Date().toISOString() } : {};
+    if (!d) d = hireSvc.addDriver({ name, carrier, phone: '(555) 010-0000', email: name.toLowerCase().replace(/[^a-z]/g, '.') + '@example.com', position: 'Company Driver', ...fleet }, stage);
     this.openCand(d.id);
   }
   moveCand(id: string, stage: string) { const c = this.CANDS.find((x: any) => x.id === id); if (c && c.stage !== stage) { c.stage = stage; this.forceUpdate(); this.toast(c.name + ' moved to ' + this.STAGE_TITLES[stage], '', 'success'); } }
@@ -185,12 +198,12 @@ export class QuickHireLogic extends React.Component<any, any> {
     const sidebarBorder = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)';
 
     const navDefs = [
-      ['dashboard', 'Dashboard', 'dashboard'], ['recruiting', 'Recruiting', 'funnel'], ['pipeline', 'Hiring', 'hiring'], ['drivers', 'Drivers', 'drivers'],
+      ['dashboard', 'Dashboard', 'dashboard'], ['pipelines', 'Pipelines', 'funnel'], ['drivers', 'Drivers', 'drivers'],
       ['compliance', 'Compliance', 'compliance'], ['docusign', 'e-Signature', 'docusign'],
       ['messages', 'Messages', 'messages'], ['anna', 'Anna', 'spark'], ['tasks', 'Tasks', 'tasks'], ['reports', 'Reports', 'reports'],
       ['integrations', 'Integrations', 'wand'], ['settings', 'Settings', 'settings'],
     ];
-    const pageGroup = (S.page === 'profile') ? 'pipeline' : S.page;
+    const pageGroup = ['profile', 'pipeline', 'recruiting'].includes(S.page) ? 'pipelines' : S.page;
     const badges: Record<string, string> = { compliance: '4', messages: '2', docusign: '5' };
     const nav = navDefs.map(([key, label, icon]) => {
       const active = pageGroup === key;
@@ -229,7 +242,8 @@ export class QuickHireLogic extends React.Component<any, any> {
     const isTasks = S.page === 'tasks';
     const isAnna = S.page === 'anna';
     const isRecruiting = S.page === 'recruiting';
-    const titles: Record<string, string> = { dashboard: 'Dashboard', recruiting: 'Recruiting', pipeline: 'Hiring Pipeline', profile: 'Candidate Profile', drivers: 'Drivers', carriers: 'Carriers', compliance: 'Compliance', docusign: 'e-Signature', messages: 'Messages', anna: 'Anna', tasks: 'Tasks', reports: 'Reports', settings: 'Settings' };
+    const isPipelines = ['pipelines', 'pipeline', 'recruiting'].includes(S.page);
+    const titles: Record<string, string> = { dashboard: 'Dashboard', pipelines: 'Pipelines', recruiting: 'Pipelines', pipeline: 'Pipelines', profile: 'Driver Profile', drivers: 'Drivers', carriers: 'Carriers', compliance: 'Compliance', docusign: 'e-Signature', messages: 'Messages', anna: 'Anna', tasks: 'Tasks', reports: 'Reports', settings: 'Settings' };
 
     const out: any = {
       expanded, sidebarStyle, sidebarStrong, sidebarFaint, sidebarBorder, nav, carrierSwitchStyle, themeBtnStyle,
@@ -239,7 +253,7 @@ export class QuickHireLogic extends React.Component<any, any> {
       toggleCollapse: () => this.setState((s: any) => ({ collapsed: !s.collapsed })),
       pageTitle: titles[S.page] || 'QuickHire',
       isDashboard, isPipeline, isProfile, isDocusign, isCompliance, isMessages, isSettings,
-      isDrivers, isCarriers, isReports, isIntegrations, isTasks, isAnna, isRecruiting,
+      isDrivers, isCarriers, isReports, isIntegrations, isTasks, isAnna, isRecruiting, isPipelines,
       icChevDown: this.ic('chevD', 15), icChevRight: this.ic('chevR', 15), icCollapse: this.ic('collapse', 18),
       icTaskTop: this.ic('list', 18), icRefresh: this.ic('refresh', 15), icCarrier: this.ic('carriers', 18), icCarrierLg: this.ic('carriers', 26), icBolt: this.ic('bolt', 11),
       openTasks: () => this.setState({ taskDrawerOpen: true }),
@@ -455,7 +469,7 @@ export class QuickHireLogic extends React.Component<any, any> {
       out.driverSubtitle = v === 'drivers' ? '5 drivers · 4 active · 1 inactive' : '5 units · 2 assigned · 1 in shop';
       out.addDriverLabel = v === 'drivers' ? 'Add Driver' : 'Add Truck';
       out.addDriver = () => {
-        if (v === 'drivers') { this.go('pipeline'); this.toast('Add a driver', 'Use “Invite Driver” on the Hiring Pipeline', 'info'); }
+        if (v === 'drivers') { this.go('pipeline'); this.toast('Add a driver', 'Use “Add candidate” in Pipelines → Hiring', 'info'); }
         else { const t = hireSvc.addTruck('GRAND ONE LLC'); this.toast('Truck added', `Unit ${t.unit} · GRAND ONE LLC — visible in the carrier folder and truck pickers`, 'success'); }
       };
       out.driverSeg = [['drivers', 'Drivers'], ['trucks', 'Trucks']].map(([k, l]: any) => ({ label: l, onClick: () => this.setState({ driverView: k }), style: { height: '30px', padding: '0 16px', fontSize: '13px', fontWeight: 600, borderRadius: '8px', border: 'none', cursor: 'pointer', background: v === k ? '#fff' : 'transparent', color: v === k ? '#1D1D1F' : '#6E6E73', boxShadow: v === k ? '0 1px 2px rgba(0,0,0,0.10)' : 'none' } }));
@@ -637,7 +651,7 @@ export class QuickHireLogic extends React.Component<any, any> {
     out.paletteOpen = S.paletteOpen; out.paletteQuery = S.paletteQuery;
     out.onPaletteQuery = (e: any) => this.setState({ paletteQuery: e.target.value });
     const q = S.paletteQuery.toLowerCase();
-    const navResults: any[] = [['dashboard', 'Dashboard', 'Overview of what needs attention', 'dashboard'], ['pipeline', 'Hiring Pipeline', 'Kanban of candidates', 'hiring'], ['compliance', 'Compliance', 'Document readiness', 'compliance'], ['docusign', 'DocuSign', 'E-signature center', 'docusign'], ['messages', 'Messages', 'Inbox', 'messages'], ['settings', 'Settings', 'Configuration', 'settings']];
+    const navResults: any[] = [['dashboard', 'Dashboard', 'Overview of what needs attention', 'dashboard'], ['pipelines', 'Pipelines', 'Leads · Hiring · Active · Inactive', 'funnel'], ['compliance', 'Compliance', 'Document readiness', 'compliance'], ['docusign', 'DocuSign', 'E-signature center', 'docusign'], ['messages', 'Messages', 'Inbox', 'messages'], ['settings', 'Settings', 'Configuration', 'settings']];
     const candResults: any[] = this.CANDS.map((c: any) => ['cand', c.name, c.stage + ' · ' + c.carrier, 'hiring', c.id]);
     const results: any[] = [];
     navResults.forEach(([page, title, sub, icon]: any) => { if (!q || title.toLowerCase().includes(q)) results.push({ title, sub, icon: this.ic(icon, 15), bg: 'rgba(0,122,255,0.08)', fg: '#007AFF', onClick: () => this.go(page) }); });

@@ -1,7 +1,6 @@
 /* Navigation bridge so the phone (mounted once, outside every page) can open a
-   driver or lead profile. QuickHire registers the navigator; the recruiting
-   board subscribes to "open this lead" requests with useLeadOpenRequests. */
-import React from 'react';
+   driver or lead profile. QuickHire registers the navigator; the Pipelines
+   page picks up "open this lead" requests with takePendingLead. */
 
 export type Navigator = {
   openDriver: (id: string) => void;
@@ -19,23 +18,12 @@ export function openRecord(kind: 'lead' | 'driver', id: string): boolean {
 }
 export function openPhoneSettings(): boolean { if (!nav) return false; nav.openSettings(); return true; }
 
-/* lead-open requests: delivered to the mounted recruiting board, or held until it mounts */
+/* lead-open requests: held until the Pipelines page picks them up. The page
+   reads the request right after it resets for a navigation, so a request made
+   together with go('recruiting') is never wiped by that reset. */
 let pendingLead: string | null = null;
-const leadListeners = new Set<(id: string) => void>();
 
-export function requestLeadOpen(id: string) {
-  if (leadListeners.size) leadListeners.forEach((l) => l(id));
-  else pendingLead = id;
-}
+export function requestLeadOpen(id: string) { pendingLead = id || null; }
 
-/** Recruiting board hook: open a lead profile when the phone asks for one. */
-export function useLeadOpenRequests(open: (id: string) => void) {
-  const ref = React.useRef(open);
-  ref.current = open;
-  React.useEffect(() => {
-    if (pendingLead) { const id = pendingLead; pendingLead = null; ref.current(id); }
-    const l = (id: string) => ref.current(id);
-    leadListeners.add(l);
-    return () => { leadListeners.delete(l); };
-  }, []);
-}
+/** Pipelines page: take (and clear) the lead the phone asked to open, if any. */
+export function takePendingLead(): string | null { const id = pendingLead; pendingLead = null; return id; }

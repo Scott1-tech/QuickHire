@@ -3,6 +3,7 @@ import { Hover } from '../lib/dc';
 import { T, Icon } from '../tasks/lib';
 import { Card, EmptyState, primaryBtn, ghostBtn, Toggle } from '../esign/ui';
 import { useRecruit, svc, USERS, SCORE_META, isOverdue, daysInStage, stageByName, fmtAgo, fmtDate, dueLabel } from './store';
+import { LEAD_STAGE } from '../pipes/stages';
 
 const owner = (id: string) => USERS.find((u) => u.id === id);
 function isToday(iso: string) { if (!iso) return false; const d = new Date(iso); const n = new Date(); return d.toDateString() === n.toDateString(); }
@@ -11,13 +12,13 @@ function isToday(iso: string) { if (!iso) return false; const d = new Date(iso);
 export function RecruitDashboard({ onOpen }: { onOpen: (id: string) => void }) {
   const store = useRecruit(); void store;
   const me = 'NP';
-  const mine = svc.visibleLeads(me).filter((l: any) => !l.archived);
+  const mine = svc.visibleLeads(me).filter((l: any) => !l.archived && !stageByName(l.stageName)?.terminal);
   const dueToday = mine.filter((l: any) => l.nextAction?.status === 'open' && isToday(l.nextAction?.due));
   const overdueFollow = mine.filter((l: any) => l.nextAction?.status === 'open' && l.nextAction?.due && +new Date(l.nextAction.due) < Date.now());
   const assigned = mine.filter((l: any) => l.ownerId === me);
   const hot = mine.filter((l: any) => l.scoreLabel === 'Hot Lead');
   const waiting = mine.filter((l: any) => isOverdue(l));
-  const ready = mine.filter((l: any) => l.stageName === 'Ready for Review');
+  const ready = mine.filter((l: any) => l.stageName === LEAD_STAGE.QUALIFIED);
   const archived = svc.visibleLeads(me).filter((l: any) => l.archived).sort((a: any, b: any) => +new Date(b.archiveReport?.archivedAt || 0) - +new Date(a.archiveReport?.archivedAt || 0)).slice(0, 6);
   const recs = svc.recommendations(me);
 
@@ -51,7 +52,7 @@ export function RecruitDashboard({ onOpen }: { onOpen: (id: string) => void }) {
       <ListCard title="Overdue follow-ups" icon="alert" leads={overdueFollow} onOpen={onOpen} tone="#C62820" sub={(l: any) => dueLabel(l.nextAction?.due)} />
       <ListCard title="Drivers waiting too long" icon="clock" leads={waiting} onOpen={onOpen} sub={(l: any) => `${daysInStage(l)}d in ${l.stageName}`} />
       <ListCard title="Hot leads" icon="zap" leads={hot} onOpen={onOpen} tone="#FF375F" sub={(l: any) => `Score ${l.score}`} />
-      <ListCard title="Ready for decision" icon="checkCircle" leads={ready} onOpen={onOpen} sub={(l: any) => l.stageName} />
+      <ListCard title="Qualified — move to Hiring" icon="checkCircle" leads={ready} onOpen={onOpen} sub={(l: any) => l.stageName} />
       <ListCard title="Recently archived" icon="ban" leads={archived} onOpen={onOpen} sub={(l: any) => l.closeReason || 'archived'} />
     </div>
   </div>;
@@ -73,7 +74,7 @@ export function RecruitReports() {
   const a = svc.analytics();
   const kpis = [
     { label: 'Total leads', value: a.totalLeads }, { label: 'New leads', value: a.newLeads },
-    { label: 'Hired', value: a.hired, color: '#248A3D' }, { label: 'Rejected', value: a.rejected, color: '#C62820' },
+    { label: 'To Hiring', value: a.hired, color: '#248A3D' }, { label: 'Rejected', value: a.rejected, color: '#C62820' },
     { label: 'Refused', value: a.refused, color: '#A05A00' }, { label: 'Conversion', value: a.conversion + '%', color: '#007AFF' },
     { label: 'Avg time to hire', value: a.avgHoursToHire != null ? (a.avgHoursToHire >= 24 ? Math.round(a.avgHoursToHire / 24) + 'd' : a.avgHoursToHire + 'h') : '—' },
     { label: 'Anna conversion', value: a.annaConversion + '%', color: '#FF375F' },
@@ -107,12 +108,12 @@ export function RecruitReports() {
 
     <Card style={{ padding: 16 }}>
       <H>Recruiter performance</H>
-      <Table cols={['Recruiter', 'Leads', 'Active', 'Hired', 'Overdue']} rows={a.perRecruiter.map((r: any) => [r.name, r.leads, r.active, r.hired, r.overdue])} highlightLast="#C62820" />
+      <Table cols={['Recruiter', 'Leads', 'Open', 'To Hiring', 'Overdue']} rows={a.perRecruiter.map((r: any) => [r.name, r.leads, r.active, r.hired, r.overdue])} highlightLast="#C62820" />
     </Card>
     <Card style={{ padding: 16 }}>
       <H>Lead source performance</H>
-      <Table cols={['Source', 'Leads', 'Hired', 'Hire rate']} rows={a.perSource.map((s: any) => [s.source, s.leads, s.hired, s.leads ? Math.round((s.hired / s.leads) * 100) + '%' : '—'])} />
-      <div style={{ fontSize: 11.5, color: T.faint, marginTop: 10 }}>Anna AI: {a.annaLeads} leads · {a.annaHired} hired · {a.annaConversion}% conversion.</div>
+      <Table cols={['Source', 'Leads', 'To Hiring', 'Rate']} rows={a.perSource.map((s: any) => [s.source, s.leads, s.hired, s.leads ? Math.round((s.hired / s.leads) * 100) + '%' : '—'])} />
+      <div style={{ fontSize: 11.5, color: T.faint, marginTop: 10 }}>Anna AI: {a.annaLeads} leads · {a.annaHired} moved to Hiring · {a.annaConversion}% conversion.</div>
     </Card>
   </div>;
 }

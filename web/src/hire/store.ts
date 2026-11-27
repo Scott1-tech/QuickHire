@@ -4,13 +4,17 @@
 import React from 'react';
 import { CANDS, CARRIER_LIST } from '../data';
 import { svc as shellSvc } from '../shell/store';
+import { HIRING_STAGES, HIRING_STAGE, normalizeHiringStage } from '../pipes/stages';
+import { EXAMPLE_DRIVER_SPECS, exampleLifecycleFields } from './lifecycleSeed';
 
 export const uid = (p: string) => `${p}_${Math.random().toString(36).slice(2, 9)}`;
 const nowIso = () => new Date().toISOString();
 const daysFromNow = (d: number) => new Date(Date.now() + d * 864e5).toISOString();
 
-export const STAGES = ['Lead', 'Screening', 'Background Check', 'Offer', 'Onboarding', 'Hired'];
-export const STAGE_DOT: Record<string, string> = { Lead: '#8E8E93', Screening: '#007AFF', 'Background Check': '#FF9F0A', Offer: '#5856D6', Onboarding: '#34C759', Hired: '#248A3D' };
+/** Hiring pipeline stages (the final "Withdrawn / Rejected" stage needs a reason
+    and is set from Pipelines). Legacy names (Lead, Screening, …) are migrated. */
+export const STAGES = HIRING_STAGES;
+export const STAGE_DOT: Record<string, string> = { [HIRING_STAGE.APPLICATION]: '#5AC8FA', [HIRING_STAGE.DOCS]: '#FF9F0A', [HIRING_STAGE.OFFER]: '#5856D6', [HIRING_STAGE.ORIENTATION]: '#007AFF', [HIRING_STAGE.HIRED]: '#34C759', [HIRING_STAGE.LOST]: '#FF3B30' };
 
 /* ───────── hiring step + document templates ───────── */
 export const STEP_GROUPS = ['Compliance & Eligibility', 'Risk Screening', 'Health & Safety', 'Employment Setup'];
@@ -109,7 +113,7 @@ function seedCarriers() {
 
 function seedDriver(c: any): any {
   const exp = 2 + (c.score % 6);
-  return {
+  return normalizeDriver({
     id: c.id, name: c.name, phone: c.phone, email: c.email, carrier: c.carrier, position: c.position,
     ownerName: c.ownerName, stage: c.stage, risk: c.risk, score: c.score, missing: c.missing || '',
     cdlClass: (c.cdl || 'TX · Class A').split('Class ')[1] || 'A', cdlState: (c.cdl || 'TX').split(' ')[0],
@@ -117,26 +121,103 @@ function seedDriver(c: any): any {
     medicalCard: (c.missing || '').toLowerCase().includes('medical') ? 'missing' : 'valid',
     mvr: { violations: c.risk === 'High' ? 3 : c.risk === 'Medium' ? 1 : 0, accidents: 0, dui: 0 },
     psp: { crashes: 0, oos: c.risk === 'High' ? 2 : 0 },
-    drugTest: c.stage === 'Lead' ? 'missing' : 'passed', backgroundCheck: c.stage === 'Lead' || c.stage === 'Screening' ? 'pending' : 'clear',
-    clearinghouse: (c.missing || '').toLowerCase().includes('clearinghouse') ? 'missing' : c.stage === 'Lead' ? 'pending' : 'clear',
+    drugTest: isEarlyStage(c.stage) ? 'missing' : 'passed', backgroundCheck: isEarlyStage(c.stage) || c.stage === 'Screening' ? 'pending' : 'clear',
+    clearinghouse: (c.missing || '').toLowerCase().includes('clearinghouse') ? 'missing' : isEarlyStage(c.stage) ? 'pending' : 'clear',
     stageSince: daysFromNow(-(1 + (c.score % 8))),
     assignedTruckId: null, steps: seedSteps(c.missing || ''), documents: seedDocs(c.missing || ''),
     activities: [{ id: uid('a'), type: 'stage', title: `Entered ${c.stage}`, detail: '', at: daysFromNow(-2), user: c.ownerName }],
-    aiReview: null, archived: false, application: { submitted: c.stage !== 'Lead', startDate: '', payRate: '', emergencyContact: '' },
+    aiReview: null, archived: false, application: { submitted: !isEarlyStage(c.stage), startDate: '', payRate: '', emergencyContact: '' },
     avatarBg: avatarColor(c.name),
+  });
+}
+const isEarlyStage = (s: string) => s === 'Lead' || s === HIRING_STAGE.APPLICATION;
+
+/** Fill lifecycle defaults + migrate legacy stage names. Idempotent, so it runs
+    on every load and keeps older localStorage data working. */
+export function normalizeDriver(d: any): any {
+  d.stage = normalizeHiringStage(d.stage);
+  if (!d.lifecycle) d.lifecycle = 'hiring';
+  if (!d.appliedAt) {
+    const times = [d.stageSince, ...(d.activities || []).map((a: any) => a.at)].filter(Boolean).map((t: string) => +new Date(t)).filter((t: number) => isFinite(t));
+    d.appliedAt = times.length ? new Date(Math.min(...times)).toISOString() : nowIso();
+  }
+  if (!Array.isArray(d.tasks)) d.tasks = [];
+  if (!Array.isArray(d.checkIns)) d.checkIns = [];
+  if (!Array.isArray(d.tenures)) d.tenures = [];
+  if (!Array.isArray(d.activities)) d.activities = [];
+  if (d.nextStep === undefined) d.nextStep = null;
+  if (d.rehireEligible === undefined) d.rehireEligible = null;
+  if (d.reapplyCount === undefined) d.reapplyCount = 0;
+  if (!d.application) d.application = { submitted: false, startDate: '', payRate: '', emergencyContact: '' };
+  return d;
+}
+
+/* Build one example lifecycle driver (Active / Inactive / rehire demo data). */
+function exampleDriver(spec: any, now: number) {
+  const d = seedDriver({ id: spec.id, name: spec.name, phone: spec.phone, email: spec.email, carrier: spec.carrier, position: spec.position || 'Company Driver', ownerName: spec.owner, stage: HIRING_STAGE.HIRED, risk: spec.risk, score: spec.score, missing: '', cdl: spec.cdl });
+  d.documents.forEach((x: any) => { x.status = x.name === 'Insurance' ? 'pending' : 'collected'; });
+  d.steps.forEach((x: any) => { x.status = 'complete'; });
+  d.drugTest = 'passed'; d.backgroundCheck = 'clear'; d.clearinghouse = 'clear'; d.medicalCard = 'valid';
+  d.mvr = { violations: spec.risk === 'High' ? 3 : spec.risk === 'Medium' ? 1 : 0, accidents: 0, dui: 0 };
+  Object.assign(d, exampleLifecycleFields(spec, now));
+  if (spec.lifecycle === 'hiring' && spec.reapplied != null) {
+    ['MVR', 'PSP Report', 'Drug Test Consent', 'Clearinghouse Consent'].forEach((n) => { const x = d.documents.find((y: any) => y.name === n); if (x) x.status = 'missing'; });
+    d.drugTest = 'missing'; d.clearinghouse = 'pending';
+  }
+  const by = spec.owner;
+  d.activities = [
+    ...(spec.note ? [{ id: uid('a'), type: 'note', title: 'Note', detail: spec.note, at: new Date(now - 36e5).toISOString(), user: by }] : []),
+    ...(spec.riskReason ? [{ id: uid('a'), type: 'stage', title: `Moved: Active → At risk`, detail: `Risk: ${spec.riskReason}`, at: d.activeSince, user: by }] : []),
+    ...(spec.reapplied != null ? [{ id: uid('a'), type: 'lifecycle', title: 'Inactive → Hiring (re-applied)', detail: 'Rehire #1 — previous tenure kept. MVR, PSP, Clearinghouse and drug test reset.', at: d.lastReappliedAt, user: by }] : []),
+    ...(d.lifecycle === 'inactive' ? [{ id: uid('a'), type: 'lifecycle', title: `Active → Inactive (${d.quitType})`, detail: `Reason: ${d.quitReason}. Rehire eligible: ${d.rehireEligible === true ? 'Yes' : d.rehireEligible === false ? 'No' : 'Not reviewed'}`, at: d.inactiveSince, user: by }] : []),
+    ...(spec.lostReason ? [{ id: uid('a'), type: 'stage', title: `Moved to ${HIRING_STAGE.LOST}`, detail: spec.lostReason, at: d.stageSince, user: by }] : []),
+    ...(d.hireDate ? [{ id: uid('a'), type: 'lifecycle', title: 'Hiring → Active · First 90 days', detail: `Hire date ${fmtDate(d.hireDate)}`, at: d.hireDate, user: by }] : []),
+    { id: uid('a'), type: 'stage', title: 'Application received', detail: spec.lane, at: d.appliedAt, user: by },
+  ];
+  d.aiReview = null;
+  return d;
+}
+
+/* One-time schema v2 upgrade: lifecycle fields, example Active/Inactive drivers
+   and deterministic demo states (next steps, e-sign) on the stock seed drivers. */
+function upgradeToV2() {
+  const now = Date.now();
+  store.drivers.forEach(normalizeDriver);
+  const NEXT: Record<string, [string, number] | null> = {
+    p1: ['Request DOT medical card', -1], p2: null, p3: ['Review PSP & advance to offer', 1], p4: ['Follow up on offer e-sign', 0],
+    p5: ['Confirm orientation & truck', 1], p6: ['Send application link', 1], p7: null, p8: ['Pull PSP report', 1], p9: ['Confirm start date', 2], p10: ['Start 90-day onboarding', 0],
   };
+  store.drivers.forEach((d: any) => {
+    if (!(d.id in NEXT) || d.nextStep) return;
+    const n = NEXT[d.id];
+    d.nextStep = n ? { title: n[0], due: new Date(now + n[1] * 864e5).toISOString(), status: 'open' } : null;
+  });
+  const byId = (id: string, stage: string) => store.drivers.find((d: any) => d.id === id && d.stage === stage && d.lifecycle === 'hiring');
+  const p3 = byId('p3', HIRING_STAGE.DOCS);
+  if (p3) { ['CDL Front', 'CDL Back', 'Medical Card', 'MVR', 'PSP Report', 'Clearinghouse Consent', 'Drug Test Consent'].forEach((n) => { const x = p3.documents.find((y: any) => y.name === n); if (x) x.status = 'collected'; }); p3.drugTest = 'passed'; p3.clearinghouse = 'clear'; p3.medicalCard = 'valid'; }
+  const p4 = byId('p4', HIRING_STAGE.OFFER);
+  if (p4 && !p4.esign) p4.esign = { status: 'viewed', at: new Date(now - 5 * 36e5).toISOString(), title: 'Offer package' };
+  const p9 = byId('p9', HIRING_STAGE.OFFER);
+  if (p9 && !p9.esign) p9.esign = { status: 'sent', at: new Date(now - 864e5).toISOString(), title: 'Offer package' };
+  const p10 = byId('p10', HIRING_STAGE.HIRED);
+  if (p10 && !p10.assignedTruckId && !p10.truckNo) { p10.truckNo = '110'; const w9 = p10.documents.find((y: any) => y.name === 'W-9'); if (w9) w9.status = 'collected'; }
+  const names = new Set(store.drivers.map((d: any) => String(d.name).toLowerCase()));
+  EXAMPLE_DRIVER_SPECS.forEach((spec) => { if (!names.has(spec.name.toLowerCase())) store.drivers.push(exampleDriver(spec, now)); });
 }
 
 /* ───────── persistence ───────── */
 const LS = 'qh_hire_v1';
 function load(): any | null { try { const r = localStorage.getItem(LS); return r ? JSON.parse(r) : null; } catch { return null; } }
-function persist() { try { localStorage.setItem(LS, JSON.stringify({ drivers: store.drivers, carriers: store.carriers, trucks: store.trucks })); } catch { /* quota */ } }
+const SCHEMA = 2;
+function persist() { try { localStorage.setItem(LS, JSON.stringify({ schema: SCHEMA, drivers: store.drivers, carriers: store.carriers, trucks: store.trucks })); } catch { /* quota */ } }
 
 export const store: any = { drivers: [], carriers: [], trucks: [] };
 (function init() {
   const s = load();
-  if (s && s.drivers?.length) { store.drivers = s.drivers; store.carriers = s.carriers || seedCarriers(); store.trucks = s.trucks || seedTrucks(); }
-  else { store.drivers = CANDS.map(seedDriver); store.carriers = seedCarriers(); store.trucks = seedTrucks(); persist(); }
+  if (s && s.drivers?.length) {
+    store.drivers = s.drivers; store.carriers = s.carriers || seedCarriers(); store.trucks = s.trucks || seedTrucks();
+    if ((s.schema || 1) < SCHEMA) { upgradeToV2(); persist(); } else store.drivers.forEach(normalizeDriver);
+  } else { store.drivers = CANDS.map(seedDriver); store.carriers = seedCarriers(); store.trucks = seedTrucks(); upgradeToV2(); persist(); }
 })();
 
 const listeners = new Set<() => void>();
@@ -233,6 +314,12 @@ export const svc = {
     emit();
   },
   update(id: string, patch: any) { const d = this.driver(id); if (!d) return; Object.assign(d, patch); emit(); },
+  /** Replace a driver wholesale (used to restore an undo snapshot). */
+  replace(rec: any) { const i = store.drivers.findIndex((d: any) => d.id === rec.id); if (i >= 0) store.drivers[i] = rec; else store.drivers.unshift(rec); emit(); },
+  remove(id: string) { store.drivers = store.drivers.filter((d: any) => d.id !== id); emit(); },
+  replaceAll(drivers: any[]) { store.drivers = drivers; emit(); },
+  /** Persist + notify after a caller mutated a driver in place. */
+  touch() { emit(); },
 
   setStepStatus(id: string, stepId: string, status: string) {
     const d = this.driver(id); if (!d) return; const s = d.steps.find((x: any) => x.id === stepId); if (!s) return;
@@ -271,16 +358,24 @@ export const svc = {
   assignTruck(id: string, truckId: string) { const d = this.driver(id); if (!d) return; d.assignedTruckId = truckId; const t = store.trucks.find((x: any) => x.id === truckId); if (t) t.status = 'Assigned'; this.log(id, 'truck', `Assigned truck — Unit ${t?.unit || ''}`); },
   changeCarrier(id: string, carrier: string) { const d = this.driver(id); if (!d) return; d.carrier = carrier; d.assignedTruckId = null; this.log(id, 'carrier', `Hiring carrier changed to ${carrier}`); },
 
-  moveStage(id: string, stage: string) { const d = this.driver(id); if (!d || d.stage === stage) return; d.stage = stage; d.stageSince = nowIso(); this.log(id, 'stage', `Moved to ${stage}`); },
+  moveStage(id: string, stage: string, detail = '') { const d = this.driver(id); if (!d) return; stage = normalizeHiringStage(stage); if (d.stage === stage) return; const from = d.stage; d.stage = stage; d.stageSince = nowIso(); this.log(id, 'stage', `Moved: ${from} → ${stage}`, detail); },
   archive(id: string, reason: string) { const d = this.driver(id); if (!d) return; d.archived = true; this.log(id, 'archive', 'Candidate archived', reason); },
   unarchive(id: string) { const d = this.driver(id); if (!d) return; d.archived = false; this.log(id, 'archive', 'Candidate restored'); },
 
-  addDriver(fields: any, stage = 'Lead') {
-    const base = { id: 'p_' + Math.random().toString(36).slice(2, 8), score: 70, risk: 'Medium', missing: '', cdl: `${(fields.cdlState || 'TX')} · Class ${fields.cdlClass || 'A'}`, ownerName: 'Nina Patel', stage, ...fields };
+  addDriver(fields: any, stage: string = HIRING_STAGE.APPLICATION) {
+    stage = normalizeHiringStage(stage);
+    const base = { id: 'p_' + Math.random().toString(36).slice(2, 8), score: 70, risk: 'Medium', missing: '', cdl: `${(fields.cdlState || 'TX')} · Class ${fields.cdlClass || 'A'}`, ownerName: 'Nina Patel', ...fields, stage };
     const d = seedDriver(base);
+    // keep extra lifecycle / profile fields (leadId, source, lifecycle, hireDate…)
+    const { cdl: _c, stage: _s, ...extra } = fields; void _c; void _s;
+    Object.assign(d, extra);
+    d.stageSince = nowIso();
+    if (!fields.appliedAt) d.appliedAt = nowIso();
+    d.activities = [];
+    normalizeDriver(d);
     d.aiReview = computeAIReview(d);
     store.drivers.unshift(d);
-    this.log(d.id, 'stage', `Candidate created in ${stage}`);
+    this.log(d.id, 'stage', d.lifecycle === 'hiring' ? `Candidate created in ${stage}` : `Driver record created (${d.lifecycle})`);
     return d;
   },
 
