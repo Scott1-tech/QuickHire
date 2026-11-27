@@ -1,32 +1,43 @@
 import React from 'react';
 import { Hover } from '../lib/dc';
 import { T, Icon } from '../tasks/lib';
-import { Card, Field, Input, Select, Textarea, primaryBtn, ghostBtn } from '../esign/ui';
+import { Card, Select, primaryBtn, ghostBtn } from '../esign/ui';
 import { svc as hireSvc } from '../hire/store';
 import { pickAndSave, openFile } from '../shell/files';
 import {
   useRecruit, svc, USERS, SOURCES, SCORE_META, INTEREST,
   isOverdue, daysInStage, stageByName, fmtAgo, fmtDate, dueLabel,
 } from './store';
+import { LEAD_STAGE } from '../pipes/stages';
+import { lifecyclePath, stageOf, pipeOfDriver } from '../pipes/lifecycle';
+import { LifecycleBreadcrumb } from '../pipes/Breadcrumb';
+import { leadToHiring } from '../pipes/service';
 
 const BG = '#F5F5F7';
 const owner = (id: string) => USERS.find((u) => u.id === id);
 const sourceMeta = (k: string) => SOURCES.find((s) => s.key === k) || SOURCES[1];
-const ACT_ICON: Record<string, string> = { lead: 'plus', anna: 'sparkles', comm: 'phone', note: 'fileText', stage: 'arrowRight', assignment: 'users', document: 'fileText', task: 'listChecks', decision: 'checkCircle', archive: 'ban', consent: 'shield', system: 'alert' };
+const ACT_ICON: Record<string, string> = { lead: 'plus', anna: 'sparkles', comm: 'phone', note: 'fileText', stage: 'arrowRight', assignment: 'users', document: 'fileText', task: 'listChecks', decision: 'checkCircle', archive: 'ban', consent: 'shield', system: 'alert', lifecycle: 'repeat' };
 const initials = (n: string) => (n || '?').split(' ').map((s) => s[0]).slice(0, 2).join('').toUpperCase();
 
 /* Full-page recruiting lead profile — activity in the middle, like the hiring profile. */
-export function LeadProfile({ id, go, onClose, toast, setModal }: any) {
+export function LeadProfile({ id, go, onClose, toast, setModal, openDriver, backLabel = 'Pipelines' }: any) {
   const store = useRecruit(); void store;
   const l = svc.lead(id); if (!l) return <div style={{ padding: 40 }}>Lead not found.</div>;
   const sm = SCORE_META[l.scoreLabel]; const st = stageByName(l.stageName);
+  const linked = l.convertedTo ? hireSvc.driver(l.convertedTo) : null;
+  const path = linked ? lifecyclePath(linked, l) : { current: 'leads' as const, reached: ['leads' as const] };
+  const toHiring = () => { const r = leadToHiring(id); toast(r.message, r.ok ? 'success' : (r.kind || 'warning')); };
+  const openLinked = () => { if (linked && openDriver) openDriver(linked.id); else go && go('pipeline'); };
 
   const comm = (channel: string, direction: string, outcome?: string) => { const r = svc.logComm(id, { channel, direction, outcome }); if ((r as any)?.blocked) toast('Blocked — Do-Not-Contact', 'error'); else toast('Logged', 'success'); };
 
   return <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: BG }}>
     {/* header */}
     <div style={{ flex: 'none', background: '#fff', borderBottom: `1px solid ${T.hair}`, padding: '14px 24px' }}>
-      <button onClick={onClose} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: T.muted, background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginBottom: 12 }}><Icon name="chevronLeft" size={15} />Pipeline</button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+        <button onClick={onClose} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: T.muted, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}><Icon name="chevronLeft" size={15} />{backLabel}</button>
+        <LifecycleBreadcrumb current={path.current} reached={path.reached} stage={linked ? stageOf(pipeOfDriver(linked), linked) : l.stageName} />
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <span style={{ width: 54, height: 54, flex: 'none', borderRadius: 999, background: '#007AFF', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 19, fontWeight: 650 }}>{initials(l.name)}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -119,7 +130,8 @@ export function LeadProfile({ id, go, onClose, toast, setModal }: any) {
             <Mini label="Refused" onClick={() => setModal({ kind: 'close', id, decision: 'refused' })} />
             <Mini label="Archive" onClick={() => setModal({ kind: 'archive', id })} />
           </div>
-          {l.stageName === 'Hired' && <Hover as="button" onClick={() => { hireSvc.addDriver({ name: l.name, phone: l.phone, email: l.email, carrier: l.carrier, position: 'Company Driver' }, 'Onboarding'); toast('Sent to onboarding', 'success'); go && go('pipeline'); }} style={{ ...primaryBtn, marginTop: 10, width: '100%', justifyContent: 'center' }} hover={{ background: '#0066D6' }}><Icon name="arrowRight" size={15} />Send to Onboarding</Hover>}
+          {linked ? <Hover as="button" onClick={openLinked} style={{ ...ghostBtn, marginTop: 10, width: '100%', justifyContent: 'center' }} hover={{ background: 'rgba(0,0,0,0.04)' }}><Icon name="externalLink" size={15} />Open in {pipeOfDriver(linked) === 'hiring' ? 'Hiring' : pipeOfDriver(linked) === 'active' ? 'Active' : 'Inactive'}</Hover>
+            : l.stageName === LEAD_STAGE.QUALIFIED && <Hover as="button" onClick={toHiring} style={{ ...primaryBtn, marginTop: 10, width: '100%', justifyContent: 'center' }} hover={{ background: '#0066D6' }}><Icon name="arrowRight" size={15} />Move to Hiring</Hover>}
         </div>
       </div>
     </div>

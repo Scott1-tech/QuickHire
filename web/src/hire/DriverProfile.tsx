@@ -7,9 +7,12 @@ import { addExternalTask, makeTask } from '../tasks/bus';
 import { pickAndSave, openFile } from '../shell/files';
 import {
   useHire, svc, AI_STATUS_META, STEP_STATUS_META, STEP_STATUSES, STEP_GROUPS, DOC_STATUS_META,
-  completeness, initials, fmtAgo, fmtDate, STAGES,
+  completeness, initials, fmtAgo, fmtDate,
 } from './store';
 import { store as esignStore } from '../esign/store';
+import { LifecycleBreadcrumb } from '../pipes/Breadcrumb';
+import { lifecyclePath, lifecycleLabel, pipeOfDriver, stageOf } from '../pipes/lifecycle';
+import { pipes as lifecyclePipes, moveRecord } from '../pipes/service';
 
 const BG = '#F5F6F8';
 const TABS = ['Overview', 'Application', 'Checklist', 'Documents', 'DocuSign', 'Messages', 'PEV', 'Activity'];
@@ -32,7 +35,10 @@ export default function DriverProfile({ driverId, go, onBack }: { driverId: stri
     <ToastHost toasts={toasts} />
     {/* header */}
     <div style={{ flex: 'none', background: '#fff', borderBottom: `1px solid ${T.hair}`, padding: '14px 24px' }}>
-      <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: T.muted, background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginBottom: 12 }}><Icon name="chevronLeft" size={15} />Hiring Pipeline</button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+        <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: T.muted, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}><Icon name="chevronLeft" size={15} />Pipelines</button>
+        {(() => { const p = lifecyclePath(d); return <LifecycleBreadcrumb current={p.current} reached={p.reached} stage={stageOf(pipeOfDriver(d), d)} />; })()}
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <span style={{ width: 56, height: 56, flex: 'none', borderRadius: 999, background: d.avatarBg, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 650 }}>{initials(d.name)}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -42,7 +48,7 @@ export default function DriverProfile({ driverId, go, onBack }: { driverId: stri
             <button onClick={() => setModal({ kind: 'editDriver' })} style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${T.border}`, background: '#fff', cursor: 'pointer', color: T.muted, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="pencil" size={13} /></button>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 6, fontSize: 12.5, color: T.muted }}>
-            <Meta icon="user" v={`${d.stage}`} /><Meta icon="building" v={d.carrier} /><Meta icon="phone" v={d.phone} /><Meta icon="mail" v={d.email} /><Meta icon="sign" v={`CDL ${d.cdlClass}`} /><Meta icon="briefcase" v={d.position} /><Meta icon="gauge" v={`Risk: ${d.risk}`} />
+            <Meta icon="user" v={lifecycleLabel(d)} /><Meta icon="building" v={d.carrier} /><Meta icon="phone" v={d.phone} /><Meta icon="mail" v={d.email} /><Meta icon="sign" v={`CDL ${d.cdlClass}`} /><Meta icon="briefcase" v={d.position} /><Meta icon="gauge" v={`Risk: ${d.risk}`} />
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
@@ -359,7 +365,7 @@ function ActivityRow({ a, first }: any) {
     <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13 }}>{a.title}</div>{a.detail && <div style={{ fontSize: 12, color: T.muted, marginTop: 1 }}>{a.detail}</div>}<div style={{ fontSize: 11, color: T.faint, marginTop: 2 }}>{a.user} · {fmtAgo(a.at)}</div></div>
   </div>;
 }
-const ACT_ICON: Record<string, string> = { stage: 'arrowRight', step: 'checkCircle', document: 'fileText', request: 'mail', truck: 'truck', carrier: 'building', ai: 'sparkles', application: 'send', offer: 'briefcase', compliance: 'shield', archive: 'ban', call: 'phone', text: 'message', email: 'mail', note: 'fileText', task: 'listChecks' };
+const ACT_ICON: Record<string, string> = { lifecycle: 'repeat', assignment: 'users', system: 'alert', stage: 'arrowRight', step: 'checkCircle', document: 'fileText', request: 'mail', truck: 'truck', carrier: 'building', ai: 'sparkles', application: 'send', offer: 'briefcase', compliance: 'shield', archive: 'ban', call: 'phone', text: 'message', email: 'mail', note: 'fileText', task: 'listChecks' };
 
 /* right activity panel */
 function ActivityPanel({ d, onAdd, onTask }: any) {
@@ -433,10 +439,15 @@ function ProfileModals({ modal, d, go, toast, onClose }: any) {
     </Modal>;
   }
   if (k === 'stage') {
-    return <Modal title="Move stage" subtitle={`${d.name} is in ${d.stage}`} width={420} onClose={onClose}>
+    // Stages of the pipeline the driver currently lives in (closing / handoffs
+    // that need a reason or create tasks are done from Pipelines).
+    const pipe = pipeOfDriver(d); const cur = stageOf(pipe, d);
+    const list = lifecyclePipes()[pipe].stages.filter((s) => !s.final && s.name !== 'At risk').map((s) => s.name);
+    return <Modal title="Move stage" subtitle={`${d.name} is in ${lifecycleLabel(d)}`} width={420} onClose={onClose}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {STAGES.map((s) => <Hover key={s} as="button" onClick={() => { svc.moveStage(d.id, s); toast(`Moved to ${s}`, 'success'); onClose(); }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 12px', borderRadius: 10, border: `1px solid ${s === d.stage ? '#007AFF' : T.border}`, background: s === d.stage ? 'rgba(0,122,255,0.06)' : '#fff', cursor: 'pointer', fontSize: 13.5, fontWeight: 600 }} hover={{ background: T.hover }}>{s}{s === d.stage && <span style={{ fontSize: 11, color: '#007AFF' }}>Current</span>}</Hover>)}
+        {list.map((s) => <Hover key={s} as="button" onClick={() => { if (s !== cur) { moveRecord(pipe, d.id, s); toast(`Moved to ${s}`, 'success'); } onClose(); }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 12px', borderRadius: 10, border: `1px solid ${s === cur ? '#007AFF' : T.border}`, background: s === cur ? 'rgba(0,122,255,0.06)' : '#fff', cursor: 'pointer', fontSize: 13.5, fontWeight: 600 }} hover={{ background: T.hover }}>{s}{s === cur && <span style={{ fontSize: 11, color: '#007AFF' }}>Current</span>}</Hover>)}
       </div>
+      <div style={{ fontSize: 12, color: T.faint, marginTop: 10 }}>At risk, withdraw, quit and rehire moves ask for a reason in Pipelines.</div>
     </Modal>;
   }
   if (k === 'archive') {
